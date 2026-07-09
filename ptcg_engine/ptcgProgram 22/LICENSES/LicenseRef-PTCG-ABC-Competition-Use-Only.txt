@@ -1,0 +1,24 @@
+# ptcgProgram — License
+
+`ptcgProgram` is the battle engine for the Pokémon Trading Card Game AI Battle Challenge on Kaggle.
+Please also read `README.md` before using this package.
+Please do not delete or alter the text of this License.
+
+It is shared with you for one purpose: to take part in that competition. It is not open-source
+software. By downloading it you agree to the competition's official rules, which define exactly what
+you may do with it. In short:
+
+- Use it only to build and test your competition entries, and only while the competition is running.
+- Please don't redistribute it, post it publicly, or use it for anything outside the competition.
+- Delete your copies once the competition is over.
+- Any work derived from this source shall be deemed "Pokémon Elements" under the Competition Rules.
+
+This is a plain-language summary. The binding terms are the official Competition Rules — the version
+you accepted when you entered, published at
+https://www.kaggle.com/competitions/pokemon-tcg-ai-battle/rules — which govern in case of any
+difference. The engine — and any copy or adaptation of it — belongs to Pokémon/Nintendo/Creatures/GAME FREAK, and no rights
+are granted beyond those set out in the Rules, and no trademark or patent license is granted.
+The engine is provided "as is", without warranties of any kind, express or implied. To the extent permitted by law, The Pokémon Company accepts no liability for any loss or damage arising from its use.
+.
+
+© Pokémon/Nintendo/Creatures/GAME FREAK TM, ®, and character names are trademarks of Nintendo.

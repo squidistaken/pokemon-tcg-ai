@@ -1,0 +1,14 @@
+version = 1
+
+# Files that do not carry inline SPDX headers (Visual Studio project files and
+# package documentation) are annotated here per the REUSE 3.3 specification.
+
+[[annotations]]
+path = [
+  "game.sln",
+  "game.vcxproj",
+  "game.vcxproj.filters",
+  "README.md",
+]
+SPDX-FileCopyrightText = "© Pokémon/Nintendo/Creatures/GAME FREAK TM, ®, and character names are trademarks of Nintendo."
+SPDX-License-Identifier = "LicenseRef-PTCG-ABC-Competition-Use-Only"
