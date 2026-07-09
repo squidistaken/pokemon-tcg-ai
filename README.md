@@ -30,6 +30,13 @@ TODO
 
 ## Usage
 
-TODO
+Run training from the repo root:
+```bash
+python -m src.train
+```
+Config is managed by [Hydra](https://hydra.cc/) (`conf/config.yaml`); override any field on the command line, e.g.:
+```bash
+python -m src.train collector.total_frames=100000 env.num_workers=4 deterministic=false
+```
 
 

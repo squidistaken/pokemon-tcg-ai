@@ -1,0 +1,7 @@
+deck0: decks/example.csv
+deck1: decks/example.csv
+max_options: 96
+num_workers: 8
+parallel: true
+mp_start_method: fork
+serial_for_single: true
