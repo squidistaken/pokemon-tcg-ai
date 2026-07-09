@@ -4,7 +4,8 @@ import random
 from cg.api import Observation, to_observation_class
 
 def read_deck_csv() -> list[int]:
-    """Read deck.csv.
+    """
+    Read deck.csv.
     
     Returns:
         list[int]: A list of card IDs in the deck.
@@ -20,7 +21,8 @@ def read_deck_csv() -> list[int]:
     return deck
 
 def agent(obs_dict: dict) -> list[int]:
-    """Implement Your Pokémon Trading Card Game Agent.
+    """
+    Implement Your Pokémon Trading Card Game Agent.
 
     Each element in the returned list must be >= 0 and < len(obs.select.option).
     The list length must be between obs.select.minCount and obs.select.maxCount (inclusive), with no duplicate elements.
