@@ -1,0 +1,6 @@
+# Hydra docs: https://hydra.cc/docs/intro/
+defaults:
+  - agent: dummy
+  - _self_
+
+seed: 42
