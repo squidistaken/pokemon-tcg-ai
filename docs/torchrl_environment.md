@@ -37,9 +37,15 @@ Some selections require `minCount` to `maxCount` option indices in one engine ca
 
 ## Two players, one agent
 
-`TCGEnv._step` submits the agent's selection, then plays the opponent's selections internally (`_advance_to_agent`) until it is the agent's seat again or the battle ends. Control alternates irregularly (opponents select mid-turn); this loop absorbs all of it, so TorchRL sees a standard single-agent env. The agent's seat is randomized every reset.
+`TCGEnv._step` submits the agent's selection, then plays the opponent's selections internally (`_advance_to_agent`) until it is the agent's seat again or the battle ends. Control alternates irregularly (opponents select mid-turn); this loop absorbs all of it, so TorchRL sees a standard single-agent env. The agent's seat is randomized every reset, so it experiences going first and second.
 
-The opponent is injected at construction. `OpponentPool` is a callable opponent whose member is drawn per episode via the env's `on_reset` hook, the self-play mechanism: frozen policy snapshots get `add()`-ed to the pool as training progresses (snapshot opponents require the agent network and are not built yet).
+## Opponent handling and self-play
+
+The opponent is any callable `Observation -> list[int]`, injected into `TCGEnv` at construction (via `make_env_factories(cfg, opponent_factory=...)`). It operates on the raw engine observation, entirely outside TorchRL: its selections consume zero collector frames and produce no training data — only the agent's selections become transitions. It answers multi-select in one call (no decomposition needed on its side).
+
+Current state: `train.py` uses the default `RandomOpponent`. `OpponentPool` is the self-play container: a callable opponent holding weighted members; the env calls its `on_reset()` hook at every episode start, at which point the pool draws the member that plays the whole episode, and `add()` registers new members.
+
+Planned self-play flow (not built yet — needs the agent network): periodically freeze the learner into a checkpoint and have pool members face it. One caveat is already known: with `ParallelEnv`, each worker process constructs its **own** pool instance via the env factory, so calling `add()` on a pool in the main process reaches no worker. Snapshot distribution must therefore go through a channel workers can see — the intended design is a snapshot opponent that rescans a checkpoint directory in `on_reset()` (cheap, once per episode), with rebuilding the collector between opponent generations as the fallback. With `SerialEnv` (single process) `add()` works directly.
 
 ## Observation, reward, termination
 
