@@ -1,0 +1,5 @@
+.venv
+*.pyc
+*Card_ID*.pdf
+*Card_Data.csv
+.claude
