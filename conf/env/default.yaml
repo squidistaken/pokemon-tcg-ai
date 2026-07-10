@@ -6,7 +6,7 @@ deck1: decks/example.csv
 # largest option list the engine can offer, or options get truncated.
 max_options: 96
 # Number of environment instances to run, each with its own battle handle.
-num_workers: 1
+num_workers: 16
 # Collect with a multiprocess ParallelEnv (true) or a single-process SerialEnv (false).
 parallel: true
 # Multiprocessing start method for ParallelEnv workers (e.g. fork, spawn).
