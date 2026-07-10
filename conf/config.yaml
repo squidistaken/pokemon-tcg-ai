@@ -6,4 +6,4 @@ defaults:
   - _self_
 
 seed: 42
-deterministic: true
+set_seed: false

@@ -16,7 +16,7 @@ def main(cfg: DictConfig) -> None:
     :param cfg: Hydra configuration object, composed from conf/config.yaml.
     """
     print(OmegaConf.to_yaml(cfg))
-    if cfg.deterministic:
+    if cfg.set_seed:
         random.seed(cfg.seed)
         torch.manual_seed(cfg.seed)
     trainer = Trainer(

@@ -18,7 +18,7 @@ class Trainer(BaseTrainer):
     statistics. The learning algorithm lives in :meth:`_update`, which is a
     no-op in this base class, so running it directly gives a pure collection
     loop (e.g. the random-policy baseline). The upcoming PPO trainer
-    subclasses this, passes the actor as ``policy`` and implements
+    could subclass this, passes the actor as ``policy`` and implements
     :meth:`_update` with the advantage/loss/optimizer step.
     """
 
@@ -36,7 +36,7 @@ class Trainer(BaseTrainer):
         :param env_factories: One environment factory per worker.
         :param policy: Collection policy; any tensordict module writing "action".
         :param frames_per_batch: Frames collected per collector iteration.
-        :param total_frames: Total frames to collect over the run.
+        :param total_frames: Total frames (e.g. timesteps) to collect over the run.
         :param use_parallel_env: Use multiprocess ParallelEnv instead of SerialEnv.
         :param mp_start_method: Multiprocessing start method for ParallelEnv workers.
         :param serial_for_single: Fall back to a single-process env when there is
@@ -99,7 +99,35 @@ class Trainer(BaseTrainer):
         advantage/minibatch/optimizer loop.
         Or maybe have a PPO class. Need to figure out the design.
 
-        :param data: Collected batch of transitions.
+        :param data: One batch of ``frames_per_batch`` transitions from the
+            Collector, as a TensorDict shaped ``(B, T)`` where ``B`` is
+            ``num_workers`` and ``T`` is ``frames_per_batch // num_workers``
+            (2D: one row per vectorized worker, not flattened). Every entry
+            is one agent-side step of :class:`~src.env.tcg_env.TCGEnv` (a
+            single ``Categorical`` pick); opponent moves are played inside
+            the environment and never appear as separate entries. Layout,
+            with ``n_actions = max_options + 1``::
+
+                data                                    (state the policy acted on)
+                |-- "observation"   (B, T, ...)        nested   structured state, see
+                |                                               docs/torchrl_environment.md
+                |-- "action_mask"   (B, T, n_actions) bool     legal actions there
+                |-- "action"        (B, T)            int64    index the policy picked
+                |-- "done"          (B, T, 1)          bool     incoming done/terminated/
+                |-- "terminated"    (B, T, 1)          bool     truncated, carried over from
+                |-- "truncated"     (B, T, 1)          bool     the previous step's "next"
+                `-- "next"                                     (state after the action)
+                    |-- "observation"  (B, T, ...)        nested
+                    |-- "action_mask"  (B, T, n_actions) bool
+                    |-- "reward"       (B, T, 1)          float32  terminal-only, see docs
+                    |-- "done"         (B, T, 1)          bool     this step's own done/
+                    |-- "terminated"   (B, T, 1)          bool     terminated/truncated
+                    `-- "truncated"    (B, T, 1)          bool
+
+            A PPO ``_update`` would read ``data["action"]``, ``data["next",
+            "reward"]`` and the done flags to compute advantages, and would
+            additionally need ``"sample_log_prob"`` from the actor (not
+            produced by the current random policy).
         :return: Loss values to log, or None when no update was performed.
         """
         return None
@@ -117,7 +145,8 @@ class Trainer(BaseTrainer):
                 mp_start_method=self._mp_start_method,
                 serial_for_single=self._serial_for_single,
             )
-        return SerialEnv(num_workers=len(self._env_factories), create_env_fn=self._env_factories)
+        return SerialEnv(num_workers=len(self._env_factories),
+                         create_env_fn=self._env_factories)
 
     def _log_progress(
             self,

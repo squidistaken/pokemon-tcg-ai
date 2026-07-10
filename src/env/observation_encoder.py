@@ -1,88 +1,47 @@
+from abc import ABC, abstractmethod
+
 import torch
+from tensordict import TensorDict
+from torchrl.data import Composite
 
-from cg.api import Observation, PlayerState
+from cg.api import Observation
 
 
-class FlatObservationEncoder:
+class ObservationEncoder(ABC):
     """
-    Placeholder encoder mapping an engine observation to a flat float vector.
+    Interface for an observation encoder: transforms an engine
+    :class:`cg.api.Observation` into a TorchRL tensordict.
 
-    Deliberately minimal: it exists so the environment is fully
-    tensor-compatible and the collector pipeline can run end to end. It will
-    be replaced by a richer card-aware encoder (embeddings, per-option
-    features) once the agent is built, so nothing here should be considered
-    a modelling decision.
+    Implementations must provide a TorchRL spec tree (for environment
+    construction) and an encode method (for per-step conversion). The
+    encoder is stateless — it does not keep a roll of previous observations.
     """
 
-    GLOBAL_FEATURES = 8
-    SELECT_FEATURES = 6
-    PLAYER_FEATURES = 11
-
-    @property
-    def dim(self) -> int:
+    @abstractmethod
+    def spec(self) -> Composite:
         """
-        Size of the encoded observation vector.
+        Build the TorchRL spec tree describing the encoded observation.
 
-        :return: Number of features produced by :meth:`encode`.
+        :return: A :class:`~torchrl.data.Composite` spec matching the
+            structure returned by :meth:`encode`.
         """
-        return self.GLOBAL_FEATURES + self.SELECT_FEATURES + 2 * self.PLAYER_FEATURES
+        raise NotImplementedError
 
-    def encode(self, observation: Observation, agent_seat: int, chosen_count: int) -> torch.Tensor:
+    @abstractmethod
+    def encode(
+            self,
+            observation: Observation,
+            agent_seat: int,
+            chosen_count: int,
+    ) -> TensorDict:
         """
-        Encode an observation from the agent's perspective.
+        Encode an engine observation from the agent's perspective.
 
-        :param observation: Current engine observation (``current`` must be set).
+        :param observation: Current engine observation.
         :param agent_seat: Player index (0 or 1) of the agent.
         :param chosen_count: Number of options already picked in an ongoing
             multi-select accumulation.
-        :return: Float32 tensor of shape ``(self.dim,)``.
+        :return: :class:`~tensordict.TensorDict` matching the structure
+            declared by :meth:`spec`.
         """
-        state = observation.current
-        features: list[float] = [
-            state.turn / 50.0,
-            state.turnActionCount / 20.0,
-            float(agent_seat),
-            1.0 if state.firstPlayer == agent_seat else 0.0,
-            float(state.supporterPlayed),
-            float(state.stadiumPlayed),
-            float(state.energyAttached),
-            float(state.retreated),
-        ]
-        select = observation.select
-        if select is None:
-            features += [0.0] * self.SELECT_FEATURES
-        else:
-            features += [
-                float(select.type) / 10.0,
-                float(select.context) / 48.0,
-                select.minCount / 6.0,
-                select.maxCount / 6.0,
-                len(select.option) / 60.0,
-                chosen_count / 6.0,
-            ]
-        features += self._player_features(state.players[agent_seat])
-        features += self._player_features(state.players[1 - agent_seat])
-        return torch.tensor(features, dtype=torch.float32)
-
-    def _player_features(self, player: PlayerState) -> list[float]:
-        """
-        Encode one player's board state.
-
-        :param player: Player state to encode.
-        :return: List of ``PLAYER_FEATURES`` floats.
-        """
-        active = player.active[0] if len(player.active) > 0 else None
-        hp_fraction = active.hp / active.maxHp if active is not None and active.maxHp > 0 else 0.0
-        return [
-            1.0 if len(player.active) > 0 else 0.0,
-            hp_fraction,
-            player.deckCount / 60.0,
-            player.handCount / 15.0,
-            len(player.prize) / 6.0,
-            len(player.bench) / max(player.benchMax, 1),
-            float(player.poisoned),
-            float(player.burned),
-            float(player.asleep),
-            float(player.paralyzed),
-            float(player.confused),
-        ]
+        raise NotImplementedError

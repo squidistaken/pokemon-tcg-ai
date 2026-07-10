@@ -9,8 +9,9 @@ from torchrl.envs import EnvBase
 
 from cg.api import Observation
 from .battle_handle import BattleHandle
-from .observation_encoder import FlatObservationEncoder
 from .random_opponent import RandomOpponent
+from .observation_encoder import ObservationEncoder
+from .structured_observation_encoder import StructuredObservationEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class TCGEnv(EnvBase):
             max_engine_selections: int = 5000,
             seed: int | None = None,
             device: torch.device | str | None = None,
+            encoder: ObservationEncoder | None = None,
     ) -> None:
         """
         :param deck0: 60 card IDs for player 0.
@@ -60,6 +62,9 @@ class TCGEnv(EnvBase):
             episode; exceeding it truncates the episode.
         :param seed: Seed for seat randomization and the default opponent.
         :param device: Device of the produced tensordicts.
+        :param encoder: Observation encoder; a default-capacity
+            :class:`StructuredObservationEncoder` matching ``max_options``
+            if None.
         """
         super().__init__(device=device, batch_size=torch.Size(()))
         self._deck0 = list(deck0)
@@ -69,7 +74,7 @@ class TCGEnv(EnvBase):
         self._reward_draw = reward_draw
         self._max_engine_selections = max_engine_selections
         self._handle = BattleHandle()
-        self._encoder = FlatObservationEncoder()
+        self._encoder = encoder if encoder is not None else StructuredObservationEncoder(max_options=max_options)
         self._opponent = opponent if opponent is not None else RandomOpponent(seed)
         self._rng = random.Random(seed)
         self._agent_seat = 0
@@ -81,7 +86,7 @@ class TCGEnv(EnvBase):
 
         n_actions = max_options + 1
         self.observation_spec = Composite(
-            observation=Unbounded(shape=(self._encoder.dim,), dtype=torch.float32),
+            observation=self._encoder.spec(),
             action_mask=Binary(n=n_actions, dtype=torch.bool),
         )
         self.action_spec = Categorical(n_actions, dtype=torch.int64)
@@ -103,7 +108,7 @@ class TCGEnv(EnvBase):
             self._handle.finish()
             if hasattr(self._opponent, "on_reset"):
                 self._opponent.on_reset()
-            self._agent_seat = self._rng.randint(0, 1)
+            self._agent_seat = self._rng.randint(0, 1)   # flip a coint to decide who plays first
             self._selection_count = 0
             self._truncate_flag = False
             self._chosen = []
@@ -233,11 +238,12 @@ class TCGEnv(EnvBase):
         """
         Encode the pending observation and action mask into a tensordict.
 
-        :return: Tensordict with "observation" and "action_mask" keys.
+        :return: Tensordict with the structured "observation" entry and the
+            "action_mask" key.
         """
-        obs_vec = self._encoder.encode(self._pending, self._agent_seat, len(self._chosen))
+        obs = self._encoder.encode(self._pending, self._agent_seat, len(self._chosen))
         return TensorDict(
-            {"observation": obs_vec.to(self.device), "action_mask": self._build_mask().to(self.device)},
+            {"observation": obs.to(self.device), "action_mask": self._build_mask().to(self.device)},
             batch_size=torch.Size(()),
         )
 
