@@ -19,3 +19,7 @@ dependencies = [
     "tqdm>=4.68.4",
     "wandb>=0.28.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

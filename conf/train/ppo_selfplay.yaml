@@ -1,0 +1,11 @@
+# Self-play training configuration.
+# Opponent to face before the first snapshot exists: "random" or "self".
+warmup_opponent: random
+# Freeze the learner into the self-play pool every N collected frames
+# (0 disables snapshotting -> train against the warmup opponent only).
+snapshot_interval: 50000
+# Directory learner snapshots are written to and reloaded from (ParallelEnv
+# workers reload from disk; no shared Python object across processes).
+checkpoint_dir: checkpoints
+# Number of most-recent snapshots kept in the opponent pool.
+pool_size: 5

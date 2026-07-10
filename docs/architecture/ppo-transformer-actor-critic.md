@@ -63,10 +63,17 @@ src/
   training/
     ppo_trainer.py      # INTEGRATION: PPOTrainer overriding Trainer._update with GAE+ClipPPOLoss+optim loop
 conf/
-  model/{mlp,deepsets,set_transformer,recurrent,temporal_transformer}.yaml  # one per backbone
-  agent/ppo.yaml        # clip_epsilon, entropy_coeff, lr, gamma, lmbda, epochs, sub_batch_size, frames_per_batch
-  train/ppo_selfplay.yaml   # snapshot interval, pool size/weights, deck list / deck sampling
+  config.yaml           # top-level defaults list (agent + model + train)
+  agent/{dummy,ppo}.yaml            # PPO hyperparams (clip_epsilon, lr, gamma, lmbda, epochs, ...)
+  model/
+    default.yaml                    # composes one backbone + one head + shared dims (card/deck embedding)
+    backbone/{mlp,deepsets,set_transformer,temporal_transformer,recurrent}.yaml
+    head/{linear,pointer,autoregressive}.yaml
+  train/ppo_selfplay.yaml           # snapshot interval, pool size/weights, deck list / deck sampling
 ```
+
+The **backbone** and **head** are independent Hydra config groups, so any backbone can be paired
+with any head from the CLI or a sweep (see [Configuration](#configuration-hydra)).
 
 ## Architecture
 
@@ -153,7 +160,10 @@ ac = ActorValueOperator(common, policy, value)
 
 `build_ppo_actor_critic(cfg, obs_spec, action_spec)` returns this, drop-in compatible with the
 existing `RandomMaskedPolicy` contract (`in_keys` include `action_mask`; `out_keys=["action"]`,
-int64).
+int64). The factory builds the `backbone` and `head` modules with `hydra.utils.instantiate` from
+`cfg.model.backbone` / `cfg.model.head` (each carries a `_target_`), so **which backbone and head
+are used is a pure config choice** — no code change to swap them (see
+[Configuration](#configuration-hydra)).
 
 > The shared-trunk `ActorValueOperator` pattern is not yet in
 > [`docs/torchrl/02-modules.md`](../torchrl/02-modules.md) — add a KB entry once verified against
@@ -193,6 +203,127 @@ structured, **information-set-correct** observation (new `observation_spec` keys
 
 > **Train/serve skew:** this exact encoder must be shared *verbatim* with the Kaggle `main.py`
 > `agent()` inference path.
+
+## Configuration (Hydra)
+
+Backbone and head are **independent, swappable config groups** instantiated via `_target_`, so a
+run is fully specified by picking one of each — no code edits to change architecture.
+
+**Top level** — `conf/config.yaml` (extends the existing `defaults:` pattern):
+
+```yaml
+defaults:
+  - agent: ppo
+  - model: default
+  - train: ppo_selfplay
+  - _self_
+
+seed: 42
+```
+
+**Model composition** — `conf/model/default.yaml` selects a backbone + head and holds the shared
+dims (card/deck embedding, value head) that both depend on:
+
+```yaml
+defaults:
+  - backbone: mlp        # <- default backbone; override on the CLI
+  - head: linear         # <- default head;     override on the CLI
+  - _self_
+
+embed_dim: 128           # shared token/hidden width; backbones read it via ${..embed_dim}
+card_embedding:
+  num_cards: 20000       # size the table above the current pool; index 0 reserved for OOV
+  dim: ${..embed_dim}
+deck_encoder:
+  pool: mean             # mean | sum | attention
+  dim: ${..embed_dim}
+value_head:
+  num_cells: [256, 256]
+```
+
+**Backbones** — `conf/model/backbone/*.yaml`, one `_target_` each (constructor kwargs only):
+
+```yaml
+# mlp.yaml — the proven baseline
+_target_: src.models.backbone.MLPBackbone
+num_cells: [256, 256]
+activation: tanh
+
+# deepsets.yaml
+_target_: src.models.backbone.DeepSetsBackbone
+d_model: ${model.embed_dim}
+phi_cells: [128, 128]
+pool: mean               # mean | sum | max
+
+# set_transformer.yaml
+_target_: src.models.backbone.SetTransformerBackbone
+d_model: ${model.embed_dim}
+n_heads: 4
+n_layers: 2
+ff_dim: 256
+dropout: 0.0
+
+# temporal_transformer.yaml — Phase 3 (needs recurrent-aware collection)
+_target_: src.models.backbone.TemporalTransformerBackbone
+d_model: ${model.embed_dim}
+n_heads: 4
+n_layers: 2
+context_len: 16
+
+# recurrent.yaml — backburner fallback
+_target_: src.models.backbone.RecurrentBackbone
+hidden_size: ${model.embed_dim}
+rnn: lstm                # lstm | gru
+num_layers: 1
+```
+
+**Heads** — `conf/model/head/*.yaml`:
+
+```yaml
+# linear.yaml — flat 97-way logits; the MLP baseline's head
+_target_: src.models.heads.LinearPolicyHead
+
+# pointer.yaml — score per-option tokens against a state query (needs option_repr)
+_target_: src.models.heads.PointerPolicyHead
+query_dim: ${model.embed_dim}
+score: dot               # dot | mlp
+
+# autoregressive.yaml — factored (type, target) head (later; see Heads §3)
+_target_: src.models.heads.AutoRegressivePolicyHead
+```
+
+**Agent (PPO)** — `conf/agent/ppo.yaml`:
+
+```yaml
+name: ppo
+clip_epsilon: 0.2
+entropy_coeff: 0.01
+gamma: 0.99
+lmbda: 0.95
+lr: 3.0e-4
+num_epochs: 4
+sub_batch_size: 256
+frames_per_batch: 4096
+max_grad_norm: 1.0
+```
+
+**Selecting an architecture** is then just group overrides:
+
+```bash
+# Phase-1 baseline (defaults)
+python -m src.train
+
+# Phase-2 primary: Set Transformer trunk + pointer head
+python -m src.train model/backbone=set_transformer model/head=pointer
+
+# Deep Sets trunk, pointer head, sweep two learning rates
+python -m src.train -m model/backbone=deepsets model/head=pointer agent.lr=3e-4,1e-4
+```
+
+Valid pairings note: `PointerPolicyHead` needs a backbone that emits per-option tokens
+(`option_repr`) — Deep Sets / Set Transformer / temporal. `LinearPolicyHead` works with any
+backbone (it reads only `state_repr`), so it is the natural head for `MLPBackbone`. The factory
+should assert this compatibility at build time with a clear error.
 
 ## Staging
 
