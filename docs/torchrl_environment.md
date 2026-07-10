@@ -192,6 +192,8 @@ zeros or `-1.0`.
 
 ### How to consume
 
+This is a suggestion, one way to approach it.
+
 The integer fields fall into three categories by vocabulary size:
 
 | Category | Fields | Vocabulary |
