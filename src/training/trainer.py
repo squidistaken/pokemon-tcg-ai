@@ -97,7 +97,6 @@ class Trainer(BaseTrainer):
 
         TODO: No-op in the base class; PPO overrides this with the
         advantage/minibatch/optimizer loop.
-        Or maybe have a PPO class. Need to figure out the design.
 
         :param data: One batch of ``frames_per_batch`` transitions from the
             Collector, as a TensorDict shaped ``(B, T)`` where ``B`` is
