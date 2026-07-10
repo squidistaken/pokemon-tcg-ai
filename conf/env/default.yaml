@@ -1,0 +1,16 @@
+# Deck CSV for player 0 (the agent), one card ID per line, 60 cards.
+deck0: decks/example.csv
+# Deck CSV for player 1 (the in-env opponent), same format as deck0.
+deck1: decks/example.csv
+# Padded size of the option space (stop action excluded); must exceed the
+# largest option list the engine can offer, or options get truncated.
+max_options: 96
+# Number of environment instances to run, each with its own battle handle.
+num_workers: 1
+# Collect with a multiprocess ParallelEnv (true) or a single-process SerialEnv (false).
+parallel: true
+# Multiprocessing start method for ParallelEnv workers (e.g. fork, spawn).
+mp_start_method: fork
+# When parallel is true but num_workers is 1, fall back to a single-process env
+# instead of paying multiprocessing overhead for one worker.
+serial_for_single: true
