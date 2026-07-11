@@ -1,8 +1,8 @@
 import time
-from typing import Callable
+from collections.abc import Callable
 
-import torch.nn as nn
 from tensordict import TensorDict
+from torch import nn
 from torchrl.collectors import Collector
 from torchrl.envs import EnvBase, ParallelEnv, SerialEnv
 from tqdm import tqdm
@@ -56,11 +56,16 @@ class Trainer(BaseTrainer):
 
         :return: Aggregate statistics: frames, episodes, win/draw rate and fps.
         """
+        # Opt out of torchrl's automatic policy-transform registration: env
+        # transforms are managed explicitly by the env factories, and the
+        # policies used here read "action_mask" directly without needing the
+        # InitTracker transform the collector's heuristic would append.
         collector = Collector(   # Maybe move to data member
             create_env_fn=self._make_vec_env(),
             policy=self._policy,
             frames_per_batch=self._frames_per_batch,
             total_frames=self._total_frames,
+            auto_register_policy_transforms=False,
         )
         frames = 0
         episodes = 0
@@ -91,7 +96,11 @@ class Trainer(BaseTrainer):
             "fps": frames / elapsed,
         }
 
-    def _update(self, data: TensorDict) -> dict[str, float] | None:
+    # Deliberately an instance method with an unused `data` argument: this is the
+    # no-op base-class hook that subclasses (PPO) override with this exact signature,
+    # so "could be static" and "unused argument" do not apply.
+    # noinspection PyMethodMayBeStatic,PyUnusedLocal
+    def _update(self, data: TensorDict) -> dict[str, float] | None:  # noqa: ARG002, PLR6301
         """
         Run the algorithm-specific update on a collected batch.
 
@@ -147,8 +156,8 @@ class Trainer(BaseTrainer):
         return SerialEnv(num_workers=len(self._env_factories),
                          create_env_fn=self._env_factories)
 
+    @staticmethod
     def _log_progress(
-            self,
             progress_bar: tqdm,
             episodes: int,
             wins: int,

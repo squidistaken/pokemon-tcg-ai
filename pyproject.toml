@@ -8,6 +8,8 @@ dependencies = [
     "hydra-core>=1.3.4",
     "kagglehub>=1.0.2",
     "notebook>=7.6.0",
+    "numpy>=2.5.1",
+    "omegaconf>=2.3.1",
     "pandas>=3.0.3",
     "plotly>=6.9.0",
     "pytest>=9.1.1",
@@ -18,4 +20,38 @@ dependencies = [
     "torchvision>=0.28.0",
     "tqdm>=4.68.4",
     "wandb>=0.28.0",
+]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.411",
+    "ruff>=0.15.21",
+]
+
+[tool.pyright]
+# cg/ is vendored engine API code and is deliberately not checked or modified.
+include = ["src", "tests", "scripts", "main.py"]
+typeCheckingMode = "basic"
+# tensordict ships no py.typed and types TensorDict.__getitem__ as a broad union
+# (Self | Tensor | ... | Any), so pyright flags valid nested-key indexing like
+# obs["opp", "discard_mask"] against Tensor's overloads. These three rules are
+# disabled to silence that false-positive class; Optional-access and the other
+# basic checks stay on.
+reportArgumentType = "none"
+reportCallIssue = "none"
+reportIndexIssue = "none"
+
+[tool.ruff]
+target-version = "py312"
+# cg/ is vendored engine API code and is deliberately not checked or modified.
+extend-exclude = ["cg"]
+
+[tool.ruff.lint]
+preview = true
+extend-select = [
+    "PLR6301", # method could be static / a function
+    "ARG",     # unused function/method arguments
+    "B",       # bugbear: likely bugs and design problems
+    "SIM",     # simplification suggestions
+    "SLF",     # flake8-self: access to protected members from outside the class
 ]

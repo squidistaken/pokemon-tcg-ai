@@ -1,19 +1,17 @@
-import logging
 import random
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Binary, Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
-from cg.api import Observation
-from .battle_handle import BattleHandle
-from .random_opponent import RandomOpponent
-from .observation_encoder import ObservationEncoder
-from .structured_observation_encoder import StructuredObservationEncoder
+from cg.api import Observation, SelectData, State
 
-logger = logging.getLogger(__name__)
+from .battle_handle import BattleHandle
+from .observation_encoder import ObservationEncoder
+from .random_opponent import RandomOpponent
+from .structured_observation_encoder import StructuredObservationEncoder
 
 
 class TCGEnv(EnvBase):
@@ -34,7 +32,8 @@ class TCGEnv(EnvBase):
     +1 for a win, -1 for a loss and ``reward_draw`` for a draw.
 
     ``max_options`` must exceed the largest option list the engine can
-    produce; longer lists are truncated with a warning.
+    produce; a selection that overflows it raises, since a truncated option
+    would silently desynchronize the observation from the action space.
     """
 
     def __init__(
@@ -82,7 +81,6 @@ class TCGEnv(EnvBase):
         self._chosen: list[int] = []
         self._selection_count = 0
         self._truncate_flag = False
-        self._warned_overflow = False
 
         n_actions = max_options + 1
         self.observation_spec = Composite(
@@ -97,7 +95,59 @@ class TCGEnv(EnvBase):
             truncated=Binary(1, dtype=torch.bool),
         )
 
-    def _reset(self, tensordict: TensorDictBase | None = None, **kwargs) -> TensorDictBase:
+    @property
+    def agent_seat(self) -> int:
+        """
+        Seat index (0 or 1) occupied by the agent in the current episode.
+
+        :return: The agent's seat index.
+        """
+        return self._agent_seat
+
+    @property
+    def pending_select(self) -> SelectData:
+        """
+        Selection data of the pending agent decision.
+
+        Only valid between a reset and episode termination, where the env
+        guarantees a pending selection exists.
+
+        :return: The engine's selection data for the agent's current decision.
+        """
+        assert self._pending is not None and self._pending.select is not None, (
+            "no pending selection; call reset() first"
+        )
+        return self._pending.select
+
+    @property
+    def already_chosen_option_count(self) -> int:
+        """
+        Number of options accumulated so far in the current multi-select.
+
+        :return: Count of already-picked option indices.
+        """
+        return len(self._chosen)
+
+    @property
+    def current_state(self) -> State:
+        """
+        Raw engine state at the pending agent decision.
+
+        Only valid between a reset and episode termination, where the env
+        guarantees a pending observation exists.
+
+        :return: The engine state visible to the agent.
+        """
+        assert self._pending is not None and self._pending.current is not None, (
+            "no pending observation; call reset() first"
+        )
+        return self._pending.current
+
+    # `tensordict` and `kwargs` are deliberately unused: TorchRL's EnvBase dictates
+    # this exact override signature, and this env ignores the reset input because it
+    # always starts a fresh battle. Suppressed for PyCharm (noinspection) and Ruff (noqa).
+    # noinspection PyUnusedLocal
+    def _reset(self, tensordict: TensorDictBase | None = None, **kwargs) -> TensorDictBase:  # noqa: ARG002
         """
         Start a new battle and advance it to the agent's first selection.
 
@@ -106,9 +156,10 @@ class TCGEnv(EnvBase):
         """
         while True:
             self._handle.finish()
-            if hasattr(self._opponent, "on_reset"):
-                self._opponent.on_reset()
-            self._agent_seat = self._rng.randint(0, 1)   # flip a coint to decide who plays first
+            on_reset = getattr(self._opponent, "on_reset", None)
+            if on_reset is not None:
+                on_reset()
+            self._agent_seat = self._rng.randint(0, 1)   # flip a coin to decide who plays first
             self._selection_count = 0
             self._truncate_flag = False
             self._chosen = []
@@ -131,13 +182,12 @@ class TCGEnv(EnvBase):
         :return: Tensordict with next observation, mask, reward and done flags.
         """
         action = int(tensordict["action"].item())
-        select = self._pending.select
         submit: list[int] | None = None
         if action == self._stop_index:
             submit = list(self._chosen)
         else:
             self._chosen.append(action)
-            if len(self._chosen) >= select.maxCount:
+            if len(self._chosen) >= self.pending_select.maxCount:
                 submit = list(self._chosen)
 
         if submit is None:
@@ -211,14 +261,16 @@ class TCGEnv(EnvBase):
             self._truncate_flag = True
         return self._handle.select(select_list)
 
-    def _game_over(self, observation: Observation) -> bool:
+    @staticmethod
+    def _game_over(observation: Observation) -> bool:
         """
         Whether the battle has finished.
 
         :param observation: Observation to inspect.
         :return: True if the engine reported a result.
         """
-        return observation.current.result != -1
+        state = observation.current
+        return state is not None and state.result != -1
 
     def _terminal_reward(self, observation: Observation) -> float:
         """
@@ -227,7 +279,9 @@ class TCGEnv(EnvBase):
         :param observation: Terminal observation.
         :return: +1 on win, -1 on loss, ``reward_draw`` otherwise.
         """
-        result = observation.current.result
+        state = observation.current
+        assert state is not None, "terminal observation must carry a state"
+        result = state.result
         if result == self._agent_seat:
             return 1.0
         if result == 1 - self._agent_seat:
@@ -241,7 +295,9 @@ class TCGEnv(EnvBase):
         :return: Tensordict with the structured "observation" entry and the
             "action_mask" key.
         """
-        obs = self._encoder.encode(self._pending, self._agent_seat, len(self._chosen))
+        pending = self._pending
+        assert pending is not None, "no pending observation; call reset() first"
+        obs = self._encoder.encode(pending, self._agent_seat, len(self._chosen))
         return TensorDict(
             {"observation": obs.to(self.device), "action_mask": self._build_mask().to(self.device)},
             batch_size=torch.Size(()),
@@ -259,20 +315,18 @@ class TCGEnv(EnvBase):
         :return: Bool tensor of shape ``(max_options + 1,)``.
         """
         mask = torch.zeros(self._max_options + 1, dtype=torch.bool)
-        select = self._pending.select
-        if select is None or self._game_over(self._pending) or self._truncate_flag:
+        pending = self._pending
+        assert pending is not None, "no pending observation; call reset() first"
+        select = pending.select
+        if select is None or self._game_over(pending) or self._truncate_flag:
             mask[self._stop_index] = True
             return mask
         n_options = len(select.option)
         if n_options > self._max_options:
-            if not self._warned_overflow:
-                logger.warning(
-                    "Selection offered %d options, truncating to max_options=%d.",
-                    n_options,
-                    self._max_options,
-                )
-                self._warned_overflow = True
-            n_options = self._max_options
+            raise ValueError(
+                f"Selection offers {n_options} options but max_options is {self._max_options}; "
+                f"increase max_options so every option stays addressable."
+            )
         mask[:n_options] = True
         for index in self._chosen:
             mask[index] = False
@@ -288,9 +342,9 @@ class TCGEnv(EnvBase):
             truncated: bool,
     ) -> None:
         """
-        Write reward and done flags into a step output tensordict.
+        Encode reward and done flags into a step output tensordict.
 
-        :param tensordict: Tensordict to write into.
+        :param tensordict: Tensordict to encode the step outcome into.
         :param reward: Reward for the transition.
         :param terminated: Whether the battle reached a terminal state.
         :param truncated: Whether the episode was cut by the selection cap.

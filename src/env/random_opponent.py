@@ -26,6 +26,7 @@ class RandomOpponent:
         :return: List of chosen option indices.
         """
         select = observation.select
+        assert select is not None, "observation has no pending selection"
         count = self._rng.randint(select.minCount, select.maxCount)
         return self._rng.sample(range(len(select.option)), count)
 
