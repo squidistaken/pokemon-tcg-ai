@@ -43,6 +43,8 @@ reportIndexIssue = "none"
 
 [tool.pytest.ini_options]
 filterwarnings = [
+    # treat warnings as errors
+    "error",
     # torchrl defines its own deprecated WeightUpdater subclasses at import
     # time (migration to WeightSyncScheme); we never construct these classes
     # ourselves, so this is upstream noise, not something actionable here.
