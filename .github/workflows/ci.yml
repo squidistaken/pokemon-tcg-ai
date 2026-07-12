@@ -1,5 +1,11 @@
 name: CI
 
+env:
+  # Paths that are checked by the `protected-files` job.
+  PROTECTED_PATHS: |
+    cg
+    ptcg_engine
+
 on:
   pull_request:
     types:
@@ -9,6 +15,38 @@ on:
       - ready_for_review
 
 jobs:
+  protected-files:
+    # Only run CI once a PR is in review to save free-plan compute-minutes.
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # Keep enough history to diff the PR branch against its base branch.
+          fetch-depth: 0
+
+      - name: Check protected paths
+        # Fail if a PR changes organizer-provided or protected deck assets.
+        run: |
+          mapfile -t protected_paths <<< "${PROTECTED_PATHS}"
+
+          if git diff --quiet \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            -- "${protected_paths[@]}"; then
+            exit 0
+          fi
+
+          echo "Protected paths changed in this PR:" >&2
+          git diff --name-only \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            -- "${protected_paths[@]}" >&2
+          echo "Changes to protected paths are blocked by CI: ${protected_paths[*]}" >&2
+          exit 1
+
   checks:
     # Only run CI once a PR is in review to save free-plan compute-minutes.
     if: ${{ !github.event.pull_request.draft }}
