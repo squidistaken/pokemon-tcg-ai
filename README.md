@@ -43,6 +43,7 @@ src/
     battle_handle.py            Per-instance battle pointer, decoupled from cg.game's global one
     observation_encoder.py      ObservationEncoder: abstract base class for observation encoders
     structured_observation_encoder.py  Structured observation contract: card-ID/option/board tensors (docs/torchrl_environment.md)
+    option_reference_resolver.py      OptionReferenceResolver: stateless option -> (card, target, attack) ID lookups
     flat_observation_encoder.py       Legacy flat-vector encoder (deprecated, testing only)
     card_database.py            Static card-ID-indexed lookup tables (for model-side embeddings)
     deck.py                     Deck CSV loading
@@ -65,8 +66,6 @@ docs/                        Design docs (torchrl_environment.md, game.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
 main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
 ```
-
-This section should be kept up to date whenever the code structure changes.
 
 ## Usage
 

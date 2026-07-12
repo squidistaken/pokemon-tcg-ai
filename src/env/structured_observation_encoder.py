@@ -7,10 +7,7 @@ from tensordict import TensorDict
 from torchrl.data import Binary, Composite, Unbounded
 
 from cg.api import (
-    AreaType,
     Observation,
-    Option,
-    OptionType,
     PlayerState,
     Pokemon,
     SelectData,
@@ -18,6 +15,7 @@ from cg.api import (
 )
 
 from .observation_encoder import ObservationEncoder
+from .option_reference_resolver import OptionReferenceResolver
 
 logger = logging.getLogger(__name__)
 
@@ -26,42 +24,82 @@ class StructuredObservationEncoder(ObservationEncoder):
     """
     Encoder mapping an engine observation to a structured, padded TensorDict.
 
-    This is the observation contract for model construction (see
-    ``docs/torchrl_environment.md``): instead of a flat feature vector, the
-    encoder emits card identities as raw integer IDs (for model-side
-    embedding lookup), per-option features aligned index-for-index with the
-    environment's action mask, a per-Pokemon feature table for both boards,
-    and padded/masked card-ID tables for every visible zone. No modelling
-    decisions (normalization, embeddings, aggregation) are made here.
+    Observation contract for model construction (see
+    ``docs/torchrl_environment.md``): card identities as raw integer IDs (for
+    model-side embedding lookup), per-option features aligned index-for-index
+    with the action mask, a per-Pokemon feature table for both boards, and
+    padded/masked ID tables for every visible zone. No modelling decisions
+    (normalization, embeddings, aggregation) are made here.
 
-    Conventions, applied everywhere:
+    Every zone below (hand, discard, bench, ...) varies in length across
+    game states but is padded to a fixed ``*_cap`` so every observation has
+    the same tensor shape; a companion ``*_mask`` marks real vs. padding
+    slots. The ``*_cap`` values are ``__init__`` parameters; see their
+    docstrings there for defaults and *why* each value is what it is (most
+    trace to engine constants like deck size or prize count, not guesses).
+    Shape of the returned TensorDict
+    (agent-relative throughout; ``n_slots = max_options + 1``,
+    ``rows = 2 * (1 + bench_cap)`` covers both players' active + bench)::
 
-    - Card/attack ID ``0`` means "none / padding / face-down / unknown"
-      (real engine IDs start at 1).
-    - Categorical integer fields store ``enum value + 1`` so ``0`` means
-      "absent"; they are meant for embedding lookup, not arithmetic.
-    - ``-1.0`` marks absent entries in float scalar fields where ``0`` is a
-      valid value (e.g. option indices).
-    - Everything is agent-relative: "my" precedes "opponent", and owner
-      fields use 1 for the agent and 2 for the opponent.
-    - Zones longer than their cap are truncated with a one-time warning,
-      except the option list: options map one-to-one to actions, so an
-      option list longer than ``max_options`` raises instead of silently
-      dropping legal actions.
-    - An option reference whose index falls outside the referenced visible
-      zone raises: it indicates corrupt engine data or an encoder/engine
-      mismatch, and mapping it to "unknown" would contaminate training
-      observations.
+        globals                          (GLOBAL_FEATURE_COUNT,)  float32  turn / selection / zone-count scalars
+        select_cats                      (2,)                     int64    [type+1, context+1]
+        context_card_ids                 (2,)                     int64    [contextCard.id, effect.id]
+        stadium_id                       (1,)                     int64
 
-    Internally, per-element writes are staged into preallocated NumPy
-    buffers (reset at the start of the method that owns them) and converted
-    to torch tensors with a single ``torch.from_numpy(...).clone()`` per
-    output field. The clone is required because the buffers are reused
-    across calls to :meth:`encode` while TorchRL keeps references to
-    previously returned tensordicts (e.g. inside a rollout); without it,
-    later steps would silently overwrite earlier ones. The shared staging
-    buffers also mean an encoder instance is not thread-safe: each
-    environment must own its encoder and call :meth:`encode` serially.
+        options                                                            n_slots = max_options+1, row i == action i
+          ├─ card_id                     (n_slots,)               int64
+          ├─ target_id                   (n_slots,)               int64
+          ├─ attack_id                   (n_slots,)               int64
+          ├─ owner                       (n_slots,)               int64    1 = agent, 2 = opponent
+          ├─ cats                        (n_slots, 4)             int64    type / area / inPlayArea / condition
+          └─ scalars                     (n_slots, 6)             float32  number / count / index / toolIdx / ...
+
+        pokemon                                                            rows = 2*(1+bench_cap): agent active+bench, then opp
+          ├─ card_id                     (rows,)                  int64
+          ├─ tool_id                     (rows,)                  int64
+          ├─ energy_card_ids             (rows, energy_cap)       int64
+          ├─ pre_evolution_ids           (rows, evolution_cap)    int64
+          ├─ features                    (rows, 20)               float32  HP / is-active / attachments / energy hist
+          └─ mask                        (rows,)                  bool     occupied slot
+
+        my                                                                 agent's zones
+          ├─ hand_ids                    (hand_cap,)              int64
+          ├─ hand_mask                   (hand_cap,)              bool
+          ├─ discard_ids                 (discard_cap,)           int64
+          ├─ discard_mask                (discard_cap,)           bool
+          ├─ prize_ids                   (prize_cap,)             int64
+          └─ prize_mask                  (prize_cap,)             bool
+
+        opp                                                                opponent's public zones
+          ├─ discard_ids                 (discard_cap,)           int64
+          ├─ discard_mask                (discard_cap,)           bool
+          ├─ prize_ids                   (prize_cap,)             int64
+          └─ prize_mask                  (prize_cap,)             bool
+
+        select_deck                                                       deck-search reveal, if any
+          ├─ ids                         (deck_cap,)              int64
+          └─ mask                        (deck_cap,)              bool
+
+        looking                                                           "looking" reveal, if any
+          ├─ ids                         (looking_cap,)           int64
+          └─ mask                        (looking_cap,)           bool
+
+    Conventions:
+
+    - ``0`` means none/padding/face-down/unknown for any ID field.
+    - Categorical fields store ``enum value + 1`` (0 = absent); for
+      embedding lookup, not arithmetic.
+    - ``-1.0`` marks an absent float scalar where ``0`` is a valid value.
+    - Zones over their cap truncate with a one-time warning, except the
+      option list, which raises: it must stay in sync with the action mask.
+    - An out-of-range option reference raises rather than mapping to
+      "unknown", since that would silently contaminate training data.
+
+    Per-element writes are staged into preallocated NumPy buffers (reused
+    across calls) and copied out with ``torch.from_numpy(...).clone()`` per
+    field; the clone is required because TorchRL keeps references to past
+    tensordicts (e.g. in a rollout). This makes an encoder instance
+    non-thread-safe: one per environment, called serially.
     """
 
     GLOBAL_FEATURE_COUNT = 41
@@ -83,17 +121,39 @@ class StructuredObservationEncoder(ObservationEncoder):
             evolution_cap: int = 2,
     ) -> None:
         """
+        Most defaults trace to hard constants in the C++ engine
+        (``ptcg_engine/.../Core.h``: ``DECK_SIZE=60``, ``PRIZE_SIZE=6``,
+        ``BENCH_SIZE_MAX=8``) rather than being arbitrary; the rest are
+        generous empirical headroom above what's observed in practice.
+
         :param max_options: Padded option-space size of the paired
             environment (stop action excluded); the option table has
             ``max_options + 1`` rows so row ``i`` matches action ``i``.
-        :param bench_cap: Padded bench size per player.
-        :param hand_cap: Padded size of the agent's hand table.
+            No engine constant; set above the empirically observed max
+            option count (a full deck search can offer ~60 options; 42
+            was the largest seen under random play).
+        :param bench_cap: Padded bench size per player. Matches the
+            engine's hard ``BENCH_SIZE_MAX``; the default in-game bench
+            is 5, but some card effects raise capacity up to this ceiling.
+        :param hand_cap: Padded size of the agent's hand table. No engine
+            limit on hand size; 30 is headroom well above hands seen in
+            practice, not a rule-derived value.
         :param discard_cap: Padded size of each discard-pile table.
-        :param prize_cap: Padded size of each prize table.
-        :param deck_cap: Padded size of the deck-search table.
+            Matches ``DECK_SIZE``: a discard pile can never exceed a full
+            deck's worth of cards.
+        :param prize_cap: Padded size of each prize table. Always exactly
+            6 by rule (``PRIZE_SIZE``); this is a fixed constant, not
+            really a truncation cap.
+        :param deck_cap: Padded size of the deck-search table. Matches
+            ``DECK_SIZE``: the largest a full-deck search can reveal.
         :param looking_cap: Padded size of the "looking" card table.
-        :param energy_cap: Padded number of attached energy cards per Pokemon.
-        :param evolution_cap: Padded number of pre-evolution cards per Pokemon.
+            Matches ``DECK_SIZE``, for the same reason as ``deck_cap``.
+        :param energy_cap: Padded number of attached energy cards per
+            Pokemon. No engine limit; headroom above realistic attachment
+            counts.
+        :param evolution_cap: Padded number of pre-evolution cards per
+            Pokemon. Matches the fixed evolution chain depth: Basic ->
+            Stage 1 -> Stage 2 is at most 2 pre-evolutions.
         """
         self._max_options = max_options
         self._bench_cap = bench_cap
@@ -107,6 +167,7 @@ class StructuredObservationEncoder(ObservationEncoder):
         self._pokemon_rows = 2 * (1 + bench_cap)
         self._warned_zones: set[str] = set()
 
+        # This is allocated storage which can then be copied over in bulk to a tensor (e.g. GPU)
         n_slots = max_options + 1
         self._np_option_card_id = np.zeros(n_slots, dtype=np.int64)
         self._np_option_target_id = np.zeros(n_slots, dtype=np.int64)
@@ -413,7 +474,7 @@ class StructuredObservationEncoder(ObservationEncoder):
             scalars[slot, 3] = self._float_or_absent(option.toolIndex)
             scalars[slot, 4] = self._float_or_absent(option.energyIndex)
             scalars[slot, 5] = self._float_or_absent(option.inPlayIndex)
-            card_id[slot], target_id[slot], attack_id[slot] = self._resolve_option_ids(
+            card_id[slot], target_id[slot], attack_id[slot] = OptionReferenceResolver.resolve(
                 state, select, option, agent_seat
             )
         return TensorDict(
@@ -427,158 +488,6 @@ class StructuredObservationEncoder(ObservationEncoder):
             },
             batch_size=torch.Size(()),
         )
-
-    def _resolve_option_ids(
-            self,
-            state: State,
-            select: SelectData,
-            option: Option,
-            agent_seat: int,
-    ) -> tuple[int, int, int]:
-        """
-        Resolve an option's zone references to concrete card and attack IDs.
-
-        :param state: Current engine state.
-        :param select: Current selection (for deck-search lookups).
-        :param option: Option to resolve.
-        :param agent_seat: Player index of the agent, used as the owner for
-            option types whose references omit ``playerIndex`` (own zones).
-        :return: Tuple ``(card_id, target_id, attack_id)``; 0 marks
-            none/face-down/unknown. ``target_id`` is the in-play Pokemon a
-            card-directed option acts on (attach/evolve target, or the
-            carrier of a selected tool/energy).
-        """
-        option_type = option.type
-        owner_index = option.playerIndex if option.playerIndex is not None else agent_seat
-        if option_type == OptionType.CARD:
-            return self._card_id_at(state, select, owner_index, option.area, option.index), 0, 0
-        # Attached-card options reference the carrier Pokemon plus an index
-        # into its attachments; both the attachment and carrier are exposed.
-        if option_type in (OptionType.TOOL_CARD, OptionType.ENERGY_CARD, OptionType.ENERGY):
-            pokemon = self._pokemon_at(state, owner_index, option.area, option.index)
-            if pokemon is None:
-                return 0, 0, 0
-            if option_type == OptionType.TOOL_CARD:
-                attached = self._card_in_list(pokemon.tools, option.toolIndex)
-            else:
-                attached = self._card_in_list(pokemon.energyCards, option.energyIndex)
-            return attached, pokemon.id, 0
-        if option_type in (OptionType.PLAY, OptionType.ABILITY, OptionType.DISCARD):
-            return self._card_id_at(state, select, owner_index, option.area or AreaType.HAND, option.index), 0, 0
-        if option_type in (OptionType.ATTACH, OptionType.EVOLVE):
-            played = self._card_id_at(state, select, owner_index, option.area, option.index)
-            target = self._pokemon_at(state, owner_index, option.inPlayArea, option.inPlayIndex)
-            return played, target.id if target is not None else 0, 0
-        if option_type == OptionType.ATTACK:
-            return 0, 0, option.attackId if option.attackId is not None else 0
-        if option_type == OptionType.SKILL:
-            return option.cardId if option.cardId is not None else 0, 0, 0
-        return 0, 0, 0
-
-    def _card_id_at(
-            self,
-            state: State,
-            select: SelectData,
-            player_index: int,
-            area: AreaType | None,
-            index: int | None,
-    ) -> int:
-        """
-        Look up the card ID at a (player, area, index) reference.
-
-        :param state: Current engine state.
-        :param select: Current selection (source of the deck-search list).
-        :param player_index: Absolute owner index of the referenced zone.
-        :param area: Referenced area, or None.
-        :param index: Index within the area, or None.
-        :return: Card ID, or 0 when the reference is absent, face-down, or
-            in a zone the agent cannot see.
-        :raises IndexError: If the reference points outside a visible zone.
-        """
-        if area is None or index is None:
-            return 0
-        player = state.players[player_index]
-        if area == AreaType.HAND:
-            if player.hand is None:
-                return 0
-            return self._card_in_list(player.hand, index)
-        if area == AreaType.DISCARD:
-            return self._card_in_list(player.discard, index)
-        if area == AreaType.ACTIVE:
-            pokemon = self._pokemon_at(state, player_index, area, index)
-            return pokemon.id if pokemon is not None else 0
-        if area == AreaType.BENCH:
-            pokemon = self._pokemon_at(state, player_index, area, index)
-            return pokemon.id if pokemon is not None else 0
-        if area == AreaType.PRIZE:
-            return self._card_in_list(player.prize, index)
-        if area == AreaType.STADIUM:
-            return self._card_in_list(state.stadium, index)
-        if area == AreaType.DECK:
-            if select is not None and select.deck is not None:
-                return self._card_in_list(select.deck, index)
-            return 0
-        if area == AreaType.LOOKING:
-            if state.looking is None:
-                return 0
-            return self._card_in_list(state.looking, index)
-        return 0
-
-    @staticmethod
-    def _pokemon_at(
-            state: State,
-            player_index: int,
-            area: AreaType | None,
-            index: int | None,
-    ) -> Pokemon | None:
-        """
-        Look up an in-play Pokemon at a (player, area, index) reference.
-
-        :param state: Current engine state.
-        :param player_index: Absolute owner index of the Pokemon.
-        :param area: ``ACTIVE`` or ``BENCH``; anything else resolves to None.
-        :param index: Index within the area, or None.
-        :return: The Pokemon, or None when the reference is absent or the
-            slot holds a face-down card.
-        :raises IndexError: If ``index`` falls outside the referenced board
-            area.
-        """
-        if area is None or index is None:
-            return None
-        player = state.players[player_index]
-        if area == AreaType.ACTIVE:
-            slots = player.active
-        elif area == AreaType.BENCH:
-            slots = player.bench
-        else:
-            return None
-        if not 0 <= index < len(slots):
-            raise IndexError(
-                f"Pokemon reference index {index} out of range for {area.name} of size {len(slots)}."
-            )
-        return slots[index]
-
-    @staticmethod
-    def _card_in_list(cards: list, index: int | None) -> int:
-        """
-        Read a card ID from a card list.
-
-        :param cards: List of ``Card`` objects (or None entries for
-            face-down cards).
-        :param index: Index to read, or None for an absent reference.
-        :return: The card's ID, or 0 when the reference is absent or the
-            card is face-down.
-        :raises IndexError: If ``index`` falls outside the list; an engine
-            reference into a visible zone must always resolve.
-        """
-        if index is None:
-            return 0
-        if not 0 <= index < len(cards):
-            raise IndexError(
-                f"Card reference index {index} out of range for zone of size {len(cards)}."
-            )
-        card = cards[index]
-        return card.id if card is not None else 0
 
     def _encode_pokemon(self, state: State, agent_seat: int) -> TensorDict:
         """
