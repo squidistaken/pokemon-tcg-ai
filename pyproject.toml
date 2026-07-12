@@ -41,6 +41,14 @@ reportArgumentType = "none"
 reportCallIssue = "none"
 reportIndexIssue = "none"
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    # torchrl defines its own deprecated WeightUpdater subclasses at import
+    # time (migration to WeightSyncScheme); we never construct these classes
+    # ourselves, so this is upstream noise, not something actionable here.
+    "ignore:Creating .*WeightUpdater which inherits from WeightUpdaterBase is deprecated.*:DeprecationWarning",
+]
+
 [tool.ruff]
 target-version = "py312"
 # cg/ is vendored engine API code and is deliberately not checked or modified.
