@@ -173,3 +173,4 @@ CLAUDE.md
 
 uv.lock
 *.lock
+*_pp.md
