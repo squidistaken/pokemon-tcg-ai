@@ -13,6 +13,8 @@ jobs:
     # Only run CI once a PR is in review to save free-plan compute-minutes.
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
 
     steps:
       - name: Check out repository
