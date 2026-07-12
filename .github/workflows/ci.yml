@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+jobs:
+  checks:
+    # Only run CI once a PR is in review to save free-plan compute-minutes.
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Check lockfile
+        # Fail if pyproject metadata changed without regenerating uv.lock.
+        run: uv lock --check
+
+      - name: Sync dependencies
+        # Install the project and all dependency groups needed by CI.
+        run: uv sync --all-groups
+
+      - name: Lint
+        # Run Ruff to catch style issues and common bug patterns.
+        run: uv run ruff check .
+
+      - name: Type-check
+        # Run Pyright to catch static typing errors.
+        run: uv run pyright
+
+      - name: Run tests
+        # Run the pytest suite and fail on test failures or unignored warnings.
+        run: uv run pytest
