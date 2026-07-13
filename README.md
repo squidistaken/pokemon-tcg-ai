@@ -11,7 +11,17 @@ See [this video](https://www.youtube.com/watch?v=eKC5PlYoboE) for an explanation
 After cloning the repository make sure you have the [UV package manager](https://docs.astral.sh/uv/getting-started/installation/):
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.bashrc
+shell_name="$(basename "${SHELL:-}")"
+
+if [ "$shell_name" = "zsh" ]; then
+  . "$HOME/.local/bin/env"
+elif [ "$shell_name" = "bash" ]; then
+  . "$HOME/.local/bin/env"
+else
+  echo "ERROR: unsupported shell: ${SHELL:-unknown}" >&2
+  exit 1
+fi
+
 uv --version
 ```
 Install dependencies:
@@ -43,6 +53,7 @@ src/
     battle_handle.py            Per-instance battle pointer, decoupled from cg.game's global one
     observation_encoder.py      ObservationEncoder: abstract base class for observation encoders
     structured_observation_encoder.py  Structured observation contract: card-ID/option/board tensors (docs/torchrl_environment.md)
+    option_reference_resolver.py      OptionReferenceResolver: stateless option -> (card, target, attack) ID lookups
     flat_observation_encoder.py       Legacy flat-vector encoder (deprecated, testing only)
     card_database.py            Static card-ID-indexed lookup tables (for model-side embeddings)
     deck.py                     Deck CSV loading
@@ -66,8 +77,6 @@ tests/                       Unit tests (+ fixtures/: committed sample observati
 main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
 ```
 
-This section should be kept up to date whenever the code structure changes.
-
 ## Usage
 
 Run training from the repo root:
@@ -79,4 +88,9 @@ Config is managed by [Hydra](https://hydra.cc/) (`conf/config.yaml`); override a
 python -m src.train collector.total_frames=100000 env.num_workers=4 set_seed=true
 ```
 
+## CI
+
+GitHub Actions runs linting, type-checking, and tests for pull requests that
+are ready for review. Draft pull requests intentionally skip CI to stay within
+the GitHub Actions free-plan budget.
 

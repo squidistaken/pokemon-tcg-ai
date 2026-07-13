@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from src.env.opponent_pool import OpponentPool
 from src.env.random_opponent import RandomOpponent
@@ -11,7 +11,7 @@ from src.training.trainer import Trainer
 DECK_PATH = str(Path(__file__).parents[1] / "decks" / "example.csv")
 
 
-def make_cfg(num_workers: int = 2) -> OmegaConf:
+def make_cfg(num_workers: int = 2) -> DictConfig:
     """
     Build a minimal config for the environment factories.
 
