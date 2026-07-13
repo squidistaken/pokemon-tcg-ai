@@ -1,6 +1,5 @@
 from collections.abc import Callable
 from functools import partial
-from typing import Callable
 
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig

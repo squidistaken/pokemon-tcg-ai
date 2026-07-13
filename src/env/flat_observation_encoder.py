@@ -23,6 +23,7 @@ from tensordict import TensorDict
 from torchrl.data import Composite, Unbounded
 
 from cg.api import Observation, PlayerState
+
 from .observation_encoder import ObservationEncoder
 
 

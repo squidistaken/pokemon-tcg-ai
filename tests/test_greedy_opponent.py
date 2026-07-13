@@ -12,7 +12,6 @@ from src.policies.greedy_policy_opponent import (
 )
 from src.policies.ppo_actor import build_actor_critic
 from src.policies.random_masked_policy import RandomMaskedPolicy
-
 from tests.conftest import DECK_PATH, N_ACTIONS
 
 DECK = load_deck(DECK_PATH)

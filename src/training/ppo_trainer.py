@@ -1,9 +1,9 @@
-from typing import Callable
+from collections.abc import Callable
 
 import torch
-import torch.nn as nn
 from tensordict import TensorDict
-from torchrl.data import ReplayBuffer, LazyTensorStorage, TensorSpec
+from torch import nn
+from torchrl.data import LazyTensorStorage, ReplayBuffer, TensorSpec
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from torchrl.envs import EnvBase
 from torchrl.modules import ActorValueOperator

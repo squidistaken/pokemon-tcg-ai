@@ -5,8 +5,8 @@ from .heads import LinearPolicyHead, ValueHead
 __all__ = [
     "ActorCritic",
     "Backbone",
-    "MLPBackbone",
-    "activation_class",
     "LinearPolicyHead",
+    "MLPBackbone",
     "ValueHead",
+    "activation_class",
 ]

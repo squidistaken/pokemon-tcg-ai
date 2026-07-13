@@ -2,10 +2,9 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from src.models import ActorCritic, LinearPolicyHead, MLPBackbone, ValueHead
+from src.models import LinearPolicyHead, MLPBackbone, ValueHead
 from src.models.backbone import activation_class
 from src.policies.ppo_actor import build_actor_critic
-
 from tests.conftest import FLAT_DIM, N_ACTIONS
 
 

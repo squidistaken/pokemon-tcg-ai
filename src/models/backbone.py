@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 import torch
-import torch.nn as nn
+from torch import nn
 from torchrl.modules import MLP
 
 _ACTIVATIONS: dict[str, type[nn.Module]] = {

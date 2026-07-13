@@ -9,7 +9,6 @@ from src.env.random_opponent import RandomOpponent
 from src.policies.ppo_actor import build_actor_critic
 from src.training.env_factory import make_env_factories
 from src.training.ppo_trainer import PPOTrainer
-
 from tests.conftest import flat_env_cfg
 
 
