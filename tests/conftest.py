@@ -6,11 +6,36 @@ from omegaconf import OmegaConf
 from torchrl.data import Binary, Categorical, Composite, Unbounded
 
 from src.env.flat_observation_encoder import FlatObservationEncoder
+from src.training.ppo_trainer import PPOTrainer
 
 DECK_PATH = str(Path(__file__).parents[1] / "decks" / "example.csv")
 MAX_OPTIONS = 96
 N_ACTIONS = MAX_OPTIONS + 1
 FLAT_DIM = FlatObservationEncoder().dim
+
+
+class PPOTrainerForTests(PPOTrainer):
+    """
+    Test-only PPOTrainer exposing selected internals for white-box tests.
+    """
+
+    @property
+    def policy_for_test(self):
+        """
+        Collection policy used by the trainer.
+
+        :return: The policy module passed to the base trainer.
+        """
+        return self._policy
+
+    def update_for_test(self, data):
+        """
+        Run one algorithm update on a collected batch for testing.
+
+        :param data: Collected batch from a TorchRL collector.
+        :return: Loss values returned by the trainer update.
+        """
+        return self._update(data)
 
 
 @pytest.fixture

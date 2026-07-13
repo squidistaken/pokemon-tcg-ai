@@ -8,8 +8,7 @@ from src.env.opponent_pool import OpponentPool
 from src.env.random_opponent import RandomOpponent
 from src.policies.ppo_actor import build_actor_critic
 from src.training.env_factory import make_env_factories
-from src.training.ppo_trainer import PPOTrainer
-from tests.conftest import flat_env_cfg
+from tests.conftest import PPOTrainerForTests, flat_env_cfg
 
 
 def make_random_pool() -> OpponentPool:
@@ -21,16 +20,16 @@ def make_random_pool() -> OpponentPool:
     return OpponentPool([RandomOpponent(seed=0), RandomOpponent(seed=1)], seed=2)
 
 
-def _make_trainer(actor_critic, action_spec, opponent_factory=None) -> PPOTrainer:
+def _make_trainer(actor_critic, action_spec, opponent_factory=None) -> PPOTrainerForTests:
     """
     Build a small PPO trainer over a serial flat-observation env.
 
     :param actor_critic: Actor-critic to train.
     :param action_spec: Environment action spec.
     :param opponent_factory: Optional self-play opponent factory.
-    :return: A configured PPOTrainer with tiny budgets.
+    :return: A configured PPO trainer with tiny budgets.
     """
-    return PPOTrainer(
+    return PPOTrainerForTests(
         env_factories=make_env_factories(flat_env_cfg(), opponent_factory=opponent_factory),
         actor_critic=actor_critic,
         action_spec=action_spec,
@@ -63,9 +62,15 @@ def test_ppo_update_returns_finite_losses(model_cfg, flat_obs_spec, action_spec)
     actor_critic = build_actor_critic(model_cfg, flat_obs_spec, action_spec)
     trainer = _make_trainer(actor_critic, action_spec)
     env = SerialEnv(2, make_env_factories(flat_env_cfg()))
-    collector = Collector(env, trainer.policy, frames_per_batch=64, total_frames=64)
+    collector = Collector(
+        env,
+        trainer.policy_for_test,
+        frames_per_batch=64,
+        total_frames=64,
+        auto_register_policy_transforms=False,
+    )
     try:
-        losses = trainer.update(next(iter(collector)))
+        losses = trainer.update_for_test(next(iter(collector)))
     finally:
         collector.shutdown()
     assert set(losses) >= {"loss_objective", "loss_critic", "loss_entropy", "grad_norm"}

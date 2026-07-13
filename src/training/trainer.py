@@ -50,15 +50,6 @@ class Trainer(BaseTrainer):
         self._mp_start_method = mp_start_method
         self._serial_for_single = serial_for_single
 
-    @property
-    def policy(self) -> nn.Module:
-        """
-        Collection policy used by the trainer.
-
-        :return: The policy module passed at construction time.
-        """
-        return self._policy
-
     def train(self) -> dict[str, float]:
         """
         Run collection until ``total_frames``, updating after every batch.
@@ -104,15 +95,6 @@ class Trainer(BaseTrainer):
             "draw_rate": draws / max(episodes, 1),
             "fps": frames / elapsed,
         }
-
-    def update(self, data: TensorDict) -> dict[str, float] | None:
-        """
-        Public wrapper around the algorithm-specific batch update hook.
-
-        :param data: Collected batch to update from.
-        :return: Loss values to log, or None when no update was performed.
-        """
-        return self._update(data)
 
     # Deliberately an instance method with an unused `data` argument: this is the
     # no-op base-class hook that subclasses (PPO) override with this exact signature,
