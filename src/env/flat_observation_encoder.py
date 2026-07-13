@@ -81,6 +81,10 @@ class FlatObservationEncoder(ObservationEncoder):
         :return: Tensordict with a single ``"observation"`` key.
         """
         state = observation.current
+        if state is None:
+            raise ValueError(
+                "FlatObservationEncoder cannot encode the initial deck-selection observation."
+            )
         features: list[float] = [
             state.turn / 50.0,
             state.turnActionCount / 20.0,

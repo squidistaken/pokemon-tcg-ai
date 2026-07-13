@@ -77,7 +77,10 @@ class GreedyPolicyOpponent:
             ``maxCount`` entries with no duplicates.
         """
         select = observation.select
-        seat = observation.current.yourIndex
+        state = observation.current
+        if select is None or state is None:
+            raise ValueError("GreedyPolicyOpponent requires an observation with current state and select.")
+        seat = state.yourIndex
         # Match TCGEnv, which nests the encoder output under "observation".
         encoded = TensorDict(
             {"observation": self._encoder.encode(observation, seat, 0)},

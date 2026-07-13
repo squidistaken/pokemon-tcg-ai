@@ -3,7 +3,7 @@ import math
 from hydra.utils import instantiate
 from omegaconf import DictConfig, ListConfig
 from tensordict.nn import TensorDictModule
-from torchrl.data import Composite, TensorSpec
+from torchrl.data import Categorical, Composite, TensorSpec
 from torchrl.modules import ActorValueOperator, ProbabilisticActor, ValueOperator
 from torchrl.modules.distributions import MaskedCategorical
 
@@ -56,7 +56,7 @@ def _input_dim(obs_spec: Composite, in_keys: list[str]) -> int:
 def build_actor_critic(
         cfg: DictConfig,
         obs_spec: Composite,
-        action_spec: TensorSpec,
+        action_spec: Categorical,
 ) -> ActorCritic:
     """
     Build the standalone :class:`~src.models.actor_critic.ActorCritic`.
@@ -100,7 +100,7 @@ def build_actor_critic(
     return ActorCritic(backbone=backbone, policy_head=policy_head, value_head=value_head)
 
 
-def build_ppo_operator(actor_critic: ActorCritic, action_spec: TensorSpec) -> ActorValueOperator:
+def build_ppo_operator(actor_critic: ActorCritic, action_spec: Categorical) -> ActorValueOperator:
     """
     Wrap an :class:`ActorCritic` in a shared-trunk torchrl operator.
 
@@ -138,7 +138,7 @@ def build_ppo_operator(actor_critic: ActorCritic, action_spec: TensorSpec) -> Ac
 def build_ppo_actor_critic(
         cfg: DictConfig,
         obs_spec: Composite,
-        action_spec: TensorSpec,
+        action_spec: Categorical,
 ) -> ActorValueOperator:
     """
     Build the PPO shared-trunk actor-critic operator from config and specs.

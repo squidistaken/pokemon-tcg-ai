@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 import torch
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 from torchrl.data import Binary, Categorical, Composite, Unbounded
 
 from src.env.flat_observation_encoder import FlatObservationEncoder
@@ -39,7 +39,7 @@ class PPOTrainerForTests(PPOTrainer):
 
 
 @pytest.fixture
-def model_cfg() -> OmegaConf:
+def model_cfg() -> DictConfig:
     """
     Minimal ``model`` config selecting the MLP backbone + linear head.
 
@@ -89,7 +89,7 @@ def action_spec() -> Categorical:
     return Categorical(N_ACTIONS, dtype=torch.int64)
 
 
-def flat_env_cfg(num_workers: int = 2) -> OmegaConf:
+def flat_env_cfg(num_workers: int = 2) -> DictConfig:
     """
     Build a config for flat-observation environment factories.
 
