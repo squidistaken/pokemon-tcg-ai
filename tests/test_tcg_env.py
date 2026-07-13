@@ -75,9 +75,11 @@ def test_concurrent_battle_handles() -> None:
     for _ in range(50):
         for slot, handle in enumerate(handles):
             observation = observations[slot]
-            if observation.current.result != -1:
+            state = observation.current
+            assert state is not None
+            if state.result != -1:
                 continue
-            assert handle.select_player == observation.current.yourIndex
+            assert handle.select_player == state.yourIndex
             observations[slot] = handle.select(opponent(observation))
     for handle in handles:
         handle.finish()
@@ -88,11 +90,16 @@ def test_serial_collector() -> None:
     The Collector produces correctly shaped batches over a SerialEnv.
     """
     vec_env = SerialEnv(2, [partial(make_env, seed) for seed in (10, 11)])
+    # Opt out of torchrl's automatic policy-transform registration: the random
+    # masked policy only reads "action_mask", so the InitTracker transform the
+    # collector's heuristic wants to add is not needed, and this env's transforms
+    # are managed explicitly in make_env.
     collector = Collector(
         create_env_fn=vec_env,
         policy=RandomMaskedPolicy(),
         frames_per_batch=64,
         total_frames=128,
+        auto_register_policy_transforms=False,
     )
     batches = list(collector)
     collector.shutdown()

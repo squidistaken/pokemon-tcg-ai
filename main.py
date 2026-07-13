@@ -3,6 +3,7 @@ import random
 
 from cg.api import Observation, to_observation_class
 
+
 def read_deck_csv() -> list[int]:
     """
     Read deck.csv.

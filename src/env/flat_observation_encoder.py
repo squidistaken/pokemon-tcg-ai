@@ -23,6 +23,7 @@ from tensordict import TensorDict
 from torchrl.data import Composite, Unbounded
 
 from cg.api import Observation, PlayerState
+
 from .observation_encoder import ObservationEncoder
 
 
@@ -80,6 +81,10 @@ class FlatObservationEncoder(ObservationEncoder):
         :return: Tensordict with a single ``"observation"`` key.
         """
         state = observation.current
+        if state is None:
+            raise ValueError(
+                "FlatObservationEncoder cannot encode the initial deck-selection observation."
+            )
         features: list[float] = [
             state.turn / 50.0,
             state.turnActionCount / 20.0,
@@ -109,7 +114,8 @@ class FlatObservationEncoder(ObservationEncoder):
             batch_size=torch.Size(()),
         )
 
-    def _player_features(self, player: PlayerState) -> list[float]:
+    @staticmethod
+    def _player_features(player: PlayerState) -> list[float]:
         """
         Encode one player's board state.
 

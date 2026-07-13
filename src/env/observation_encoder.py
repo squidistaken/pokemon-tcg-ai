@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 
-import torch
 from tensordict import TensorDict
 from torchrl.data import Composite
 
@@ -32,15 +31,15 @@ class ObservationEncoder(ABC):
             self,
             observation: Observation,
             agent_seat: int,
-            chosen_count: int,
+            already_chosen_option_count: int,
     ) -> TensorDict:
         """
         Encode an engine observation from the agent's perspective.
 
         :param observation: Current engine observation.
         :param agent_seat: Player index (0 or 1) of the agent.
-        :param chosen_count: Number of options already picked in an ongoing
-            multi-select accumulation.
+        :param already_chosen_option_count: Number of options already picked in
+            an ongoing multi-select accumulation.
         :return: :class:`~tensordict.TensorDict` matching the structure
             declared by :meth:`spec`.
         """

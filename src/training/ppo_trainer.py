@@ -1,9 +1,10 @@
-from typing import Callable
+from collections.abc import Callable
+from typing import cast
 
 import torch
-import torch.nn as nn
 from tensordict import TensorDict
-from torchrl.data import ReplayBuffer, LazyTensorStorage, TensorSpec
+from torch import nn
+from torchrl.data import Categorical, LazyTensorStorage, ReplayBuffer
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from torchrl.envs import EnvBase
 from torchrl.modules import ActorValueOperator
@@ -41,7 +42,7 @@ class PPOTrainer(Trainer):
             self,
             env_factories: list[Callable[[], EnvBase]],
             actor_critic: ActorCritic,
-            action_spec: TensorSpec,
+            action_spec: Categorical,
             frames_per_batch: int,
             total_frames: int,
             clip_epsilon: float = 0.2,
@@ -79,7 +80,10 @@ class PPOTrainer(Trainer):
         :param serial_for_single: Fall back to a single-process env for one worker.
         """
         self._actor_critic = actor_critic
-        self._operator: ActorValueOperator = build_ppo_operator(actor_critic, action_spec).to(device)
+        self._operator = cast(
+            ActorValueOperator,
+            build_ppo_operator(actor_critic, action_spec).to(device),
+        )
         super().__init__(
             env_factories=env_factories,
             policy=self._operator.get_policy_operator(),

@@ -1,5 +1,5 @@
-import torch.nn as nn
 from tensordict import TensorDictBase
+from torch import nn
 
 from .backbone import Backbone
 

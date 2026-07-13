@@ -77,14 +77,17 @@ class GreedyPolicyOpponent:
             ``maxCount`` entries with no duplicates.
         """
         select = observation.select
-        seat = observation.current.yourIndex
+        state = observation.current
+        if select is None or state is None:
+            raise ValueError("GreedyPolicyOpponent requires an observation with current state and select.")
+        seat = state.yourIndex
         # Match TCGEnv, which nests the encoder output under "observation".
         encoded = TensorDict(
             {"observation": self._encoder.encode(observation, seat, 0)},
             batch_size=torch.Size(()),
         ).to(self._device)
         logits = self._actor_critic(encoded)["logits"]
-        return self._greedy_select(
+        return self.greedy_select(
             logits,
             n_options=len(select.option),
             min_count=select.minCount,
@@ -92,7 +95,7 @@ class GreedyPolicyOpponent:
         )
 
     @staticmethod
-    def _greedy_select(
+    def greedy_select(
             logits: torch.Tensor,
             n_options: int,
             min_count: int,

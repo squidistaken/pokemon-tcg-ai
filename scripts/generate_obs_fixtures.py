@@ -18,8 +18,9 @@ Run from the repository root::
 
     uv run python scripts/generate_obs_fixtures.py
 
-The script reaches into the environment's private state (``_pending``,
-``_chosen``) to classify selections; it is a dev tool, not part of training.
+The script inspects the environment's pending selection (via its public
+``pending_select``/``already_chosen_option_count`` accessors) to classify
+observations; it is a dev tool, not part of training.
 """
 import random
 import sys
@@ -37,6 +38,8 @@ from src.env.deck import load_deck
 from src.env.tcg_env import TCGEnv
 
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures"
+MAX_STEPS_PER_EPISODE = 5000   # Don't like this but this is a slop script anyway
+"""Safety cap on steps per random-policy episode, to bail out of a stuck game."""
 CASE_NAMES = [
     "setup",
     "main_select",
@@ -61,11 +64,11 @@ def classify(env: TCGEnv, is_reset: bool, is_terminal: bool) -> list[str]:
     """
     if is_terminal:
         return ["terminal"]
-    select = env._pending.select
+    select = env.pending_select
     cases: list[str] = []
     if is_reset:
         cases.append("setup")
-    if len(env._chosen) >= 1:
+    if env.already_chosen_option_count >= 1:
         cases.append("multi_select_partial")
     if select.deck is not None:
         cases.append("deck_search")
@@ -95,7 +98,7 @@ def main() -> None:
         obs_td = env.reset()
         episodes += 1
         is_reset = True
-        for _ in range(5000):
+        for _ in range(MAX_STEPS_PER_EPISODE):
             done = bool(obs_td.get("done", torch.zeros(1, dtype=torch.bool)).any())
             for case in classify(env, is_reset, done):
                 if case not in captured:

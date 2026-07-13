@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+from torch import nn
 from torchrl.modules import MLP
 
 from .backbone import activation_class
@@ -41,6 +41,7 @@ class LinearPolicyHead(nn.Module):
             head's signature and can be swapped without touching the trunk.
         :return: Logits of shape ``(..., n_actions)``.
         """
+        del option_repr
         return self.linear(state_repr)
 
 

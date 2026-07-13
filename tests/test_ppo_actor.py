@@ -1,4 +1,3 @@
-from pathlib import Path
 
 import torch
 from tensordict import TensorDict
@@ -9,7 +8,6 @@ from src.env.deck import load_deck
 from src.env.flat_observation_encoder import FlatObservationEncoder
 from src.env.tcg_env import TCGEnv
 from src.policies.ppo_actor import build_ppo_actor_critic
-
 from tests.conftest import DECK_PATH, FLAT_DIM, N_ACTIONS
 
 DECK = load_deck(DECK_PATH)

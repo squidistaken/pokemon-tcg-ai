@@ -1,12 +1,21 @@
 import logging
+from enum import IntEnum
 
 import numpy as np
 import torch
 from tensordict import TensorDict
 from torchrl.data import Binary, Composite, Unbounded
 
-from cg.api import AreaType, Observation, Option, OptionType, Pokemon, SelectData, State
+from cg.api import (
+    Observation,
+    PlayerState,
+    Pokemon,
+    SelectData,
+    State,
+)
+
 from .observation_encoder import ObservationEncoder
+from .option_reference_resolver import OptionReferenceResolver
 
 logger = logging.getLogger(__name__)
 
@@ -15,40 +24,89 @@ class StructuredObservationEncoder(ObservationEncoder):
     """
     Encoder mapping an engine observation to a structured, padded TensorDict.
 
-    This is the observation contract for model construction (see
-    ``docs/torchrl_environment.md``): instead of a flat feature vector, the
-    encoder emits card identities as raw integer IDs (for model-side
-    embedding lookup), per-option features aligned index-for-index with the
-    environment's action mask, a per-Pokemon feature table for both boards,
-    and padded/masked card-ID tables for every visible zone. No modelling
-    decisions (normalization, embeddings, aggregation) are made here.
+    Observation contract for model construction (see
+    ``docs/torchrl_environment.md``): card identities as raw integer IDs (for
+    model-side embedding lookup), per-option features aligned index-for-index
+    with the action mask, a per-Pokemon feature table for both boards, and
+    padded/masked ID tables for every visible zone. No modelling decisions
+    (normalization, embeddings, aggregation) are made here.
 
-    Conventions, applied everywhere:
+    Every zone below (hand, discard, bench, ...) varies in length across
+    game states but is padded to a fixed ``*_cap`` so every observation has
+    the same tensor shape; a companion ``*_mask`` marks real vs. padding
+    slots. The ``*_cap`` values are ``__init__`` parameters; see their
+    docstrings there for defaults and *why* each value is what it is (most
+    trace to engine constants like deck size or prize count, not guesses).
+    Shape of the returned TensorDict
+    (agent-relative throughout; ``n_slots = max_options + 1``,
+    ``rows = 2 * (1 + bench_cap)`` covers both players' active + bench)::
 
-    - Card/attack ID ``0`` means "none / padding / face-down / unknown"
-      (real engine IDs start at 1).
-    - Categorical integer fields store ``enum value + 1`` so ``0`` means
-      "absent"; they are meant for embedding lookup, not arithmetic.
-    - ``-1.0`` marks absent entries in float scalar fields where ``0`` is a
-      valid value (e.g. option indices).
-    - Everything is agent-relative: "my" precedes "opponent", and owner
-      fields use 1 for the agent and 2 for the opponent.
-    - Zones longer than their cap are truncated with a one-time warning.
+        globals                          (GLOBAL_FEATURE_COUNT,)  float32  turn / selection / zone-count scalars
+        select_cats                      (2,)                     int64    [type+1, context+1]
+        context_card_ids                 (2,)                     int64    [contextCard.id, effect.id]
+        stadium_id                       (1,)                     int64
 
-    Internally, per-element writes are staged into preallocated NumPy
-    buffers (reset at the start of the method that owns them) and converted
-    to torch tensors with a single ``torch.from_numpy(...).clone()`` per
-    output field. The clone is required because the buffers are reused
-    across calls to :meth:`encode` while TorchRL keeps references to
-    previously returned tensordicts (e.g. inside a rollout); without it,
-    later steps would silently overwrite earlier ones.
+        options                                                            n_slots = max_options+1, row i == action i
+          ├─ card_id                     (n_slots,)               int64
+          ├─ target_id                   (n_slots,)               int64
+          ├─ attack_id                   (n_slots,)               int64
+          ├─ owner                       (n_slots,)               int64    1 = agent, 2 = opponent
+          ├─ cats                        (n_slots, 4)             int64    type / area / inPlayArea / condition
+          └─ scalars                     (n_slots, 6)             float32  number / count / index / toolIdx / ...
+
+        pokemon                                                            rows = 2*(1+bench_cap): agent active+bench, then opp
+          ├─ card_id                     (rows,)                  int64
+          ├─ tool_id                     (rows,)                  int64
+          ├─ energy_card_ids             (rows, energy_cap)       int64
+          ├─ pre_evolution_ids           (rows, evolution_cap)    int64
+          ├─ features                    (rows, 20)               float32  HP / is-active / attachments / energy hist
+          └─ mask                        (rows,)                  bool     occupied slot
+
+        my                                                                 agent's zones
+          ├─ hand_ids                    (hand_cap,)              int64
+          ├─ hand_mask                   (hand_cap,)              bool
+          ├─ discard_ids                 (discard_cap,)           int64
+          ├─ discard_mask                (discard_cap,)           bool
+          ├─ prize_ids                   (prize_cap,)             int64
+          └─ prize_mask                  (prize_cap,)             bool
+
+        opp                                                                opponent's public zones
+          ├─ discard_ids                 (discard_cap,)           int64
+          ├─ discard_mask                (discard_cap,)           bool
+          ├─ prize_ids                   (prize_cap,)             int64
+          └─ prize_mask                  (prize_cap,)             bool
+
+        select_deck                                                       deck-search reveal, if any
+          ├─ ids                         (deck_cap,)              int64
+          └─ mask                        (deck_cap,)              bool
+
+        looking                                                           "looking" reveal, if any
+          ├─ ids                         (looking_cap,)           int64
+          └─ mask                        (looking_cap,)           bool
+
+    Conventions:
+
+    - ``0`` means none/padding/face-down/unknown for any ID field.
+    - Categorical fields store ``enum value + 1`` (0 = absent); for
+      embedding lookup, not arithmetic.
+    - ``-1.0`` marks an absent float scalar where ``0`` is a valid value.
+    - Zones over their cap truncate with a one-time warning, except the
+      option list, which raises: it must stay in sync with the action mask.
+    - An out-of-range option reference raises rather than mapping to
+      "unknown", since that would silently contaminate training data.
+
+    Per-element writes are staged into preallocated NumPy buffers (reused
+    across calls) and copied out with ``torch.from_numpy(...).clone()`` per
+    field; the clone is required because TorchRL keeps references to past
+    tensordicts (e.g. in a rollout). This makes an encoder instance
+    non-thread-safe: one per environment, called serially.
     """
 
-    GLOBAL_FEATURES = 41
-    OPTION_CATEGORICALS = 4
-    OPTION_SCALARS = 6
-    POKEMON_FEATURES = 20
-    ENERGY_TYPES = 12
+    GLOBAL_FEATURE_COUNT = 41
+    OPTION_CATEGORICAL_COUNT = 4
+    OPTION_SCALAR_COUNT = 6
+    POKEMON_FEATURE_COUNT = 20
+    ENERGY_TYPE_COUNT = 12
 
     def __init__(
             self,
@@ -63,17 +121,39 @@ class StructuredObservationEncoder(ObservationEncoder):
             evolution_cap: int = 2,
     ) -> None:
         """
+        Most defaults trace to hard constants in the C++ engine
+        (``ptcg_engine/.../Core.h``: ``DECK_SIZE=60``, ``PRIZE_SIZE=6``,
+        ``BENCH_SIZE_MAX=8``) rather than being arbitrary; the rest are
+        generous empirical headroom above what's observed in practice.
+
         :param max_options: Padded option-space size of the paired
             environment (stop action excluded); the option table has
             ``max_options + 1`` rows so row ``i`` matches action ``i``.
-        :param bench_cap: Padded bench size per player.
-        :param hand_cap: Padded size of the agent's hand table.
+            No engine constant; set above the empirically observed max
+            option count (a full deck search can offer ~60 options; 42
+            was the largest seen under random play).
+        :param bench_cap: Padded bench size per player. Matches the
+            engine's hard ``BENCH_SIZE_MAX``; the default in-game bench
+            is 5, but some card effects raise capacity up to this ceiling.
+        :param hand_cap: Padded size of the agent's hand table. No engine
+            limit on hand size; 30 is headroom well above hands seen in
+            practice, not a rule-derived value.
         :param discard_cap: Padded size of each discard-pile table.
-        :param prize_cap: Padded size of each prize table.
-        :param deck_cap: Padded size of the deck-search table.
+            Matches ``DECK_SIZE``: a discard pile can never exceed a full
+            deck's worth of cards.
+        :param prize_cap: Padded size of each prize table. Always exactly
+            6 by rule (``PRIZE_SIZE``); this is a fixed constant, not
+            really a truncation cap.
+        :param deck_cap: Padded size of the deck-search table. Matches
+            ``DECK_SIZE``: the largest a full-deck search can reveal.
         :param looking_cap: Padded size of the "looking" card table.
-        :param energy_cap: Padded number of attached energy cards per Pokemon.
-        :param evolution_cap: Padded number of pre-evolution cards per Pokemon.
+            Matches ``DECK_SIZE``, for the same reason as ``deck_cap``.
+        :param energy_cap: Padded number of attached energy cards per
+            Pokemon. No engine limit; headroom above realistic attachment
+            counts.
+        :param evolution_cap: Padded number of pre-evolution cards per
+            Pokemon. Matches the fixed evolution chain depth: Basic ->
+            Stage 1 -> Stage 2 is at most 2 pre-evolutions.
         """
         self._max_options = max_options
         self._bench_cap = bench_cap
@@ -87,19 +167,20 @@ class StructuredObservationEncoder(ObservationEncoder):
         self._pokemon_rows = 2 * (1 + bench_cap)
         self._warned_zones: set[str] = set()
 
+        # This is allocated storage which can then be copied over in bulk to a tensor (e.g. GPU)
         n_slots = max_options + 1
         self._np_option_card_id = np.zeros(n_slots, dtype=np.int64)
         self._np_option_target_id = np.zeros(n_slots, dtype=np.int64)
         self._np_option_attack_id = np.zeros(n_slots, dtype=np.int64)
         self._np_option_owner = np.zeros(n_slots, dtype=np.int64)
-        self._np_option_cats = np.zeros((n_slots, self.OPTION_CATEGORICALS), dtype=np.int64)
-        self._np_option_scalars = np.full((n_slots, self.OPTION_SCALARS), -1.0, dtype=np.float32)
+        self._np_option_cats = np.zeros((n_slots, self.OPTION_CATEGORICAL_COUNT), dtype=np.int64)
+        self._np_option_scalars = np.full((n_slots, self.OPTION_SCALAR_COUNT), -1.0, dtype=np.float32)
 
         self._np_pokemon_card_id = np.zeros(self._pokemon_rows, dtype=np.int64)
         self._np_pokemon_tool_id = np.zeros(self._pokemon_rows, dtype=np.int64)
         self._np_pokemon_energy_ids = np.zeros((self._pokemon_rows, energy_cap), dtype=np.int64)
         self._np_pokemon_pre_evolution_ids = np.zeros((self._pokemon_rows, evolution_cap), dtype=np.int64)
-        self._np_pokemon_features = np.zeros((self._pokemon_rows, self.POKEMON_FEATURES), dtype=np.float32)
+        self._np_pokemon_features = np.zeros((self._pokemon_rows, self.POKEMON_FEATURE_COUNT), dtype=np.float32)
         self._np_pokemon_mask = np.zeros(self._pokemon_rows, dtype=np.bool_)
 
         self._np_hand_ids = np.zeros(hand_cap, dtype=np.int64)
@@ -134,7 +215,7 @@ class StructuredObservationEncoder(ObservationEncoder):
         """
         n_action_slots = self._max_options + 1
         return Composite(
-            globals=Unbounded(shape=(self.GLOBAL_FEATURES,), dtype=torch.float32),
+            globals=Unbounded(shape=(self.GLOBAL_FEATURE_COUNT,), dtype=torch.float32),
             select_cats=Unbounded(shape=(2,), dtype=torch.int64),
             context_card_ids=Unbounded(shape=(2,), dtype=torch.int64),
             stadium_id=Unbounded(shape=(1,), dtype=torch.int64),
@@ -143,15 +224,15 @@ class StructuredObservationEncoder(ObservationEncoder):
                 target_id=Unbounded(shape=(n_action_slots,), dtype=torch.int64),
                 attack_id=Unbounded(shape=(n_action_slots,), dtype=torch.int64),
                 owner=Unbounded(shape=(n_action_slots,), dtype=torch.int64),
-                cats=Unbounded(shape=(n_action_slots, self.OPTION_CATEGORICALS), dtype=torch.int64),
-                scalars=Unbounded(shape=(n_action_slots, self.OPTION_SCALARS), dtype=torch.float32),
+                cats=Unbounded(shape=(n_action_slots, self.OPTION_CATEGORICAL_COUNT), dtype=torch.int64),
+                scalars=Unbounded(shape=(n_action_slots, self.OPTION_SCALAR_COUNT), dtype=torch.float32),
             ),
             pokemon=Composite(
                 card_id=Unbounded(shape=(self._pokemon_rows,), dtype=torch.int64),
                 tool_id=Unbounded(shape=(self._pokemon_rows,), dtype=torch.int64),
                 energy_card_ids=Unbounded(shape=(self._pokemon_rows, self._energy_cap), dtype=torch.int64),
                 pre_evolution_ids=Unbounded(shape=(self._pokemon_rows, self._evolution_cap), dtype=torch.int64),
-                features=Unbounded(shape=(self._pokemon_rows, self.POKEMON_FEATURES), dtype=torch.float32),
+                features=Unbounded(shape=(self._pokemon_rows, self.POKEMON_FEATURE_COUNT), dtype=torch.float32),
                 mask=Binary(n=self._pokemon_rows, dtype=torch.bool),
             ),
             my=Composite(
@@ -178,21 +259,22 @@ class StructuredObservationEncoder(ObservationEncoder):
             ),
         )
 
-    def encode(self, observation: Observation, agent_seat: int, chosen_count: int) -> TensorDict:
+    def encode(self, observation: Observation, agent_seat: int, already_chosen_option_count: int) -> TensorDict:
         """
         Encode an observation from the agent's perspective.
 
         :param observation: Current engine observation (``current`` must be set).
         :param agent_seat: Player index (0 or 1) of the agent.
-        :param chosen_count: Number of options already picked in an ongoing
-            multi-select accumulation.
+        :param already_chosen_option_count: Number of options already picked in
+            an ongoing multi-select accumulation.
         :return: TensorDict matching :meth:`spec`, batch size ``()``.
         """
         state = observation.current
+        assert state is not None, "observation.current must be set"
         select = observation.select
         return TensorDict(
             {
-                "globals": self._encode_globals(state, select, agent_seat, chosen_count),
+                "globals": self._encode_globals(state, select, agent_seat, already_chosen_option_count),
                 "select_cats": self._encode_select_cats(select),
                 "context_card_ids": self._encode_context_cards(select),
                 "stadium_id": torch.tensor(
@@ -220,12 +302,12 @@ class StructuredObservationEncoder(ObservationEncoder):
             batch_size=torch.Size(()),
         )
 
+    @staticmethod
     def _encode_globals(
-            self,
             state: State,
             select: SelectData | None,
             agent_seat: int,
-            chosen_count: int,
+            already_chosen_option_count: int,
     ) -> torch.Tensor:
         """
         Encode scalar game and selection context as raw float values.
@@ -237,13 +319,15 @@ class StructuredObservationEncoder(ObservationEncoder):
         :param state: Current engine state.
         :param select: Current selection, or None on a terminal observation.
         :param agent_seat: Player index of the agent.
-        :param chosen_count: Picks already accumulated in a multi-select.
-        :return: Float32 tensor of shape ``(GLOBAL_FEATURES,)``.
+        :param already_chosen_option_count: Picks already accumulated in a
+            multi-select.
+        :return: Float32 tensor of shape ``(GLOBAL_FEATURE_COUNT,)``.
         """
         if state.firstPlayer == -1:
             first_player_flag = -1.0
         else:
             first_player_flag = 1.0 if state.firstPlayer == agent_seat else 0.0
+        # Game block (8 entries): turn progress and the once-per-turn flags.
         features: list[float] = [
             float(state.turn),
             float(state.turnActionCount),
@@ -254,6 +338,8 @@ class StructuredObservationEncoder(ObservationEncoder):
             float(state.energyAttached),
             float(state.retreated),
         ]
+        # Selection block (9 entries): all zero on a terminal observation,
+        # where entry 0 doubles as a "selection present" flag.
         if select is None:
             features += [0.0] * 9
         else:
@@ -262,12 +348,14 @@ class StructuredObservationEncoder(ObservationEncoder):
                 float(select.minCount),
                 float(select.maxCount),
                 float(len(select.option)),
-                float(chosen_count),
+                float(already_chosen_option_count),
                 float(select.remainDamageCounter),
                 float(select.remainEnergyCost),
                 1.0 if select.deck is not None else 0.0,
                 1.0 if state.looking is not None else 0.0,
             ]
+        # Player blocks (12 entries each, agent first): zone counts, the
+        # active slot occupancy/face-down flags and special conditions.
         for player in (state.players[agent_seat], state.players[1 - agent_seat]):
             active = player.active[0] if len(player.active) > 0 else None
             features += [
@@ -284,9 +372,15 @@ class StructuredObservationEncoder(ObservationEncoder):
                 float(player.paralyzed),
                 float(player.confused),
             ]
+        if len(features) != StructuredObservationEncoder.GLOBAL_FEATURE_COUNT:
+            raise RuntimeError(
+                f"Expected {StructuredObservationEncoder.GLOBAL_FEATURE_COUNT} global features, "
+                f"got {len(features)}."
+            )
         return torch.tensor(features, dtype=torch.float32)
 
-    def _encode_select_cats(self, select: SelectData | None) -> torch.Tensor:
+    @staticmethod
+    def _encode_select_cats(select: SelectData | None) -> torch.Tensor:
         """
         Encode the selection type and context as shifted categorical IDs.
 
@@ -297,7 +391,8 @@ class StructuredObservationEncoder(ObservationEncoder):
             return torch.zeros(2, dtype=torch.int64)
         return torch.tensor([int(select.type) + 1, int(select.context) + 1], dtype=torch.int64)
 
-    def _encode_context_cards(self, select: SelectData | None) -> torch.Tensor:
+    @staticmethod
+    def _encode_context_cards(select: SelectData | None) -> torch.Tensor:
         """
         Encode the selection's context and effect card identities.
 
@@ -309,6 +404,26 @@ class StructuredObservationEncoder(ObservationEncoder):
         context_id = select.contextCard.id if select.contextCard is not None else 0
         effect_id = select.effect.id if select.effect is not None else 0
         return torch.tensor([context_id, effect_id], dtype=torch.int64)
+
+    @staticmethod
+    def _shifted_category(value: IntEnum | None) -> int:
+        """
+        Shift an optional categorical enum so that 0 can mean "absent".
+
+        :param value: Enum value, or None when the field is absent.
+        :return: ``int(value) + 1``, or 0 when absent.
+        """
+        return int(value) + 1 if value is not None else 0
+
+    @staticmethod
+    def _float_or_absent(value: int | None) -> float:
+        """
+        Convert an optional integer field to its float feature value.
+
+        :param value: Field value, or None when absent.
+        :return: ``float(value)``, or -1.0 when absent (0 is a valid value).
+        """
+        return float(value) if value is not None else -1.0
 
     def _encode_options(self, state: State, select: SelectData | None, agent_seat: int) -> TensorDict:
         """
@@ -341,22 +456,25 @@ class StructuredObservationEncoder(ObservationEncoder):
         cats.fill(0)
         scalars.fill(-1.0)
         options = select.option if select is not None else []
-        for slot, option in enumerate(options[: self._max_options]):
-            cats[slot, 0] = int(option.type) + 1
-            cats[slot, 1] = int(option.area) + 1 if option.area is not None else 0
-            cats[slot, 2] = int(option.inPlayArea) + 1 if option.inPlayArea is not None else 0
-            cats[slot, 3] = (
-                int(option.specialConditionType) + 1 if option.specialConditionType is not None else 0
+        if len(options) > self._max_options:
+            raise ValueError(
+                f"Selection offers {len(options)} options but max_options is {self._max_options}; "
+                f"a truncated option would desynchronize the observation from the action space."
             )
+        for slot, option in enumerate(options):
+            cats[slot, 0] = int(option.type) + 1
+            cats[slot, 1] = self._shifted_category(option.area)
+            cats[slot, 2] = self._shifted_category(option.inPlayArea)
+            cats[slot, 3] = self._shifted_category(option.specialConditionType)
             if option.playerIndex is not None:
                 owner[slot] = 1 if option.playerIndex == agent_seat else 2
-            scalars[slot, 0] = float(option.number) if option.number is not None else -1.0
-            scalars[slot, 1] = float(option.count) if option.count is not None else -1.0
-            scalars[slot, 2] = float(option.index) if option.index is not None else -1.0
-            scalars[slot, 3] = float(option.toolIndex) if option.toolIndex is not None else -1.0
-            scalars[slot, 4] = float(option.energyIndex) if option.energyIndex is not None else -1.0
-            scalars[slot, 5] = float(option.inPlayIndex) if option.inPlayIndex is not None else -1.0
-            card_id[slot], target_id[slot], attack_id[slot] = self._resolve_option_ids(
+            scalars[slot, 0] = self._float_or_absent(option.number)
+            scalars[slot, 1] = self._float_or_absent(option.count)
+            scalars[slot, 2] = self._float_or_absent(option.index)
+            scalars[slot, 3] = self._float_or_absent(option.toolIndex)
+            scalars[slot, 4] = self._float_or_absent(option.energyIndex)
+            scalars[slot, 5] = self._float_or_absent(option.inPlayIndex)
+            card_id[slot], target_id[slot], attack_id[slot] = OptionReferenceResolver.resolve(
                 state, select, option, agent_seat
             )
         return TensorDict(
@@ -370,144 +488,6 @@ class StructuredObservationEncoder(ObservationEncoder):
             },
             batch_size=torch.Size(()),
         )
-
-    def _resolve_option_ids(
-            self,
-            state: State,
-            select: SelectData,
-            option: Option,
-            agent_seat: int,
-    ) -> tuple[int, int, int]:
-        """
-        Resolve an option's zone references to concrete card and attack IDs.
-
-        :param state: Current engine state.
-        :param select: Current selection (for deck-search lookups).
-        :param option: Option to resolve.
-        :param agent_seat: Player index of the agent, used as the owner for
-            option types whose references omit ``playerIndex`` (own zones).
-        :return: Tuple ``(card_id, target_id, attack_id)``; 0 marks
-            none/face-down/unknown. ``target_id`` is the in-play Pokemon a
-            card-directed option acts on (attach/evolve target, or the
-            carrier of a selected tool/energy).
-        """
-        option_type = option.type
-        owner_index = option.playerIndex if option.playerIndex is not None else agent_seat
-        if option_type == OptionType.CARD:
-            return self._card_id_at(state, select, owner_index, option.area, option.index), 0, 0
-        if option_type in (OptionType.TOOL_CARD, OptionType.ENERGY_CARD, OptionType.ENERGY):
-            pokemon = self._pokemon_at(state, owner_index, option.area, option.index)
-            if pokemon is None:
-                return 0, 0, 0
-            if option_type == OptionType.TOOL_CARD:
-                attached = self._card_in_list(pokemon.tools, option.toolIndex)
-            else:
-                attached = self._card_in_list(pokemon.energyCards, option.energyIndex)
-            return attached, pokemon.id, 0
-        if option_type in (OptionType.PLAY, OptionType.ABILITY, OptionType.DISCARD):
-            return self._card_id_at(state, select, owner_index, option.area or AreaType.HAND, option.index), 0, 0
-        if option_type in (OptionType.ATTACH, OptionType.EVOLVE):
-            played = self._card_id_at(state, select, owner_index, option.area, option.index)
-            target = self._pokemon_at(state, owner_index, option.inPlayArea, option.inPlayIndex)
-            return played, target.id if target is not None else 0, 0
-        if option_type == OptionType.ATTACK:
-            return 0, 0, option.attackId if option.attackId is not None else 0
-        if option_type == OptionType.SKILL:
-            return option.cardId if option.cardId is not None else 0, 0, 0
-        return 0, 0, 0
-
-    def _card_id_at(
-            self,
-            state: State,
-            select: SelectData,
-            player_index: int,
-            area: AreaType | None,
-            index: int | None,
-    ) -> int:
-        """
-        Look up the card ID at a (player, area, index) reference.
-
-        :param state: Current engine state.
-        :param select: Current selection (source of the deck-search list).
-        :param player_index: Absolute owner index of the referenced zone.
-        :param area: Referenced area, or None.
-        :param index: Index within the area, or None.
-        :return: Card ID, or 0 when the reference is absent, out of range,
-            face-down, or in a zone the agent cannot see.
-        """
-        if area is None or index is None:
-            return 0
-        player = state.players[player_index]
-        if area == AreaType.HAND:
-            if player.hand is None:
-                return 0
-            return self._card_in_list(player.hand, index)
-        if area == AreaType.DISCARD:
-            return self._card_in_list(player.discard, index)
-        if area == AreaType.ACTIVE:
-            pokemon = self._pokemon_at(state, player_index, area, index)
-            return pokemon.id if pokemon is not None else 0
-        if area == AreaType.BENCH:
-            pokemon = self._pokemon_at(state, player_index, area, index)
-            return pokemon.id if pokemon is not None else 0
-        if area == AreaType.PRIZE:
-            if 0 <= index < len(player.prize) and player.prize[index] is not None:
-                return player.prize[index].id
-            return 0
-        if area == AreaType.STADIUM:
-            return self._card_in_list(state.stadium, index)
-        if area == AreaType.DECK:
-            if select is not None and select.deck is not None:
-                return self._card_in_list(select.deck, index)
-            return 0
-        if area == AreaType.LOOKING:
-            if state.looking is not None and 0 <= index < len(state.looking) and state.looking[index] is not None:
-                return state.looking[index].id
-            return 0
-        return 0
-
-    def _pokemon_at(
-            self,
-            state: State,
-            player_index: int,
-            area: AreaType | None,
-            index: int | None,
-    ) -> Pokemon | None:
-        """
-        Look up an in-play Pokemon at a (player, area, index) reference.
-
-        :param state: Current engine state.
-        :param player_index: Absolute owner index of the Pokemon.
-        :param area: ``ACTIVE`` or ``BENCH``; anything else resolves to None.
-        :param index: Index within the area, or None.
-        :return: The Pokemon, or None when absent or face-down.
-        """
-        if area is None or index is None:
-            return None
-        player = state.players[player_index]
-        if area == AreaType.ACTIVE:
-            slots = player.active
-        elif area == AreaType.BENCH:
-            slots = player.bench
-        else:
-            return None
-        if 0 <= index < len(slots):
-            return slots[index]
-        return None
-
-    @staticmethod
-    def _card_in_list(cards: list, index: int | None) -> int:
-        """
-        Read a card ID from a card list, tolerating bad indices.
-
-        :param cards: List of ``Card`` objects (or None entries).
-        :param index: Index to read, or None.
-        :return: The card's ID, or 0 when out of range or face-down.
-        """
-        if index is None or not 0 <= index < len(cards):
-            return 0
-        card = cards[index]
-        return card.id if card is not None else 0
 
     def _encode_pokemon(self, state: State, agent_seat: int) -> TensorDict:
         """
@@ -595,6 +575,9 @@ class StructuredObservationEncoder(ObservationEncoder):
             pre_evolutions = pre_evolutions[: self._evolution_cap]
         for column, card in enumerate(pre_evolutions):
             pre_evolution_ids[row, column] = card.id
+        # Feature columns: 0-3 HP block and freshness, 4 is-active (set
+        # above), 5-7 attachment counts, 8+ histogram of provided energy
+        # units by type.
         features[row, 0] = float(pokemon.hp)
         features[row, 1] = float(pokemon.maxHp)
         features[row, 2] = pokemon.hp / pokemon.maxHp if pokemon.maxHp > 0 else 0.0
@@ -604,7 +587,7 @@ class StructuredObservationEncoder(ObservationEncoder):
         features[row, 7] = float(len(pokemon.preEvolution))
         for energy in pokemon.energies:
             energy_index = int(energy)
-            if 0 <= energy_index < self.ENERGY_TYPES:
+            if 0 <= energy_index < self.ENERGY_TYPE_COUNT:
                 features[row, 8 + energy_index] += 1.0
         return
 
@@ -617,30 +600,18 @@ class StructuredObservationEncoder(ObservationEncoder):
         :return: TensorDict with padded ID tables and masks.
         """
         player = state.players[agent_seat]
-        hand_ids = [card.id for card in player.hand] if player.hand is not None else []
-        hand_ids_tensor, hand_mask_tensor = self._stage_id_list(
-            hand_ids, self._np_hand_ids, self._np_hand_mask, "hand"
-        )
-        discard_ids_tensor, discard_mask_tensor = self._stage_id_list(
-            [card.id for card in player.discard], self._np_my_discard_ids, self._np_my_discard_mask, "discard"
-        )
-        prize_ids_tensor, prize_mask_tensor = self._stage_id_list(
-            [card.id if card is not None else 0 for card in player.prize],
+        entries = self._stage_public_zones(
+            player,
+            self._np_my_discard_ids,
+            self._np_my_discard_mask,
             self._np_my_prize_ids,
             self._np_my_prize_mask,
-            "prize",
         )
-        return TensorDict(
-            {
-                "hand_ids": hand_ids_tensor,
-                "hand_mask": hand_mask_tensor,
-                "discard_ids": discard_ids_tensor,
-                "discard_mask": discard_mask_tensor,
-                "prize_ids": prize_ids_tensor,
-                "prize_mask": prize_mask_tensor,
-            },
-            batch_size=torch.Size(()),
+        hand_ids = [card.id for card in player.hand] if player.hand is not None else []
+        entries["hand_ids"], entries["hand_mask"] = self._stage_id_list(
+            hand_ids, self._np_hand_ids, self._np_hand_mask, "hand"
         )
+        return TensorDict(entries, batch_size=torch.Size(()))
 
     def _encode_opp_zones(self, state: State, agent_seat: int) -> TensorDict:
         """
@@ -650,25 +621,50 @@ class StructuredObservationEncoder(ObservationEncoder):
         :param agent_seat: Player index of the agent.
         :return: TensorDict with padded ID tables and masks.
         """
-        player = state.players[1 - agent_seat]
-        discard_ids_tensor, discard_mask_tensor = self._stage_id_list(
-            [card.id for card in player.discard], self._np_opp_discard_ids, self._np_opp_discard_mask, "discard"
-        )
-        prize_ids_tensor, prize_mask_tensor = self._stage_id_list(
-            [card.id if card is not None else 0 for card in player.prize],
+        entries = self._stage_public_zones(
+            state.players[1 - agent_seat],
+            self._np_opp_discard_ids,
+            self._np_opp_discard_mask,
             self._np_opp_prize_ids,
             self._np_opp_prize_mask,
+        )
+        return TensorDict(entries, batch_size=torch.Size(()))
+
+    def _stage_public_zones(
+            self,
+            player: PlayerState,
+            discard_ids_buffer: np.ndarray,
+            discard_mask_buffer: np.ndarray,
+            prize_ids_buffer: np.ndarray,
+            prize_mask_buffer: np.ndarray,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Stage the zones that are visible for both players: the discard pile
+        and the prizes (face-down prizes keep a mask slot with ID 0).
+
+        :param player: Player whose zones to encode.
+        :param discard_ids_buffer: Staging buffer for the discard card IDs.
+        :param discard_mask_buffer: Staging buffer for the discard mask.
+        :param prize_ids_buffer: Staging buffer for the prize card IDs.
+        :param prize_mask_buffer: Staging buffer for the prize mask.
+        :return: Dict with ``discard_ids``/``discard_mask`` and
+            ``prize_ids``/``prize_mask`` tensors.
+        """
+        discard_ids, discard_mask = self._stage_id_list(
+            [card.id for card in player.discard], discard_ids_buffer, discard_mask_buffer, "discard"
+        )
+        prize_ids, prize_mask = self._stage_id_list(
+            [card.id if card is not None else 0 for card in player.prize],
+            prize_ids_buffer,
+            prize_mask_buffer,
             "prize",
         )
-        return TensorDict(
-            {
-                "discard_ids": discard_ids_tensor,
-                "discard_mask": discard_mask_tensor,
-                "prize_ids": prize_ids_tensor,
-                "prize_mask": prize_mask_tensor,
-            },
-            batch_size=torch.Size(()),
-        )
+        return {
+            "discard_ids": discard_ids,
+            "discard_mask": discard_mask,
+            "prize_ids": prize_ids,
+            "prize_mask": prize_mask,
+        }
 
     def _stage_id_list(
             self,
