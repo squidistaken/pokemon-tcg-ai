@@ -84,7 +84,7 @@ class GreedyPolicyOpponent:
             batch_size=torch.Size(()),
         ).to(self._device)
         logits = self._actor_critic(encoded)["logits"]
-        return self._greedy_select(
+        return self.greedy_select(
             logits,
             n_options=len(select.option),
             min_count=select.minCount,
@@ -92,7 +92,7 @@ class GreedyPolicyOpponent:
         )
 
     @staticmethod
-    def _greedy_select(
+    def greedy_select(
             logits: torch.Tensor,
             n_options: int,
             min_count: int,

@@ -31,13 +31,13 @@ class LinearPolicyHead(nn.Module):
     def forward(
             self,
             state_repr: torch.Tensor,
-            option_repr: torch.Tensor | None = None,
+            _option_repr: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Map the latent state to per-action logits.
 
         :param state_repr: Latent state of shape ``(..., in_features)``.
-        :param option_repr: Unused; accepted so the head shares the pointer
+        :param _option_repr: Unused; accepted so the head shares the pointer
             head's signature and can be swapped without touching the trunk.
         :return: Logits of shape ``(..., n_actions)``.
         """

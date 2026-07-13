@@ -63,9 +63,9 @@ def test_ppo_update_returns_finite_losses(model_cfg, flat_obs_spec, action_spec)
     actor_critic = build_actor_critic(model_cfg, flat_obs_spec, action_spec)
     trainer = _make_trainer(actor_critic, action_spec)
     env = SerialEnv(2, make_env_factories(flat_env_cfg()))
-    collector = Collector(env, trainer._policy, frames_per_batch=64, total_frames=64)
+    collector = Collector(env, trainer.policy, frames_per_batch=64, total_frames=64)
     try:
-        losses = trainer._update(next(iter(collector)))
+        losses = trainer.update(next(iter(collector)))
     finally:
         collector.shutdown()
     assert set(losses) >= {"loss_objective", "loss_critic", "loss_entropy", "grad_norm"}

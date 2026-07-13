@@ -35,7 +35,7 @@ def test_greedy_select_single_pick() -> None:
     """
     A single-pick selection returns the argmax option.
     """
-    picks = GreedyPolicyOpponent._greedy_select(
+    picks = GreedyPolicyOpponent.greedy_select(
         _logits([0.1, 0.2, 5.0, 0.3, 0.4], stop=-1.0), n_options=5, min_count=1, max_count=1
     )
     assert picks == [2]
@@ -45,7 +45,7 @@ def test_greedy_select_stops_between_min_and_max() -> None:
     """
     Multi-select takes options above the stop logit, honoring minCount.
     """
-    picks = GreedyPolicyOpponent._greedy_select(
+    picks = GreedyPolicyOpponent.greedy_select(
         _logits([3.0, 2.0, 1.0, 0.5], stop=1.5), n_options=4, min_count=1, max_count=3
     )
     assert picks == [0, 1]
@@ -55,11 +55,11 @@ def test_greedy_select_respects_min_and_max_counts() -> None:
     """
     minCount forces picks below stop; maxCount caps picks above it.
     """
-    empty = GreedyPolicyOpponent._greedy_select(
+    empty = GreedyPolicyOpponent.greedy_select(
         _logits([0.1, 0.2], stop=5.0), n_options=2, min_count=0, max_count=2
     )
     assert empty == []
-    capped = GreedyPolicyOpponent._greedy_select(
+    capped = GreedyPolicyOpponent.greedy_select(
         _logits([5.0, 4.0, 3.0, 2.0], stop=-10.0), n_options=4, min_count=1, max_count=2
     )
     assert capped == [0, 1]

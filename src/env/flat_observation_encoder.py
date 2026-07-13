@@ -110,7 +110,8 @@ class FlatObservationEncoder(ObservationEncoder):
             batch_size=torch.Size(()),
         )
 
-    def _player_features(self, player: PlayerState) -> list[float]:
+    @staticmethod
+    def _player_features(player: PlayerState) -> list[float]:
         """
         Encode one player's board state.
 
