@@ -20,7 +20,7 @@ through every component so modules, envs, collectors, and losses share one data 
 - **Replay buffers** (`torchrl.data`): storage + sampler for transitions.
 - **Objectives / losses** (`torchrl.objectives`): stateful modules (PPO, DQN, SAC, ...)
   that consume a TensorDict and emit `loss_*` components, using value estimators (GAE,
-  TD(0), TD(λ)) internally.
+  TD(0), TD(λ)) internally. Where GAE is the best estimator and generalizes TD(0), TD(lambda).
 
 ## Documentation TOC (with paths)
 
@@ -34,10 +34,10 @@ through every component so modules, envs, collectors, and losses share one data 
 
 ### Tutorials
 - Basics: PPO with TorchRL; Pendulum (writing envs & transforms); Intro to TorchRL
-- Intermediate: Multi-Agent PPO; TorchRL environments; Pretrained models; Recurrent DQN;
+- Intermediate: TorchRL environments; Pretrained models; Recurrent DQN;
   MuJoCo scripted manipulation; Collectors deep dive; Evaluator usage; Replay Buffers;
   Memory-efficient RL training; Exporting modules
-- Advanced: Competitive Multi-Agent (DDPG); Multi-task policies; DDPG loss implementation;
+- Advanced: Multi-task policies; DDPG loss implementation;
   DQN trainer example
 
 ### API references (`reference/<name>.html`)

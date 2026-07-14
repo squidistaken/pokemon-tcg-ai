@@ -10,7 +10,8 @@ call on a TensorDict of rollout data, and get back a TensorDict of `loss_*` comp
 ```python
 from torchrl.objectives import DDPGLoss
 
-loss = DDPGLoss(actor_network=actor, value_network=value, gamma=0.99)
+loss = DDPGLoss(actor_network=actor, value_network=value)
+loss.make_value_estimator(gamma=0.99)   # gamma is never a constructor kwarg
 td = collector.rollout()
 loss_vals = loss(td)
 total_loss = sum(v for k, v in loss_vals.items() if k.startswith("loss_"))
@@ -54,5 +55,8 @@ target_updater = SoftUpdate(loss, eps=0.995)
 # per update: loss_vals = loss(sampled_td); backward; optim.step(); target_updater.step()
 ```
 
-> Confirm constructor arg names per installed version (e.g. `actor_network` vs
-> `actor_critic`, `critic_network`, `action_space`); they vary across losses/versions.
+> Network-arg names vary **by loss, not by version** — check the one you're using:
+> `value_network` (DDPG, DQN), `critic_network` (PPO/`ClipPPOLoss`, A2C), or
+> `actor_network` + `qvalue_network` (+ optional `value_network`) for SAC. There is no
+> `actor_critic` kwarg on any current loss. `gamma` is likewise never a constructor arg —
+> always set it via `loss.make_value_estimator(gamma=...)`.

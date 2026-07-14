@@ -30,55 +30,24 @@ Define these in `__init__` (usually wrapped in a `Composite`):
 
 Spec classes (from `torchrl.data`): `Composite`, `Bounded`, `Unbounded`, `Categorical`
 (discrete). For the PTCG agent the action is **choosing an option index** among
-`obs.select.option`, i.e. a discrete choice → use `Categorical`. Note the number of legal
-options is *dynamic per step*; TorchRL specs are static, so a common pattern is to set
-`action_spec` to the max option count and carry an **action mask** in the observation
-(e.g. an `action_mask` key) that the policy/`QValueModule` uses to mask illegal actions.
+`obs.select.option`, i.e. a discrete choice → use `Categorical`.
 
-## Sketch
+### Handling a dynamic number of legal options
 
-```python
-import torch
-from tensordict import TensorDict
-from torchrl.envs import EnvBase
-from torchrl.data import Composite, Categorical, Unbounded, Bounded
+The number of legal options is *dynamic per step*. TorchRL does support dynamic specs
+(variable-size dims via `-1` on a spec's shape, combined with `return_contiguous=False`
+on rollouts), but for a per-step-varying *discrete action count* the simpler, standard
+pattern is still: fix `action_spec` to the max option count and carry an **action mask**
+in the observation (e.g. an `action_mask` key). Prefer TorchRL's built-in consumers of
+that mask over hand-rolling the logic:
 
-class PTCGEnv(EnvBase):
-    def __init__(self, max_options: int, obs_dim: int, device="cpu"):
-        super().__init__(device=device)
-        self.observation_spec = Composite(
-            observation=Unbounded(shape=(obs_dim,), dtype=torch.float32),
-            action_mask=Categorical(2, shape=(max_options,), dtype=torch.bool),
-            shape=(),
-        )
-        self.action_spec = Categorical(max_options, shape=(), dtype=torch.int64)
-        self.reward_spec = Unbounded(shape=(1,), dtype=torch.float32)
-        self.done_spec = Categorical(2, shape=(1,), dtype=torch.bool)
+- **`torchrl.envs.transforms.ActionMask`** — an env transform that reads the mask key and
+  keeps `action_spec` in sync with the currently-legal actions.
+- **`torchrl.modules.distributions.MaskedCategorical`** — used as the `distribution_class`
+  of a `ProbabilisticActor` for policy-gradient/PPO actor-critic policies (this project's
+  architecture; see [02-modules.md](02-modules.md)), wired via
+  `in_keys={"logits": "logits", "mask": "action_mask"}`.
 
-    def _reset(self, tensordict=None):
-        obs, mask = self._engine_reset()
-        return TensorDict({
-            "observation": obs,
-            "action_mask": mask,
-            "done": torch.zeros(1, dtype=torch.bool),
-        }, batch_size=[])
-
-    def _step(self, tensordict):
-        action = tensordict["action"]
-        obs, mask, reward, done = self._engine_step(int(action))
-        return TensorDict({
-            "observation": obs,
-            "action_mask": mask,
-            "reward": torch.tensor([reward], dtype=torch.float32),
-            "done": torch.tensor([done], dtype=torch.bool),
-        }, batch_size=[])
-
-    def _set_seed(self, seed):
-        self._rng = torch.manual_seed(seed)
-```
-
-Validate a custom env with `torchrl.envs.utils.check_env_specs(env)` before training.
-
-> Verify exact spec constructor names/signatures against the installed version — some spec
-> classes have historical aliases (`DiscreteTensorSpec` == `Categorical`,
-> `UnboundedContinuousTensorSpec` == `Unbounded`, etc.).
+`QValueModule`/`QValueActor`'s own `action_mask_key` is the equivalent mechanism for
+value-based (DQN-style) policies — not what this project's PPO actor-critic uses, but
+relevant if a DQN baseline is ever tried (see [03-objectives-losses.md](03-objectives-losses.md)).

@@ -31,7 +31,12 @@ actor_net = nn.Sequential(
 policy_module = ProbabilisticActor(
     module=TensorDictModule(actor_net, in_keys=["observation"], out_keys=["loc", "scale"]),
     spec=env.action_spec, in_keys=["loc", "scale"],
-    distribution_class=TanhNormal, return_log_prob=True,
+    distribution_class=TanhNormal,
+    distribution_kwargs={
+        "low": env.action_spec_unbatched.space.low,
+        "high": env.action_spec_unbatched.space.high,
+    },  # without this, TanhNormal defaults to [-1, 1] instead of the real action range
+    return_log_prob=True,
 )
 value_module = ValueOperator(
     module=nn.Sequential(nn.LazyLinear(256), nn.Tanh(), nn.LazyLinear(256), nn.Tanh(), nn.LazyLinear(1)),
@@ -40,16 +45,34 @@ value_module = ValueOperator(
 ```
 
 ## 3–6. Collector, buffer, advantage, loss, optim
+
+Collector: see [04-collectors-buffers.md](04-collectors-buffers.md) for the full API
+(`SyncDataCollector` was removed in TorchRL v0.13 — `Collector` is the canonical class now).
+PTCG vectorizes at the **env** level: one factory per worker, wrapped into a single vectorized
+env by `ParallelEnv` (or `SerialEnv` when there's only one worker, to skip `ParallelEnv`'s
+process overhead), then handed to a single `Collector` — rather than a `MultiCollector` with
+multiple `create_env_fn` factories. The parallelism lives inside the env, not the collector.
+
 ```python
-from torchrl.collectors import SyncDataCollector
+from torchrl.collectors import Collector
+from torchrl.envs import ParallelEnv
 from torchrl.data import ReplayBuffer, LazyTensorStorage
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value import GAE
 import torch
 
-collector = SyncDataCollector(env, policy_module, frames_per_batch=1000,
-                              total_frames=10_000, split_trajs=False, device=device)
+vec_env = ParallelEnv(num_workers=len(env_factories), create_env_fn=env_factories,
+                      mp_start_method="fork")
+collector = Collector(
+    create_env_fn=vec_env,   # an already-built env works too -- Collector accepts either
+    policy=policy_module,
+    frames_per_batch=1000,
+    total_frames=10_000,
+    # Env transforms (e.g. ActionMask) are applied per-factory, and the masked policy reads
+    # "action_mask" directly -- skip the collector's own transform auto-registration.
+    auto_register_policy_transforms=False,
+)
 rb = ReplayBuffer(storage=LazyTensorStorage(1000), sampler=SamplerWithoutReplacement())
 advantage_module = GAE(gamma=0.99, lmbda=0.95, value_network=value_module, average_gae=True)
 loss_module = ClipPPOLoss(actor_network=policy_module, critic_network=value_module,
