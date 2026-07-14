@@ -8,9 +8,31 @@ from torchrl.envs.transforms import ActionMask
 
 from cg.api import Observation
 from src.env.deck import load_deck
+from src.env.flat_observation_encoder import FlatObservationEncoder
+from src.env.observation_encoder import ObservationEncoder
+from src.env.structured_observation_encoder import StructuredObservationEncoder
 from src.env.tcg_env import TCGEnv
 
 OpponentFactory = Callable[[], Callable[[Observation], list[int]]]
+
+
+def make_encoder(name: str, max_options: int) -> ObservationEncoder:
+    """
+    Build the observation encoder selected by name.
+
+    :param name: ``structured`` (default env encoder; ``MLPBackbone`` and
+        future backbones train against this) or ``flat`` (legacy 36-dim
+        vector, kept only for regression testing / reference comparison —
+        not a supported training path).
+    :param max_options: Padded option-space size of the environment.
+    :return: A matching :class:`~src.env.observation_encoder.ObservationEncoder`.
+    :raises ValueError: If the name is unknown.
+    """
+    if name == "structured":
+        return StructuredObservationEncoder(max_options=max_options)
+    if name == "flat":
+        return FlatObservationEncoder()
+    raise ValueError(f"Unknown observation encoder '{name}'; expected 'structured' or 'flat'.")
 
 
 def make_env(
@@ -19,6 +41,7 @@ def make_env(
         max_options: int,
         seed: int,
         opponent_factory: OpponentFactory | None = None,
+        encoder: str = "structured",
 ) -> EnvBase:
     """
     Build a single masked TCG environment instance.
@@ -31,10 +54,18 @@ def make_env(
     :param seed: Seed for this environment instance.
     :param opponent_factory: Builds the opponent for this instance (e.g. an
         OpponentPool for self-play); the default random opponent if None.
+    :param encoder: Observation encoder name (see :func:`make_encoder`).
     :return: TransformedEnv with the ActionMask transform applied.
     """
     opponent = opponent_factory() if opponent_factory is not None else None
-    base_env = TCGEnv(deck0=deck0, deck1=deck1, max_options=max_options, seed=seed, opponent=opponent)
+    base_env = TCGEnv(
+        deck0=deck0,
+        deck1=deck1,
+        max_options=max_options,
+        seed=seed,
+        opponent=opponent,
+        encoder=make_encoder(encoder, max_options),
+    )
     return TransformedEnv(base_env, ActionMask())
 
 
@@ -48,7 +79,8 @@ def make_env_factories(cfg: DictConfig, opponent_factory: OpponentFactory | None
     """
     deck0 = load_deck(to_absolute_path(cfg.env.deck0))
     deck1 = load_deck(to_absolute_path(cfg.env.deck1))
+    encoder = cfg.env.get("encoder", "structured")
     return [
-        partial(make_env, deck0, deck1, cfg.env.max_options, cfg.seed + worker, opponent_factory)
+        partial(make_env, deck0, deck1, cfg.env.max_options, cfg.seed + worker, opponent_factory, encoder)
         for worker in range(cfg.env.num_workers)
     ]

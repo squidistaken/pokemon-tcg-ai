@@ -1,3 +1,4 @@
+import logging
 import time
 from collections.abc import Callable
 
@@ -9,6 +10,8 @@ from tqdm import tqdm
 
 from src.training.base_trainer import BaseTrainer
 
+logger = logging.getLogger(__name__)
+
 
 class Trainer(BaseTrainer):
     """
@@ -17,8 +20,8 @@ class Trainer(BaseTrainer):
     Owns the vectorized environment, the collector lifecycle and progress
     statistics. The learning algorithm lives in :meth:`_update`, which is a
     no-op in this base class, so running it directly gives a pure collection
-    loop (e.g. the random-policy baseline). The upcoming PPO trainer
-    could subclass this, passes the actor as ``policy`` and implements
+    loop (e.g. the random-policy baseline). The  PPO trainer
+    subclasses this, passes the actor as ``policy`` and implements
     :meth:`_update` with the advantage/loss/optimizer step.
     """
 
@@ -66,6 +69,7 @@ class Trainer(BaseTrainer):
             frames_per_batch=self._frames_per_batch,
             total_frames=self._total_frames,
             auto_register_policy_transforms=False,
+            **self._collector_kwargs(),
         )
         frames = 0
         episodes = 0
@@ -85,6 +89,7 @@ class Trainer(BaseTrainer):
                     losses = self._update(data)
                     progress_bar.update(batch_frames)
                     self._log_progress(progress_bar, episodes, wins, losses)
+                    self._log_metrics(frames, episodes, wins, draws, time.time() - start_time, losses)
         finally:
             collector.shutdown()
         elapsed = time.time() - start_time
@@ -95,6 +100,21 @@ class Trainer(BaseTrainer):
             "draw_rate": draws / max(episodes, 1),
             "fps": frames / elapsed,
         }
+
+    # Instance method (not static) so subclasses can override with instance
+    # state; the base returns no extra kwargs, leaving collection unchanged.
+    # noinspection PyMethodMayBeStatic
+    def _collector_kwargs(self) -> dict:  # noqa: PLR6301
+        """
+        Extra keyword arguments to pass to the :class:`Collector`.
+
+        Empty in the base class, so the random-collection baseline builds the
+        collector exactly as before. Subclasses override this to enable
+        collector-level features (e.g. PPO sets ``compile_policy``).
+
+        :return: Mapping splatted into the ``Collector(...)`` construction.
+        """
+        return {}
 
     # Deliberately an instance method with an unused `data` argument: this is the
     # no-op base-class hook that subclasses (PPO) override with this exact signature,
@@ -175,3 +195,41 @@ class Trainer(BaseTrainer):
         if losses:
             postfix.update({key: f"{value:.4f}" for key, value in losses.items()})
         progress_bar.set_postfix(postfix)
+
+    def _log_metrics(
+            self,
+            frames: int,
+            episodes: int,
+            wins: int,
+            draws: int,
+            elapsed: float,
+            losses: dict[str, float] | None,
+    ) -> None:
+        """
+        Emit one timestamped log line per collector iteration with the
+        running training metrics.
+
+        The tqdm progress bar (:meth:`_log_progress`) only overwrites a
+        single terminal line in place, so it leaves no persistent record of
+        metrics over time; this writes through the standard ``logging``
+        module instead (picked up by Hydra's default handler, so every line
+        carries a timestamp), independent of whether a progress bar is
+        attached to a terminal.
+
+        :param frames: Total frames collected so far.
+        :param episodes: Total episodes finished so far.
+        :param wins: Total wins so far.
+        :param draws: Total draws so far.
+        :param elapsed: Wall-clock seconds since training started.
+        :param losses: Loss values from the last update, if any.
+        """
+        parts = [
+            f"frames={frames}/{self._total_frames}",
+            f"episodes={episodes}",
+            f"win_rate={wins / max(episodes, 1):.3f}",
+            f"draw_rate={draws / max(episodes, 1):.3f}",
+            f"fps={frames / elapsed:.1f}",
+        ]
+        if losses:
+            parts.extend(f"{key}={value:.4f}" for key, value in losses.items())
+        logger.info(" ".join(parts))
