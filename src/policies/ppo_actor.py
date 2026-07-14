@@ -17,9 +17,21 @@ LOGITS_KEY = "logits"
 VALUE_KEY = "state_value"
 ACTION_MASK_KEY = "action_mask"
 ACTION_KEY = "action"
-# The environment nests the encoder's output under "observation"; the flat
-# encoder names its single field "observation", so the flat vector lives here.
-DEFAULT_IN_KEYS = [("observation", "observation")]
+# The environment nests the encoder's output under "observation". These are
+# the structured encoder's top-level groups (see StructuredObservationEncoder
+# .spec()); MLPBackbone flattens each and concatenates them.
+DEFAULT_IN_KEYS = [
+    ("observation", "globals"),
+    ("observation", "select_cats"),
+    ("observation", "context_card_ids"),
+    ("observation", "stadium_id"),
+    ("observation", "options"),
+    ("observation", "pokemon"),
+    ("observation", "my"),
+    ("observation", "opp"),
+    ("observation", "select_deck"),
+    ("observation", "looking"),
+]
 
 
 def _normalize_keys(raw_keys) -> list:
@@ -32,13 +44,21 @@ def _normalize_keys(raw_keys) -> list:
     return [tuple(key) if isinstance(key, (list, ListConfig)) else key for key in raw_keys]
 
 
-def _feature_width(spec: TensorSpec) -> int:
+def _feature_width(spec: TensorSpec | Composite) -> int:
     """
     Flattened feature width of a (batchless) observation spec entry.
 
-    :param spec: Spec of one observation key.
-    :return: Product of its shape (its length for a vector entry).
+    Recurses into a :class:`~torchrl.data.Composite` (a group key, e.g. the
+    structured encoder's ``options``/``pokemon`` tables) by summing the width
+    of every leaf beneath it.
+
+    :param spec: Spec of one observation key: a leaf tensor spec, or a
+        composite group of them.
+    :return: Product of its shape (its length for a vector entry), or the
+        summed width of all leaves for a composite group.
     """
+    if isinstance(spec, Composite):
+        return sum(_feature_width(spec[leaf]) for leaf in spec.keys(True, True))
     return int(math.prod(spec.shape)) if len(spec.shape) > 0 else 1
 
 
@@ -47,8 +67,9 @@ def _input_dim(obs_spec: Composite, in_keys: list[str]) -> int:
     Summed flattened width of the backbone's input keys.
 
     :param obs_spec: Observation composite spec of the environment.
-    :param in_keys: Observation keys the backbone consumes.
-    :return: Total input width fed to the flat backbone.
+    :param in_keys: Observation keys the backbone consumes; an entry may name
+        a leaf field or a composite group (see :func:`_feature_width`).
+    :return: Total input width fed to :class:`~src.models.backbone.MLPBackbone`.
     """
     return sum(_feature_width(obs_spec[key]) for key in in_keys)
 

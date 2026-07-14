@@ -20,8 +20,10 @@ def make_encoder(name: str, max_options: int) -> ObservationEncoder:
     """
     Build the observation encoder selected by name.
 
-    :param name: ``structured`` (default env encoder) or ``flat`` (the 36-dim
-        vector the Phase-1 PPO/MLP baseline is built against).
+    :param name: ``structured`` (default env encoder; ``MLPBackbone`` and
+        future backbones train against this) or ``flat`` (legacy 36-dim
+        vector, kept only for regression testing / reference comparison —
+        not a supported training path).
     :param max_options: Padded option-space size of the environment.
     :return: A matching :class:`~src.env.observation_encoder.ObservationEncoder`.
     :raises ValueError: If the name is unknown.

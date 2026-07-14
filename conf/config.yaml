@@ -1,6 +1,6 @@
 # Hydra docs: https://hydra.cc/docs/intro/
 # Random baseline (default):  python -m src.train
-# Phase-1 PPO/MLP baseline:   python -m src.train agent=ppo env.encoder=flat
+# PPO/MLP baseline:           python -m src.train agent=ppo
 defaults:
   - agent: dummy
   - env: default

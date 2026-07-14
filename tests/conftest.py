@@ -6,6 +6,7 @@ from omegaconf import DictConfig, OmegaConf
 from torchrl.data import Binary, Categorical, Composite, Unbounded
 
 from src.env.flat_observation_encoder import FlatObservationEncoder
+from src.env.structured_observation_encoder import StructuredObservationEncoder
 from src.training.ppo_trainer import PPOTrainer
 
 DECK_PATH = str(Path(__file__).parents[1] / "decks" / "example.csv")
@@ -124,6 +125,59 @@ def flat_obs_spec() -> Composite:
 
 
 @pytest.fixture
+def structured_obs_spec() -> Composite:
+    """
+    Observation spec matching the (default) structured encoder plus the
+    action mask.
+
+    :return: Composite spec with the nested structured observation groups and
+        the ``action_mask``, matching what :class:`TCGEnv` emits with the
+        default structured encoder.
+    """
+    return Composite(
+        observation=StructuredObservationEncoder(max_options=MAX_OPTIONS).spec(),
+        action_mask=Binary(n=N_ACTIONS, dtype=torch.bool),
+    )
+
+
+@pytest.fixture
+def structured_model_cfg() -> DictConfig:
+    """
+    Minimal ``model`` config selecting the MLP backbone over the structured
+    observation's top-level groups (mirrors :func:`model_cfg` for the flat
+    pairing).
+
+    :return: OmegaConf config with a ``model`` section.
+    """
+    return OmegaConf.create(
+        {
+            "model": {
+                "embed_dim": 32,
+                "backbone": {
+                    "_target_": "src.models.backbone.MLPBackbone",
+                    "num_cells": [32],
+                    "activation": "tanh",
+                    "in_keys": [
+                        ["observation", "globals"],
+                        ["observation", "select_cats"],
+                        ["observation", "context_card_ids"],
+                        ["observation", "stadium_id"],
+                        ["observation", "options"],
+                        ["observation", "pokemon"],
+                        ["observation", "my"],
+                        ["observation", "opp"],
+                        ["observation", "select_deck"],
+                        ["observation", "looking"],
+                    ],
+                },
+                "head": {"_target_": "src.models.heads.LinearPolicyHead"},
+                "value_head": {"num_cells": [32]},
+            }
+        }
+    )
+
+
+@pytest.fixture
 def action_spec() -> Categorical:
     """
     Discrete action spec over the option slots plus the stop action.
@@ -150,6 +204,28 @@ def flat_env_cfg(num_workers: int = 2) -> DictConfig:
                 "num_workers": num_workers,
                 "parallel": False,
                 "encoder": "flat",
+            },
+        }
+    )
+
+
+def structured_env_cfg(num_workers: int = 2) -> DictConfig:
+    """
+    Build a config for structured-observation environment factories.
+
+    :param num_workers: Number of environment workers.
+    :return: OmegaConf config with ``seed`` and an ``env`` section.
+    """
+    return OmegaConf.create(
+        {
+            "seed": 0,
+            "env": {
+                "deck0": DECK_PATH,
+                "deck1": DECK_PATH,
+                "max_options": MAX_OPTIONS,
+                "num_workers": num_workers,
+                "parallel": False,
+                "encoder": "structured",
             },
         }
     )

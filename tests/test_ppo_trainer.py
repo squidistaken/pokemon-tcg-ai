@@ -10,7 +10,7 @@ from src.env.opponent_pool import OpponentPool
 from src.env.random_opponent import RandomOpponent
 from src.policies.ppo_actor import build_actor_critic
 from src.training.env_factory import make_env_factories
-from tests.conftest import PPOTrainerForTests, flat_env_cfg
+from tests.conftest import PPOTrainerForTests, flat_env_cfg, structured_env_cfg
 
 
 def make_random_pool() -> OpponentPool:
@@ -75,6 +75,36 @@ def test_ppo_trainer_trains_without_nans(model_cfg, flat_obs_spec, action_spec) 
     """
     actor_critic = build_actor_critic(model_cfg, flat_obs_spec, action_spec)
     trainer = _make_trainer(actor_critic, action_spec)
+    stats = trainer.train()
+    assert stats["frames"] == 128
+    assert stats["episodes"] > 0
+    assert all(torch.isfinite(p).all() for p in actor_critic.parameters())
+
+
+def test_ppo_trainer_trains_on_structured_obs(structured_model_cfg, structured_obs_spec, action_spec) -> None:
+    """
+    The real default pairing (structured obs + ``MLPBackbone`` flattening it)
+    collects frames and trains without NaNs, proving the default config path
+    (not just the legacy flat-encoder regression fixtures used elsewhere in
+    this file) works end-to-end.
+
+    Seeds torch explicitly: whether an episode finishes within the small
+    frame budget below depends on the (otherwise unseeded) initial policy's
+    action samples, which would otherwise make ``episodes > 0`` flaky
+    depending on how much of the global RNG stream earlier tests consumed.
+    """
+    torch.manual_seed(0)
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    trainer = PPOTrainerForTests(
+        env_factories=make_env_factories(structured_env_cfg()),
+        actor_critic=actor_critic,
+        action_spec=action_spec,
+        frames_per_batch=64,
+        total_frames=128,
+        num_epochs=2,
+        sub_batch_size=32,
+        use_parallel_env=False,
+    )
     stats = trainer.train()
     assert stats["frames"] == 128
     assert stats["episodes"] > 0

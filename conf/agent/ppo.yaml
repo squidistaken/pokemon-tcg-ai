@@ -28,7 +28,7 @@ target_kl_multiplier: 1.5
 use_amp: false
 # torch.compile the loss module / collection policy. Default off: compile is
 # slow/fragile on the CPU dev box (CUDA unavailable here).
-compile_loss: true
+compile_loss: false
 compile_policy: false
 # Linearly anneal the learning rate to 0 over training.
 lr_anneal: false

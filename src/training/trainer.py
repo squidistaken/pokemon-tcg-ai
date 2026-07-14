@@ -1,3 +1,4 @@
+import logging
 import time
 from collections.abc import Callable
 
@@ -8,6 +9,8 @@ from torchrl.envs import EnvBase, ParallelEnv, SerialEnv
 from tqdm import tqdm
 
 from src.training.base_trainer import BaseTrainer
+
+logger = logging.getLogger(__name__)
 
 
 class Trainer(BaseTrainer):
@@ -86,6 +89,7 @@ class Trainer(BaseTrainer):
                     losses = self._update(data)
                     progress_bar.update(batch_frames)
                     self._log_progress(progress_bar, episodes, wins, losses)
+                    self._log_metrics(frames, episodes, wins, draws, time.time() - start_time, losses)
         finally:
             collector.shutdown()
         elapsed = time.time() - start_time
@@ -191,3 +195,41 @@ class Trainer(BaseTrainer):
         if losses:
             postfix.update({key: f"{value:.4f}" for key, value in losses.items()})
         progress_bar.set_postfix(postfix)
+
+    def _log_metrics(
+            self,
+            frames: int,
+            episodes: int,
+            wins: int,
+            draws: int,
+            elapsed: float,
+            losses: dict[str, float] | None,
+    ) -> None:
+        """
+        Emit one timestamped log line per collector iteration with the
+        running training metrics.
+
+        The tqdm progress bar (:meth:`_log_progress`) only overwrites a
+        single terminal line in place, so it leaves no persistent record of
+        metrics over time; this writes through the standard ``logging``
+        module instead (picked up by Hydra's default handler, so every line
+        carries a timestamp), independent of whether a progress bar is
+        attached to a terminal.
+
+        :param frames: Total frames collected so far.
+        :param episodes: Total episodes finished so far.
+        :param wins: Total wins so far.
+        :param draws: Total draws so far.
+        :param elapsed: Wall-clock seconds since training started.
+        :param losses: Loss values from the last update, if any.
+        """
+        parts = [
+            f"frames={frames}/{self._total_frames}",
+            f"episodes={episodes}",
+            f"win_rate={wins / max(episodes, 1):.3f}",
+            f"draw_rate={draws / max(episodes, 1):.3f}",
+            f"fps={frames / elapsed:.1f}",
+        ]
+        if losses:
+            parts.extend(f"{key}={value:.4f}" for key, value in losses.items())
+        logger.info(" ".join(parts))

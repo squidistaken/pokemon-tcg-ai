@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 import torch
+from tensordict import TensorDictBase
 from torch import nn
 from torchrl.modules import MLP
 
@@ -61,12 +62,14 @@ class Backbone(nn.Module, ABC):
         self.out_features = out_features
 
     @abstractmethod
-    def forward(self, *inputs: torch.Tensor):
+    def forward(self, *inputs: torch.Tensor | TensorDictBase):
         """
         Encode the observation tensors into a latent state.
 
-        :param inputs: One tensor per entry of :attr:`in_keys`, in order, each
-            shaped ``(*batch, features)``.
+        :param inputs: One entry per :attr:`in_keys`, in order: either a
+            tensor shaped ``(*batch, features)``, or a nested tensordict (for
+            an ``in_key`` naming a group of observation fields) whose leaves
+            an implementation is responsible for interpreting.
         :return: ``state_repr`` of shape ``(*batch, out_features)``, or a
             ``(state_repr, option_repr)`` tuple when
             :attr:`produces_option_repr` is True.
@@ -78,17 +81,22 @@ class MLPBackbone(Backbone):
     """
     Flat multi-layer-perceptron trunk — the literature's proven PPO baseline.
 
-    Concatenates its per-sample feature vectors along the last dimension and
-    runs the result through a fully-connected stack. It runs on the flat
-    36-dim observation and is the honest
-    control every richer backbone must beat. It reads only global state, so it
-    emits no per-option tokens (:attr:`produces_option_repr` is False) and
-    pairs with :class:`~src.models.heads.LinearPolicyHead`.
+    Flattens every input into a per-sample feature vector, concatenates them
+    along the last dimension, and runs the result through a fully-connected
+    stack. This is the honest control every richer (permutation-invariant)
+    backbone must beat. It reads only global state, so it emits no per-option
+    tokens (:attr:`produces_option_repr` is False) and pairs with
+    :class:`~src.models.heads.LinearPolicyHead`.
 
-    Every input is expected to be a per-sample feature vector (its last
-    dimension is the feature axis); 
-    
-    #TODO: flattening multi-dimensional token tables needed once we tokenize observations.
+    Each positional input is either a plain tensor already shaped
+    ``(*batch, features)`` (used as-is, e.g. the flat 36-dim observation or
+    the structured encoder's scalar leaves like ``globals``), or a nested
+    :class:`~tensordict.TensorDictBase` (e.g. the structured encoder's
+    ``options``/``pokemon``/zone groups), whose leaves are individually
+    flattened past its own ``batch_size`` and concatenated. Card/attack IDs
+    and boolean masks are cast to float and concatenated like any other
+    feature — this is a deliberately naive baseline; embedding lookups and
+    permutation-invariant pooling are future backbones' job, not this one's.
     """
 
     produces_option_repr = False
@@ -118,13 +126,13 @@ class MLPBackbone(Backbone):
             activation_class=activation_class(activation),
         )
 
-    def forward(self, *inputs: torch.Tensor) -> torch.Tensor:
+    def forward(self, *inputs: torch.Tensor | TensorDictBase) -> torch.Tensor:
         """
-        Concatenate the input vectors and encode them into ``state_repr``.
+        Flatten, concatenate and encode the inputs into ``state_repr``.
 
-        :param inputs: One per-sample feature vector per entry of
-            :attr:`in_keys`, each shaped ``(*batch, features)`` with matching
-            leading dimensions.
+        :param inputs: One entry per :attr:`in_keys`: either a per-sample
+            feature vector shaped ``(*batch, features)``, or a nested
+            tensordict whose leaves are flattened past its own ``batch_size``.
         :return: ``state_repr`` of shape ``(*batch, out_features)``.
         """
         if len(inputs) != len(self.in_keys):
@@ -132,5 +140,14 @@ class MLPBackbone(Backbone):
                 f"MLPBackbone expected {len(self.in_keys)} inputs for keys "
                 f"{self.in_keys}, got {len(inputs)}."
             )
-        features = inputs[0] if len(inputs) == 1 else torch.cat(inputs, dim=-1)
-        return self.mlp(features.to(torch.float32))
+        flat_parts: list[torch.Tensor] = []
+        for value in inputs:
+            if isinstance(value, TensorDictBase):
+                batch_ndim = len(value.batch_size)
+                for leaf_key in value.keys(include_nested=True, leaves_only=True):
+                    leaf = value.get(leaf_key)
+                    flat_parts.append(leaf.reshape(*leaf.shape[:batch_ndim], -1).to(torch.float32))
+            else:
+                flat_parts.append(value.reshape(*value.shape[:-1], -1).to(torch.float32))
+        features = flat_parts[0] if len(flat_parts) == 1 else torch.cat(flat_parts, dim=-1)
+        return self.mlp(features)

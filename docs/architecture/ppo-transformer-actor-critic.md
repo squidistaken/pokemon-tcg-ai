@@ -63,10 +63,13 @@ One `Backbone` ABC → `forward(obs_td, deck_ctx) -> (state_repr, option_repr)`.
 TorchRL assembly are identical across all implementations, so backbones are swappable via
 `conf/model/`.
 
-- **`MLPBackbone`** — the literature's **dominant, proven** network: concat/flatten features →
-  `torchrl.modules.MLP`. Runs on the flat 36-dim obs *and* on the tokenized obs (flattened), so it
-  is both the zero-env-change starter **and** the baseline every richer backbone must beat
-  (Vieira et al.). Not a throwaway.
+- **`MLPBackbone`** — the literature's **dominant, proven** network: flattens every observation
+  field (including the structured encoder's nested per-option/per-Pokemon/zone tables — card and
+  attack IDs go in as raw floats, no embedding lookup) and concatenates them →
+  `torchrl.modules.MLP`. **Implemented and trains against the default `structured` encoder today**
+  (as well as the legacy flat 36-dim obs, kept for regression testing) — this naive-flatten
+  pairing is the baseline every richer, permutation-invariant backbone below must beat (Vieira et
+  al.), not a placeholder blocked on Phase 2.
 - **`DeepSetsBackbone`** — permutation-**invariant** pooling (shared per-token MLP → sum/mean pool)
   over entity/hand/option tokens. The lightweight permutation-equivariant option named alongside
   Set Transformers in the literature; far cheaper than attention, order-invariant over cards.
@@ -216,8 +219,10 @@ self-play agents are brittle off-distribution.
 
 ### 8. Tokenized observation encoder (`src/env/observation_encoder.py`, integration)
 
-Extend the placeholder `FlatObservationEncoder` into a `TokenizedObservationEncoder` emitting a
-structured, **information-set-correct** observation (new `observation_spec` keys):
+**Done** — this is `src/env/structured_observation_encoder.py::StructuredObservationEncoder` (the
+env default), not a separate `TokenizedObservationEncoder` to still be built. It emits a
+structured, **information-set-correct** observation (`observation_spec` keys below, in the
+encoder's own naming):
 
 - `entities (E_max, F)` + `entity_mask (E_max,)` — board pokemon for both seats (active + bench):
   card-id / hp / energies / status / owner features (opponent hand hidden, only counts).
@@ -356,14 +361,18 @@ should assert this compatibility at build time with a clear error.
 
 Backbones are ordered by literature maturity + integration cost.
 
-- **Phase 1 — proven baseline, loop green.** `ActorCritic` + `MLPBackbone` on the *current* flat
-  obs; `PPOTrainer._update`; self-play vs `RandomOpponent` then `OpponentPool`. Proves
-  PPO+masking+self-play end-to-end with no env changes. This MLP is the reference every later
-  backbone must beat.
-- **Phase 2 — deck-aware structured obs + permutation-equivariant encoders.**
-  `TokenizedObservationEncoder` + `DeckContextEncoder` + `PointerPolicyHead`, with
-  `DeepSetsBackbone` first (cheap, order-invariant) then `SetTransformerBackbone`. Re-run the MLP on
-  the tokenized obs as the honest control. This is the intended main agent.
+- **Phase 1 — proven baseline, loop green. Done.** `ActorCritic` + `MLPBackbone` (flattening
+  every field, including the structured encoder's nested tables) on the *structured* obs (the env
+  default) or the legacy flat obs; `PPOTrainer._update`; self-play vs `RandomOpponent` then
+  `OpponentPool`. Proves PPO+masking+self-play end-to-end. This MLP-on-structured pairing is the
+  reference every later backbone must beat — it is not blocked on Phase 2 (the structured,
+  card-aware observation already exists as `StructuredObservationEncoder`; only the tokenizing
+  encoder was ever the Phase-1/2 boundary, not the backbone).
+- **Phase 2 — permutation-equivariant encoders + deck conditioning.** `DeckContextEncoder` +
+  `PointerPolicyHead`, with `DeepSetsBackbone` first (cheap, order-invariant embedding + pooling
+  over card/attack IDs, in place of the MLP's naive raw-ID flattening) then `SetTransformerBackbone`.
+  The Phase-1 MLP-on-structured-obs run is the honest control this must beat. This is the intended
+  main agent.
 - **Phase 3 — sequence/history follow-up.** `TemporalTransformerBackbone` (DT-style history window),
   needing recurrent-aware collection (`InitTracker`, sequence batching). `RecurrentBackbone` (LSTM)
   is backburner — a fallback only if the temporal transformer underperforms or proves too costly.
