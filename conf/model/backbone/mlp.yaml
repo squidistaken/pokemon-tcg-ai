@@ -1,0 +1,22 @@
+# The proven PPO baseline trunk: flattens every observation field into one
+# vector and runs it through an MLP. input_dim and out_features are injected
+# by build_actor_critic from the specs.
+_target_: src.models.backbone.MLPBackbone
+num_cells: [256, 256]
+activation: tanh
+# Observation keys to consume, nested under the env's "observation" key.
+# These are StructuredObservationEncoder's top-level groups (see its .spec());
+# MLPBackbone flattens each (including nested per-option/per-Pokemon/zone
+# tables) and concatenates them. Override to [[observation, observation]] to
+# run against the legacy FlatObservationEncoder's single flat vector instead.
+in_keys:
+  - [observation, globals]
+  - [observation, select_cats]
+  - [observation, context_card_ids]
+  - [observation, stadium_id]
+  - [observation, options]
+  - [observation, pokemon]
+  - [observation, my]
+  - [observation, opp]
+  - [observation, select_deck]
+  - [observation, looking]

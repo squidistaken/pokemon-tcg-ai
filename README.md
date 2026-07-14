@@ -59,15 +59,27 @@ src/
     deck.py                     Deck CSV loading
     opponent_pool.py            Self-play opponent pool (samples/holds frozen policy snapshots)
     random_opponent.py          Uniform-random opponent baseline
+  models/                     Actor-critic network, independent of the policy/training wiring
+    backbone.py                  Backbone ABC + MLPBackbone (DeepSets/SetTransformer/TemporalTransformer/Recurrent planned)
+    heads.py                     LinearPolicyHead (flat logits over actions) + ValueHead (scalar critic)
+    actor_critic.py              ActorCritic: shared trunk feeding both heads, tensordict-in/tensordict-out
+    transformer.py                Set-transformer building blocks (placeholder, not yet implemented)
   policies/
     random_masked_policy.py     Uniform random policy over the action mask (stand-in for the future PPO actor)
+    greedy_policy_opponent.py   Greedy opponent baseline built on a saved ActorCritic checkpoint
+    ppo_actor.py                 build_actor_critic / build_ppo_operator: assemble the ActorValueOperator from Hydra config
   training/
     trainer.py                  Trainer: parallel rollout collection via TorchRL's Collector
     base_trainer.py             BaseTrainer interface
+    ppo_trainer.py               PPOTrainer: Trainer subclass running GAE + ClipPPOLoss optimization
     env_factory.py               Builds TransformedEnv instances (deck + opponent + ActionMask) for the collector
   train.py                    Hydra entry point (python -m src.train)
 
-conf/                        Hydra configs (config.yaml + env/, agent/, collector/ groups)
+conf/                        Hydra configs (config.yaml + env/, agent/, model/, train/, collector/ groups)
+  model/
+    default.yaml                Composes one backbone + one head, holds shared dims (embed_dim, value_head)
+    backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
+    head/linear.yaml             Flat logits head (more heads added as separate config files as they land)
 scripts/                     Standalone dev scripts (not part of the training entry point)
   bench_throughput.py          Collection throughput benchmark (naive vs SerialEnv vs ParallelEnv)
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
@@ -76,6 +88,9 @@ docs/                        Design docs (torchrl_environment.md, game.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
 main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
 ```
+
+The **backbone** and **head** are independent Hydra config groups, so any backbone can be paired
+with any head from the CLI or a sweep, e.g. `python -m src.train model/backbone=mlp model/head=linear`.
 
 ## Usage
 
