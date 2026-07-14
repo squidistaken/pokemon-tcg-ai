@@ -15,8 +15,6 @@ from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value import GAE
 
 from src.models.actor_critic import ActorCritic
-from src.models.masked_rpo_categorical import MaskedRPOCategorical
-from src.models.rpo_tanh_normal import RPOTanhNormal
 from src.policies.ppo_actor import build_ppo_operator
 from src.training.loss._helpers import _sum_loss_keys
 from src.training.trainer import Trainer
@@ -41,7 +39,7 @@ class PPOTrainer(Trainer):
     kept for snapshotting into a self-play pool.
 
     This trainer absorbs the feature set of a colleague's ``TorchRLTrainer``
-    (RPO, AMP, ``torch.compile``, ``target_kl`` early stopping, generic loss
+    (AMP, ``torch.compile``, ``target_kl`` early stopping, generic loss
     aggregation, NaN/Inf guarding, LR/entropy annealing, an NCL hook) while
     keeping the friendly hyperparameter constructor. Several of those features
     change training behaviour or were reconstructed from an unseen base class;
@@ -80,7 +78,6 @@ class PPOTrainer(Trainer):
             serial_for_single: bool = True,
             target_kl: float | None = None,
             target_kl_multiplier: float = 1.5,
-            rpo_alpha: float | None = None,
             use_amp: bool = False,
             compile_loss: bool = False,
             compile_policy: bool = False,
@@ -88,7 +85,6 @@ class PPOTrainer(Trainer):
             ent_anneal: bool = False,
             ent_warm_frac: float = 0.5,
             reward_scaling: float = 1.0,
-            is_discrete: bool = True,
             ncl_model: nn.Module | None = None,
     ) -> None:
         """
@@ -115,10 +111,6 @@ class PPOTrainer(Trainer):
             *between* epochs, so a single bad epoch still fully applies.
         :param target_kl_multiplier: Multiplier applied to ``target_kl`` for the
             early-stop threshold.
-        :param rpo_alpha: If set, enables RPO perturbation of the policy
-            distribution during the loss pass. For the discrete action space
-            this uses :class:`~src.models.masked_rpo_categorical.MaskedRPOCategorical`
-            (a **novel, empirically-unvalidated** discrete analogue of RPO).
         :param use_amp: Enable automatic mixed precision for the update step
             (``float16`` + GradScaler on CUDA, ``bfloat16`` elsewhere). Uses the
             modern ``torch.amp`` API (not the deprecated ``torch.cuda.amp``),
@@ -137,9 +129,6 @@ class PPOTrainer(Trainer):
             current stats**: win/draw rates in :meth:`Trainer.train` are computed
             from the reward *sign*, not its magnitude; this would only matter for
             future magnitude logging.
-        :param is_discrete: Whether the action space is discrete. Selects the RPO
-            distribution (discrete ``MaskedRPOCategorical`` vs continuous
-            ``RPOTanhNormal``).
         :param ncl_model: **Guarded stub.** Natural Continual Learning FIM
             estimation / grad clipping is not implemented; passing a non-None
             module raises ``NotImplementedError``. See the NCL note in
@@ -160,18 +149,10 @@ class PPOTrainer(Trainer):
             )
 
         self._actor_critic = actor_critic
-        self._rpo_alpha = rpo_alpha
-        self._is_discrete = is_discrete
-        # RPO uses process-global class flags (mirroring the colleague's design);
-        # pick which distribution class carries the alpha and enabled toggle.
-        self._rpo_dist_cls = MaskedRPOCategorical if is_discrete else RPOTanhNormal
-        use_rpo = rpo_alpha is not None and is_discrete
-        if rpo_alpha is not None:
-            self._rpo_dist_cls.rpo_alpha = rpo_alpha
 
         self._operator = cast(
             ActorValueOperator,
-            build_ppo_operator(actor_critic, action_spec, use_rpo=use_rpo).to(device),
+            build_ppo_operator(actor_critic, action_spec).to(device),
         )
         super().__init__(
             env_factories=env_factories,
@@ -244,7 +225,7 @@ class PPOTrainer(Trainer):
         logger.info(
             "PPOTrainer initialized: device=%s frames_per_batch=%d total_frames=%d "
             "num_epochs=%d sub_batch_size=%d lr=%g gamma=%g lmbda=%g clip_epsilon=%g "
-            "entropy_coeff=%g target_kl=%s rpo_alpha=%s use_amp=%s lr_anneal=%s "
+            "entropy_coeff=%g target_kl=%s use_amp=%s lr_anneal=%s "
             "ent_anneal=%s",
             self._device,
             frames_per_batch,
@@ -257,7 +238,6 @@ class PPOTrainer(Trainer):
             clip_epsilon,
             entropy_coeff,
             target_kl,
-            rpo_alpha,
             use_amp,
             lr_anneal,
             ent_anneal,
@@ -360,74 +340,65 @@ class PPOTrainer(Trainer):
             self._sub_batch_size,
         )
 
-        # Enable RPO perturbation only during the loss pass; the finally block
-        # guarantees the process-global flag is cleared even on exception, so
-        # rollout collection is never perturbed.
-        if self._rpo_alpha is not None:
-            self._rpo_dist_cls.rpo_enabled = True
-        try:
-            for _ in range(self._num_epochs):
-                perm = torch.randperm(batch, device=self._device)
-                data_shuffled = data_flat[perm]
-                epoch_kl = 0.0
-                n_minibatches = 0
+        for _ in range(self._num_epochs):
+            perm = torch.randperm(batch, device=self._device)
+            data_shuffled = data_flat[perm]
+            epoch_kl = 0.0
+            n_minibatches = 0
 
-                for start in range(0, batch, self._sub_batch_size):
-                    mb = data_shuffled[start : start + self._sub_batch_size]
+            for start in range(0, batch, self._sub_batch_size):
+                mb = data_shuffled[start : start + self._sub_batch_size]
 
-                    with self._autocast_ctx:
-                        loss_vals = self._loss_fwd(mb)
-                        total_loss = _sum_loss_keys(loss_vals)
+                with self._autocast_ctx:
+                    loss_vals = self._loss_fwd(mb)
+                    total_loss = _sum_loss_keys(loss_vals)
 
-                    if not torch.isfinite(total_loss):
-                        skipped_minibatches += 1
-                        continue
+                if not torch.isfinite(total_loss):
+                    skipped_minibatches += 1
+                    continue
 
-                    if self._scaler is not None:
-                        self._scaler.scale(total_loss).backward()
-                        self._scaler.unscale_(self._optim)
-                        grad_norm = nn.utils.clip_grad_norm_(self._clip_params, self._max_grad_norm)
-                        self._scaler.step(self._optim)
-                        self._scaler.update()
-                    else:
-                        total_loss.backward()
-                        grad_norm = nn.utils.clip_grad_norm_(self._clip_params, self._max_grad_norm)
-                        self._optim.step()
-                    self._optim.zero_grad(set_to_none=True)
+                if self._scaler is not None:
+                    self._scaler.scale(total_loss).backward()
+                    self._scaler.unscale_(self._optim)
+                    grad_norm = nn.utils.clip_grad_norm_(self._clip_params, self._max_grad_norm)
+                    self._scaler.step(self._optim)
+                    self._scaler.update()
+                else:
+                    total_loss.backward()
+                    grad_norm = nn.utils.clip_grad_norm_(self._clip_params, self._max_grad_norm)
+                    self._optim.step()
+                self._optim.zero_grad(set_to_none=True)
 
-                    # Log only the optimizable ``loss_*`` terms (plus grad-norm
-                    # below). Diagnostics like ``explained_variance`` are
-                    # deliberately excluded: they can be non-finite on tiny/near-
-                    # constant-target batches and would poison a finite-loss check.
-                    for key, value in loss_vals.items():
-                        if (
-                            key.startswith("loss_")
-                            and isinstance(value, torch.Tensor)
-                            and value.numel() == 1
-                        ):
-                            loss_accum[key] = loss_accum.get(key, 0.0) + float(value.detach())
-                    grad_norm_accum += float(grad_norm)
-                    loss_counts += 1
+                # Log only the optimizable ``loss_*`` terms (plus grad-norm
+                # below). Diagnostics like ``explained_variance`` are
+                # deliberately excluded: they can be non-finite on tiny/near-
+                # constant-target batches and would poison a finite-loss check.
+                for key, value in loss_vals.items():
+                    if (
+                        key.startswith("loss_")
+                        and isinstance(value, torch.Tensor)
+                        and value.numel() == 1
+                    ):
+                        loss_accum[key] = loss_accum.get(key, 0.0) + float(value.detach())
+                grad_norm_accum += float(grad_norm)
+                loss_counts += 1
 
-                    if self._target_kl is not None and "kl_approx" in loss_vals:
-                        epoch_kl += float(loss_vals["kl_approx"])
-                        n_minibatches += 1
+                if self._target_kl is not None and "kl_approx" in loss_vals:
+                    epoch_kl += float(loss_vals["kl_approx"])
+                    n_minibatches += 1
 
-                if (
-                    self._target_kl is not None
-                    and n_minibatches > 0
-                    and (epoch_kl / n_minibatches) > self._target_kl_multiplier * self._target_kl
-                ):
-                    logger.info(
-                        "Early-stopping epoch loop: mean kl_approx=%.4f exceeded "
-                        "target_kl_multiplier * target_kl=%.4f",
-                        epoch_kl / n_minibatches,
-                        self._target_kl_multiplier * self._target_kl,
-                    )
-                    break
-        finally:
-            if self._rpo_alpha is not None:
-                self._rpo_dist_cls.rpo_enabled = False
+            if (
+                self._target_kl is not None
+                and n_minibatches > 0
+                and (epoch_kl / n_minibatches) > self._target_kl_multiplier * self._target_kl
+            ):
+                logger.info(
+                    "Early-stopping epoch loop: mean kl_approx=%.4f exceeded "
+                    "target_kl_multiplier * target_kl=%.4f",
+                    epoch_kl / n_minibatches,
+                    self._target_kl_multiplier * self._target_kl,
+                )
+                break
 
         self._updates_done += 1
 

@@ -1,0 +1,17 @@
+# Phase-1 PPO/MLP baseline, pre-wired so it runs with zero CLI overrides:
+#   python -m src.train --config-name=ppo_mlp
+# Equivalent to:
+#   python -m src.train agent=ppo env.encoder=flat
+defaults:
+  - agent: ppo
+  - env: default
+  - collector: default
+  - model: default
+  - train: ppo_selfplay
+  - _self_
+
+env:
+  encoder: flat
+
+seed: 42
+set_seed: false

@@ -8,7 +8,6 @@ from torchrl.envs import SerialEnv
 
 from src.env.opponent_pool import OpponentPool
 from src.env.random_opponent import RandomOpponent
-from src.models.masked_rpo_categorical import MaskedRPOCategorical
 from src.policies.ppo_actor import build_actor_critic
 from src.training.env_factory import make_env_factories
 from tests.conftest import PPOTrainerForTests, flat_env_cfg
@@ -31,7 +30,7 @@ def _make_trainer(actor_critic, action_spec, opponent_factory=None, **kwargs) ->
     :param action_spec: Environment action spec.
     :param opponent_factory: Optional self-play opponent factory.
     :param kwargs: Overrides forwarded to :class:`PPOTrainerForTests` (e.g.
-        ``rpo_alpha``, ``target_kl``, ``use_amp``, annealing flags).
+        ``target_kl``, ``use_amp``, annealing flags).
     :return: A configured PPO trainer with tiny budgets.
     """
     params = {
@@ -116,19 +115,6 @@ def test_ppo_trainer_self_play_pool(model_cfg, flat_obs_spec, action_spec) -> No
     trainer = _make_trainer(actor_critic, action_spec, opponent_factory=make_random_pool)
     stats = trainer.train()
     assert stats["frames"] == 128
-
-
-def test_ppo_trainer_rpo_runs_and_leaves_flag_clear(model_cfg, flat_obs_spec, action_spec) -> None:
-    """
-    RPO training runs NaN-free and the process-global perturbation flag is
-    cleared after the update, so rollout collection is never perturbed.
-    """
-    actor_critic = build_actor_critic(model_cfg, flat_obs_spec, action_spec)
-    trainer = _make_trainer(actor_critic, action_spec, rpo_alpha=0.5)
-    stats = trainer.train()
-    assert stats["frames"] == 128
-    assert all(torch.isfinite(p).all() for p in actor_critic.parameters())
-    assert MaskedRPOCategorical.rpo_enabled is False
 
 
 def test_ncl_model_is_guarded_stub(model_cfg, flat_obs_spec, action_spec) -> None:

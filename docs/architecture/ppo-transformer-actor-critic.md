@@ -152,8 +152,16 @@ grad-clip → `Adam.step()`. Losses / grad-norm are logged in the outer loop.
 
 It absorbs the feature set of a colleague's `TorchRLTrainer` **while keeping the friendly
 hyperparameter constructor** (no separate dependency-injection trainer class, no extra inheritance
-layer). Adopted features: RPO perturbation, AMP (`torch.amp`), `torch.compile` (loss + policy),
+layer). Adopted features: AMP (`torch.amp`), `torch.compile` (loss + policy),
 `target_kl` early stopping, NaN/Inf-guarded minibatches, and LR / entropy annealing.
+
+> **TODO — RPO removed, revisit separately.** An earlier version of this trainer carried an RPO
+> (Robust Policy Optimization) perturbation path (`MaskedRPOCategorical` / `RPOTanhNormal`,
+> `rpo_alpha`). It has been removed: RPO is originally a continuous-control technique, the discrete
+> analogue used here was novel and empirically unvalidated, and it added process-global mutable
+> state (`rpo_enabled` toggled around the loss pass) for a benefit nobody had measured. If RPO (or a
+> validated discrete equivalent) turns out to be worth having, reintroduce it as its own scoped
+> task with a benchmark showing it helps, rather than carrying unvalidated inert code.
 
 **Documented behavioural changes & inferences** (each also flagged inline in code):
 
@@ -162,10 +170,6 @@ layer). Adopted features: RPO perturbation, AMP (`torch.amp`), `torch.compile` (
 - **Permutation minibatching.** `randperm` + contiguous slicing uses the final smaller minibatch;
   the previous `ReplayBuffer` + floor-division path silently dropped up to `sub_batch_size - 1`
   frames per epoch.
-- **RPO is discrete here and unvalidated.** `rpo_alpha` activates `MaskedRPOCategorical` (perturbs
-  logits *before* masking, so illegal actions stay illegal). RPO is a continuous-control technique;
-  its benefit for a masked-discrete action space is unproven. `RPOTanhNormal` is kept wired for a
-  future continuous head but is inert under the current policy.
 - **Anneal schedule inferred.** The `lr_anneal` / `ent_anneal` / `ent_warm_frac` flags come from the
   colleague's file, but the schedule lived in an unseen base class; implemented as the conventional
   linear anneal (LR → 0; entropy held for `ent_warm_frac` of training, then → 0).
