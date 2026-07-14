@@ -85,6 +85,16 @@ def _build_ppo_trainer(cfg: DictConfig) -> PPOTrainer:
         use_parallel_env=cfg.env.parallel,
         mp_start_method=cfg.env.mp_start_method,
         serial_for_single=cfg.env.serial_for_single,
+        target_kl=cfg.agent.get("target_kl"),
+        target_kl_multiplier=cfg.agent.get("target_kl_multiplier", 1.5),
+        rpo_alpha=cfg.agent.get("rpo_alpha"),
+        use_amp=cfg.agent.get("use_amp", False),
+        compile_loss=cfg.agent.get("compile_loss", False),
+        compile_policy=cfg.agent.get("compile_policy", False),
+        lr_anneal=cfg.agent.get("lr_anneal", False),
+        ent_anneal=cfg.agent.get("ent_anneal", False),
+        ent_warm_frac=cfg.agent.get("ent_warm_frac", 0.5),
+        reward_scaling=cfg.agent.get("reward_scaling", 1.0),
     )
 
 

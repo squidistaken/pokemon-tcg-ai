@@ -17,3 +17,29 @@ sub_batch_size: 256
 frames_per_batch: 4096
 # Gradient-norm clipping threshold.
 max_grad_norm: 1.0
+
+# --- Adopted TorchRLTrainer features (all additive; defaults preserve prior behaviour) ---
+# Early-stop the epoch loop once mean approx-KL exceeds
+# target_kl_multiplier * target_kl (null disables; checked between epochs).
+target_kl: null
+target_kl_multiplier: 1.5
+# RPO (Robust Policy Optimization) perturbation alpha (null disables). For the
+# discrete action space this uses MaskedRPOCategorical — a novel, empirically
+# unvalidated analogue of RPO (see the arch doc).
+rpo_alpha: null
+# Automatic mixed precision for the update step (float16+GradScaler on CUDA,
+# bfloat16 elsewhere).
+use_amp: false
+# torch.compile the loss module / collection policy. Default off: compile is
+# slow/fragile on the CPU dev box (CUDA unavailable here).
+compile_loss: false
+compile_policy: false
+# Linearly anneal the learning rate to 0 over training.
+lr_anneal: false
+# Anneal the entropy coefficient: held for ent_warm_frac of training, then
+# linearly decayed to 0. (Schedule shape inferred — see arch doc.)
+ent_anneal: false
+ent_warm_frac: 0.5
+# Reward-scaling divisor for reporting. No effect on the current sign-based
+# win/draw stats; reserved for future magnitude logging.
+reward_scaling: 1.0

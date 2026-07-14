@@ -17,8 +17,8 @@ class Trainer(BaseTrainer):
     Owns the vectorized environment, the collector lifecycle and progress
     statistics. The learning algorithm lives in :meth:`_update`, which is a
     no-op in this base class, so running it directly gives a pure collection
-    loop (e.g. the random-policy baseline). The upcoming PPO trainer
-    could subclass this, passes the actor as ``policy`` and implements
+    loop (e.g. the random-policy baseline). The  PPO trainer
+    subclasses this, passes the actor as ``policy`` and implements
     :meth:`_update` with the advantage/loss/optimizer step.
     """
 
@@ -66,6 +66,7 @@ class Trainer(BaseTrainer):
             frames_per_batch=self._frames_per_batch,
             total_frames=self._total_frames,
             auto_register_policy_transforms=False,
+            **self._collector_kwargs(),
         )
         frames = 0
         episodes = 0
@@ -95,6 +96,21 @@ class Trainer(BaseTrainer):
             "draw_rate": draws / max(episodes, 1),
             "fps": frames / elapsed,
         }
+
+    # Instance method (not static) so subclasses can override with instance
+    # state; the base returns no extra kwargs, leaving collection unchanged.
+    # noinspection PyMethodMayBeStatic
+    def _collector_kwargs(self) -> dict:  # noqa: PLR6301
+        """
+        Extra keyword arguments to pass to the :class:`Collector`.
+
+        Empty in the base class, so the random-collection baseline builds the
+        collector exactly as before. Subclasses override this to enable
+        collector-level features (e.g. PPO sets ``compile_policy``).
+
+        :return: Mapping splatted into the ``Collector(...)`` construction.
+        """
+        return {}
 
     # Deliberately an instance method with an unused `data` argument: this is the
     # no-op base-class hook that subclasses (PPO) override with this exact signature,

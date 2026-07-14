@@ -10,6 +10,7 @@ from torchrl.modules.distributions import MaskedCategorical
 from src.models.actor_critic import ActorCritic
 from src.models.backbone import Backbone
 from src.models.heads import ValueHead
+from src.models.masked_rpo_categorical import MaskedRPOCategorical
 
 HIDDEN_KEY = "hidden"
 OPTION_REPR_KEY = "option_repr"
@@ -100,7 +101,11 @@ def build_actor_critic(
     return ActorCritic(backbone=backbone, policy_head=policy_head, value_head=value_head)
 
 
-def build_ppo_operator(actor_critic: ActorCritic, action_spec: Categorical) -> ActorValueOperator:
+def build_ppo_operator(
+        actor_critic: ActorCritic,
+        action_spec: Categorical,
+        use_rpo: bool = False,
+) -> ActorValueOperator:
     """
     Wrap an :class:`ActorCritic` in a shared-trunk torchrl operator.
 
@@ -112,6 +117,12 @@ def build_ppo_operator(actor_critic: ActorCritic, action_spec: Categorical) -> A
 
     :param actor_critic: Actor-critic whose backbone/heads are wrapped.
     :param action_spec: Environment action spec, forwarded to the actor.
+    :param use_rpo: Use :class:`~src.models.masked_rpo_categorical.MaskedRPOCategorical`
+        (RPO logit perturbation, gated by the trainer) instead of the plain
+        :class:`~torchrl.modules.distributions.MaskedCategorical`. The default
+        (``False``) leaves the collection/loss wiring identical to before; the
+        two distributions behave the same until the trainer flips
+        ``MaskedRPOCategorical.rpo_enabled`` around the loss pass.
     :return: Operator exposing ``get_policy_operator`` / ``get_value_operator``.
     """
     backbone = actor_critic.backbone
@@ -122,12 +133,13 @@ def build_ppo_operator(actor_critic: ActorCritic, action_spec: Categorical) -> A
         else [HIDDEN_KEY]
     )
 
+    distribution_class = MaskedRPOCategorical if use_rpo else MaskedCategorical
     common = TensorDictModule(backbone, in_keys=backbone.in_keys, out_keys=common_out)
     policy = ProbabilisticActor(
         TensorDictModule(actor_critic.policy_head, in_keys=head_in, out_keys=[LOGITS_KEY]),
         in_keys={"logits": LOGITS_KEY, "mask": ACTION_MASK_KEY},
         out_keys=[ACTION_KEY],
-        distribution_class=MaskedCategorical,
+        distribution_class=distribution_class,
         return_log_prob=True,
         spec=action_spec,
     )
@@ -139,6 +151,7 @@ def build_ppo_actor_critic(
         cfg: DictConfig,
         obs_spec: Composite,
         action_spec: Categorical,
+        use_rpo: bool = False,
 ) -> ActorValueOperator:
     """
     Build the PPO shared-trunk actor-critic operator from config and specs.
@@ -151,6 +164,10 @@ def build_ppo_actor_critic(
     :param cfg: Hydra config with a ``model`` section.
     :param obs_spec: Environment observation composite spec.
     :param action_spec: Environment action spec.
+    :param use_rpo: Forwarded to :func:`build_ppo_operator` to select the RPO
+        distribution.
     :return: The assembled :class:`~torchrl.modules.ActorValueOperator`.
     """
-    return build_ppo_operator(build_actor_critic(cfg, obs_spec, action_spec), action_spec)
+    return build_ppo_operator(
+        build_actor_critic(cfg, obs_spec, action_spec), action_spec, use_rpo=use_rpo
+    )

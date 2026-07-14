@@ -37,6 +37,50 @@ class PPOTrainerForTests(PPOTrainer):
         """
         return self._update(data)
 
+    def count_optimizer_steps_for_update(self, data) -> int:
+        """
+        Run one update, counting how many optimizer steps were applied.
+
+        Used to observe ``target_kl`` early stopping (fewer steps than
+        ``num_epochs * minibatches``) without reaching into trainer internals
+        from the test body.
+
+        :param data: Collected batch from a TorchRL collector.
+        :return: Number of ``optimizer.step()`` calls during the update.
+        """
+        calls = 0
+        original_step = self._optim.step
+
+        def counting_step(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return original_step(*args, **kwargs)
+
+        self._optim.step = counting_step
+        try:
+            self._update(data)
+        finally:
+            self._optim.step = original_step
+        return calls
+
+    @property
+    def current_lr_for_test(self) -> float:
+        """
+        Current optimizer learning rate (for annealing assertions).
+
+        :return: LR of the first optimizer parameter group.
+        """
+        return float(self._optim.param_groups[0]["lr"])
+
+    @property
+    def current_entropy_coeff_for_test(self) -> float:
+        """
+        Current loss-module entropy coefficient (for annealing assertions).
+
+        :return: The entropy-bonus weight as a float.
+        """
+        return float(self._loss.entropy_coeff)
+
 
 @pytest.fixture
 def model_cfg() -> DictConfig:

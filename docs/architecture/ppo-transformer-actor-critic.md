@@ -143,13 +143,58 @@ are used is a pure config choice** — no code change to swap them (see
 > [`docs/torchrl/02-modules.md`](../torchrl/02-modules.md) — add a KB entry once verified against
 > the installed version.
 
-### 6. PPO trainer (`src/training/ppo_trainer.py`, integration)
+### 6. PPO trainer (`src/training/ppo_trainer.py`)
 
-Override `Trainer._update(data)` following [`docs/torchrl/05-ppo-recipe.md`](../torchrl/05-ppo-recipe.md):
-`GAE(gamma, lmbda)` → refill `ReplayBuffer(LazyTensorStorage, SamplerWithoutReplacement)` →
-minibatch loop over `ClipPPOLoss` (`loss_objective + loss_critic + loss_entropy`) → grad-clip →
-`Adam.step()`. Recompute GAE each epoch (value estimates change). Log mean reward / losses /
-episode length to W&B in the outer loop.
+`PPOTrainer` overrides `Trainer._update(data)`: `GAE(gamma, lmbda)` **once per collected batch** →
+shuffled-permutation minibatch loop over `ClipPPOLoss` (`loss_objective + loss_critic +
+loss_entropy`, summed generically by the `loss_` key prefix so `DiscoPPOLoss` drops in unchanged) →
+grad-clip → `Adam.step()`. Losses / grad-norm are logged in the outer loop.
+
+It absorbs the feature set of a colleague's `TorchRLTrainer` **while keeping the friendly
+hyperparameter constructor** (no separate dependency-injection trainer class, no extra inheritance
+layer). Adopted features: RPO perturbation, AMP (`torch.amp`), `torch.compile` (loss + policy),
+`target_kl` early stopping, NaN/Inf-guarded minibatches, and LR / entropy annealing.
+
+**Documented behavioural changes & inferences** (each also flagged inline in code):
+
+- **GAE once per batch, not per epoch.** The previous implementation recomputed GAE every epoch;
+  the adopted loop computes it once. A real learning-dynamics change (the more common PPO form).
+- **Permutation minibatching.** `randperm` + contiguous slicing uses the final smaller minibatch;
+  the previous `ReplayBuffer` + floor-division path silently dropped up to `sub_batch_size - 1`
+  frames per epoch.
+- **RPO is discrete here and unvalidated.** `rpo_alpha` activates `MaskedRPOCategorical` (perturbs
+  logits *before* masking, so illegal actions stay illegal). RPO is a continuous-control technique;
+  its benefit for a masked-discrete action space is unproven. `RPOTanhNormal` is kept wired for a
+  future continuous head but is inert under the current policy.
+- **Anneal schedule inferred.** The `lr_anneal` / `ent_anneal` / `ent_warm_frac` flags come from the
+  colleague's file, but the schedule lived in an unseen base class; implemented as the conventional
+  linear anneal (LR → 0; entropy held for `ent_warm_frac` of training, then → 0).
+- **`reward_scaling`** is accepted for parity but has no effect on the current sign-based win/draw
+  stats; reserved for future magnitude logging.
+- **AMP uses `torch.amp`** (not the deprecated `torch.cuda.amp`), required by the test suite's
+  `filterwarnings=error`. `compile_*` defaults **off** (slow/fragile on the CPU dev box).
+
+#### NCL (`ncl_model`) — guarded stub, deferred
+
+The colleague's trainer exposed an `ncl_model` parameter for **Natural Continual Learning**: a
+Fisher-Information-Matrix estimate that anchors the weights important to previously-learned tasks
+and projects/clips gradients to resist **catastrophic forgetting**. It is carried here as a
+**guarded stub** — the parameter is accepted for interface parity, but passing a non-None module
+raises `NotImplementedError`.
+
+*Why it is not merely academic here:* this project is building toward **self-play against a shifting
+`OpponentPool`**, a non-stationary / quasi-continual problem, and the
+[self-play exploitability review](self-play-exploitability-review.md) names catastrophic forgetting
+/ cycling (best-responding only to the latest opponent) as the central risk. FIM weight-anchoring is
+a *candidate* mitigation for that forgetting.
+
+*Why it is nonetheless deferred:* (1) the canonical fix in this project's chosen literature
+(ByteRL/OSFP) addresses forgetting at the **opponent-sampling** level — a win-rate-gated diverse
+mixture — not via optimizer-side weight regularization; (2) self-play is **not yet wired into the
+training entrypoint** (review finding #1), so the forgetting problem cannot manifest today; (3)
+EWC/NCL-style FIM regularization in deep RL is finicky (noisy/expensive FIM, can suppress
+plasticity), and there is no in-repo spec for the intended contract. Revisit only once self-play is
+live and forgetting is empirically observed — trying OSFP-style opponent gating first.
 
 ### 7. Self-play (reuse existing scaffold)
 

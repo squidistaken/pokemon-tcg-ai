@@ -49,6 +49,10 @@ filterwarnings = [
     # time (migration to WeightSyncScheme); we never construct these classes
     # ourselves, so this is upstream noise, not something actionable here.
     "ignore:Creating .*WeightUpdater which inherits from WeightUpdaterBase is deprecated.*:DeprecationWarning",
+    # Environmental: on boxes with an old NVIDIA driver, torch's CUDA
+    # availability probe (reached incidentally by tensordict.to(cpu)) emits this
+    # once. We run CPU-only here; it says nothing about the code under test.
+    "ignore:CUDA initialization:UserWarning",
 ]
 
 [tool.ruff]
