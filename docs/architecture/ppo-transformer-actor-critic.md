@@ -36,8 +36,8 @@ Per-step TensorDict keys the policy consumes/produces (`src/env/tcg_env.py`):
 | Key | Spec | Notes |
 |-----|------|-------|
 | `observation` | `Unbounded((36,), float32)` | Placeholder hand-crafted summary; **not** a modeling decision. Replaced by the tokenized obs below. |
-| `action_mask` | `Binary(n=97, bool)` | Legal option indices `0..95` plus index `96` = synthetic **stop**. |
-| `action` (out) | `Categorical(97, int64)` | Action `i < 96` picks option `i`; `96` = stop. |
+| `action_mask` | `Binary(n=(max_options + 1), bool)` | Legal option indices `0..95` plus index `96` = synthetic **stop**. |
+| `action` (out) | `Categorical((max_options + 1), int64)` | Action `i < 96` picks option `i`; `96` = stop. |
 | `reward` | `Unbounded((1,), float32)` | Terminal-only: +1 win / −1 loss / draw. |
 | `done`/`terminated`/`truncated` | `Binary(1, bool)` | `truncated` on the engine-selection safety cap. |
 
@@ -46,34 +46,8 @@ The opponent plays inside `_step`, so it is a standard **single-agent** env. Mul
 policy only ever sees one masked `Categorical` per step.
 
 ## Module structure
+See README.md for the module structure.
 
-```
-src/
-  models/
-    card_embedding.py   # nn.Embedding over card IDs, OOV-tolerant (engine IDs can grow mid-competition)
-    deck_encoder.py     # DeckContextEncoder: pool the piloted 60-card deck list -> deck-conditioning vector/tokens
-    backbone.py         # Backbone ABC + MLP / DeepSets / SetTransformer / TemporalTransformer (+ Recurrent(LSTM), backburner)
-    heads.py            # PointerPolicyHead (logits over options+stop), ValueHead (scalar)
-    actor_critic.py     # base class assembling trunk + 2 heads; builder for ActorValueOperator
-    transformer.py      # set-transformer building blocks (or fold into backbone.py)
-  policies/
-    ppo_actor.py        # build_ppo_actor_critic(cfg, obs_spec, action_spec) factory
-  env/
-    observation_encoder.py  # INTEGRATION: add TokenizedObservationEncoder (extends FlatObservationEncoder)
-  training/
-    ppo_trainer.py      # INTEGRATION: PPOTrainer overriding Trainer._update with GAE+ClipPPOLoss+optim loop
-conf/
-  config.yaml           # top-level defaults list (agent + model + train)
-  agent/{dummy,ppo}.yaml            # PPO hyperparams (clip_epsilon, lr, gamma, lmbda, epochs, ...)
-  model/
-    default.yaml                    # composes one backbone + one head + shared dims (card/deck embedding)
-    backbone/{mlp,deepsets,set_transformer,temporal_transformer,recurrent}.yaml
-    head/{linear,pointer,autoregressive}.yaml
-  train/ppo_selfplay.yaml           # snapshot interval, pool size/weights, deck list / deck sampling
-```
-
-The **backbone** and **head** are independent Hydra config groups, so any backbone can be paired
-with any head from the CLI or a sweep (see [Configuration](#configuration-hydra)).
 
 ## Architecture
 
@@ -81,7 +55,7 @@ with any head from the CLI or a sweep (see [Configuration](#configuration-hydra)
 
 `class ActorCritic(nn.Module)` = one **shared backbone** + a **policy head** + a **value head**.
 Forward once through the backbone, fan out to both heads (weight sharing → sample efficiency,
-matches standard PPO / ByteRL). Outputs `logits` (shape `(..., 97)`) and `state_value` (`(..., 1)`).
+matches standard PPO / ByteRL). Outputs `logits` (shape `(..., (max_options + 1))`) and `state_value` (`(..., 1)`).
 
 ### 2. Pluggable backbone (`src/models/backbone.py`)
 
@@ -113,14 +87,14 @@ TorchRL assembly are identical across all implementations, so backbones are swap
 
 - **`PointerPolicyHead`** — pointer/attention-style logits: score each `option_repr` token against
   a query derived from `state_repr` (dot-product or per-option MLP) → one logit per option, plus a
-  learned **stop** logit → `(..., 97)`. Naturally handles the variable-length option set;
+  learned **stop** logit → `(..., (max_options + 1))`. Naturally handles the variable-length option set;
   `MaskedCategorical` + `action_mask` zeroes illegal indices. (The MLP baseline uses a plain
-  `Linear(97)` head instead.)
+  `Linear((max_options + 1))` head instead.)
 - **`ValueHead`** — MLP on `state_repr` → scalar `state_value`.
 - *Alternative (not Phase 1):* the Hearthstone ByteRL work factors the action **auto-regressively**
   as `(type, target)` with a per-step mask instead of one flat softmax. The `Backbone`/`ActorCritic`
   interface is head-agnostic, so a factored head can replace the pointer head later without touching
-  the trunk — worth it if the flat 97-way head plateaus.
+  the trunk — worth it if the flat (max_options + 1)-way head plateaus.
 
 ### 4. Card embedding + deck conditioning (`card_embedding.py`, `deck_encoder.py`)
 
@@ -186,6 +160,10 @@ processes). The opponent wraps the same network as a greedy `Observation -> list
 running the same tokenizer + masked-argmax + multi-select decode loop (this mirrors the Kaggle
 `main.py` inference path). Track **exploitability**, not just win rate — the literature shows
 self-play agents are brittle off-distribution.
+
+> For a detailed gap analysis of the *current* self-play implementation against this design (and
+> against the mechanisms behind ByteRL's OSFP), see
+> [`docs/architecture/self-play-exploitability-review.md`](self-play-exploitability-review.md).
 
 ### 8. Tokenized observation encoder (`src/env/observation_encoder.py`, integration)
 
@@ -280,7 +258,7 @@ num_layers: 1
 **Heads** — `conf/model/head/*.yaml`:
 
 ```yaml
-# linear.yaml — flat 97-way logits; the MLP baseline's head
+# linear.yaml — flat (max_options + 1)-way logits; the MLP baseline's head
 _target_: src.models.heads.LinearPolicyHead
 
 # pointer.yaml — score per-option tokens against a state query (needs option_repr)
@@ -341,24 +319,3 @@ Backbones are ordered by literature maturity + integration cost.
   needing recurrent-aware collection (`InitTracker`, sequence batching). `RecurrentBackbone` (LSTM)
   is backburner — a fallback only if the temporal transformer underperforms or proves too costly.
 
-## Prerequisites & integration notes
-
-- **Merge/rebase** the model branch onto `torchrlenv` (or vice-versa) so
-  `TCGEnv`/`Trainer`/`OpponentPool`/tests are present. This is where `observation_encoder.py` and
-  `ppo_trainer.py` edits land.
-- No repo-root `CLAUDE.md` currently exists, though [`docs/torchrl/README.md`](../torchrl/README.md)
-  references one for the "consult the TorchRL KB first" routine — worth creating.
-- `ActorValueOperator` shared-trunk pattern missing from the TorchRL KB — add once verified.
-
-## Verification
-
-- **Unit** — forward a dummy tokenized TensorDict through `ActorCritic`: assert `logits` shape
-  `(..., 97)` and `state_value` `(..., 1)`; assert `MaskedCategorical` gives ~0 probability to
-  illegal indices; assert gradients reach both heads *and* the shared trunk.
-- **Contract** — `check_env_specs(make_env())` (existing), then swap `RandomMaskedPolicy` → the PPO
-  actor in a short `env.rollout`; reuse the existing `test_actions_respect_mask` assertion
-  (`masks.gather(-1, actions).all()`).
-- **Integration smoke** — short PPO run (a few hundred frames) on the MLP baseline via `SerialEnv`:
-  assert no NaNs, that loss/return move, and that W&B logs appear.
-- **Self-play smoke** — run one snapshot cycle; assert a snapshot opponent loads the checkpoint from
-  disk and plays.
