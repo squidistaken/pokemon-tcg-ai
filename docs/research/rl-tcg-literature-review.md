@@ -3,7 +3,7 @@
 > **Scope.** Reinforcement-learning approaches for two-player TCGs/CCGs with deck
 > construction and hidden information (Legends of Code and Magic, Hearthstone, Magic: The
 > Gathering, and related). Priority lens: **attention / transformer** architectures for
-> state and action representation; secondary coverage of deep RL, self-play, PPO/DQN, MCTS
+> state and action representation; secondary coverage of deep RL, self-play, focus on PPO.
 > hybrids, large/variable discrete action spaces, imperfect information, and action masking.
 >
 > **Method & confidence.** Produced by the deep-research harness: 5 search angles → 18
@@ -24,12 +24,14 @@
   reproduce is on LOCM. Pokémon TCG has **essentially no published RL literature** — you are
   working in a gap.
 - **The recurring recipe is PPO + invalid action masking + self-play**, with the game framed
-  as an MDP and a **flat MLP** as the network. This is the well-trodden baseline (Vieira et
+  as a (Partially Observable) MDP and a **flat MLP** as the network. This is the well-trodden baseline (Vieira et
   al.; the LOCM competition entries).
 - **The strongest agents (ByteDance's "ByteRL")** go beyond naive self-play: an **end-to-end
   policy over both deck-building and battle**, trained with **Optimistic Smooth Fictitious
   Play** to approximate a Nash equilibrium. It won the COG2022 competition and beat a top-10
-  Hearthstone streamer — but was later shown to be **exploitable** in restricted deck pools.
+  Hearthstone streamer — but was later shown to be **exploitable, more so the more the deck
+  pool is restricted**. See "Synthesis: SOTA Mechanisms and Gaps" below for the mechanism
+  behind both results.
 - **Attention/transformers are still emergent here, not established.** The clearest
   transformer result is **DTCard** (Decision Transformer). Two other attention-relevant
   papers (transformer-as-policy for variable action spaces; action-representation for
@@ -40,6 +42,104 @@
 - **Two structural challenges dominate every paper:** (1) **large + variable discrete action
   spaces** (handled via action masking and/or auto-regressive/entity-factored actions), and
   (2) **deck-building as a separate combinatorial problem** from in-game play.
+
+---
+
+## Synthesis: SOTA Mechanisms and Gaps
+
+> Added in a follow-up pass, sourced by reading the primary texts of #2 (ByteRL/LOCM) and
+> #4 (exploitability) directly — quotes and the Table 1 numbers below are taken straight from
+> those papers, not re-run through the original 3-vote adversarial pipeline. Treat as
+> verified-by-direct-read.
+
+### Why ByteRL wins: two specific mechanisms, not "self-play in general"
+
+**1. OSFP trains against a mixture of historical policies, not just the latest checkpoint.**
+Vanilla fictitious play (and naive self-play, #6/#8) has a known failure mode: the sequence
+of trained policies cycles around the Nash equilibrium instead of converging to it, because
+each iteration only best-responds to the single most recent opponent — the policy chases
+whatever it just lost to and forgets older counters. ByteRL's OSFP fixes this by mixing in an
+*optimistic* prediction of the opponent's next move (the current payoff term is counted twice
+in the update), which gives **last-iterate convergence** — the actual final policy converges,
+not just a running average of past ones. The opponent pool itself is also curated, not
+exhaustive: new checkpoints are added only when they clear a win-rate threshold **ξ = 0.7**
+against the existing pool.
+> *(paraphrased from the OSFP formulation and pool-update rule in the paper's Section on
+> algorithm design)*
+
+**2. The end-to-end network lets battle reward backpropagate into deck-building.**
+ByteRL uses **one function approximator for both stages**: `π_θ(·|s) = δ·π_θ_CB(·|s) +
+(1−δ)·π_θ_BT(·|s)`, where δ just indicates which stage you're in. The deck-card embeddings are
+**held fixed during battle** but **updated recursively during drafting** — so the gradient
+from a battle *outcome* flows back through those same embeddings and directly shapes which
+cards get drafted. This is the concrete difference from the split-phase approach in #6-8:
+there, drafting is optimized against a proxy (synergy/curve heuristics baked into the reward
+or hand-crafted state), not against what the battle policy can actually convert into wins.
+
+**Net:** ByteRL isn't strong because "self-play" is strong — plain self-play is exactly what
+#6/#8 already do, with modest results. It's strong because it (a) fixes self-play's
+cycling/forgetting problem with a curated historical-opponent mixture, and (b) removes the
+draft/battle objective mismatch by sharing gradients between them.
+
+### Why self-play — even OSFP — is still exploitable
+
+Paper #4's attack is a straightforward **approximate best-response search**, and the authors
+frame it that way explicitly: they behavior-clone ~125k self-play matches between two ByteRL
+instances, then **PPO-fine-tune that cloned policy against a single frozen ByteRL checkpoint**.
+No white-box access is needed — this is exactly the computation a self-play *training* loop
+never performs against itself (it only ever sees opponents drawn from its own curated pool,
+never a specialist built purely to beat one frozen snapshot of it).
+
+The paper's Table 1 makes the mechanism visible as a trend, not just a single number:
+
+| Deck pool size | Exploiter win rate vs. ByteRL |
+|---|---|
+| 32 | 0.904 |
+| 64 | 0.822 |
+| 128 | 0.803 |
+| 256 | 0.801 |
+| 512 | 0.734 |
+| 1024 | 0.542 (≈ the ~0.624 behavior-cloned baseline — the exploit has essentially stopped working) |
+
+Win rate falls **monotonically** as the deck pool widens, and by 1024 decks the fine-tuned
+exploiter has barely improved over just imitating ByteRL. The mechanism: OSFP's last-iterate
+convergence is a guarantee about the Nash equilibrium **of the pool it actually trained
+against** — a finite, threshold-curated sample of the strategy space. A restricted deck pool
+at *evaluation* time shrinks the effective game toward exactly the sub-region a best-response
+search can specialize against; a broad pool spreads the exploiter's training signal thin
+enough that no single specialization pays off. Exploitability isn't a fixed property of the
+agent — it's a property of *how narrow the game is relative to what self-play covered*.
+
+### "Fierce competition" framing
+
+Treat opponents as adversarial optimizers, not a fixed benchmark distribution: assume they
+will run the same behavior-clone-then-fine-tune search against whatever checkpoint you ship,
+targeted at whatever matchup distribution they actually face (which — like most competitive
+metas — is narrower than "every legal deck"). Under that framing, **self-play win-rate against
+your own checkpoint pool is not a robustness metric** — it only tells you the policy hasn't
+been caught yet, not that it can't be. ByteRL's authors never tested this on themselves; a
+third party had to. The transferable lesson is to build that adversarial test in-house rather
+than discover it from an opponent.
+
+### Sharper next steps this motivates
+
+- **Population self-play, not single-latest-opponent self-play.** Mirror OSFP concretely:
+  keep a *pool* of past checkpoints and sample opponents from it (weighted by recency/win-rate),
+  and gate additions to the pool by a win-rate threshold rather than adding every checkpoint —
+  cheaper than full fictitious play but captures the part of OSFP that actually fixes
+  self-play's cycling problem.
+- **Build an exploitability eval into the training loop, not just a win-rate metric.**
+  Periodically freeze the current policy and spend a fixed budget behavior-cloning + PPO
+  fine-tuning a challenger against it, mirroring #4's method exactly. Track *how large a deck
+  pool the challenger needs before it stops beating the frozen policy* — Table 1 shows this
+  scales smoothly, so it's a usable robustness signal, not just a pass/fail check.
+- **Report win-rate together with the matchup breadth it was measured over.** Given the
+  monotonic relationship above, a win-rate number without stating how narrow the eval's deck/
+  matchup distribution was is close to meaningless — a policy that looks dominant on a narrow
+  slice may be near coin-flip on the full one.
+- **If deck-building ever joins this project, prefer sharing gradients between draft and
+  battle** (ByteRL's mechanism) over optimizing a separate deck heuristic — the split-phase
+  papers (#6-8) are the cautionary baseline for what's left on the table otherwise.
 
 ---
 
@@ -59,6 +159,24 @@
   > *"DTCard leverages the self-attention mechanism of Decision Transformers over a fixed
   > episodic context window to capture long-range temporal dependencies and implicitly track
   > hidden information without requiring recurrent memory or explicit search trees."*
+- **Caveat — why this likely doesn't transfer to this project:** DTCard's verified claim is
+  about *architecture* (attention captures long-range/hidden-info structure), not about the
+  *training paradigm* — and the two are separable. A Decision Transformer is **offline
+  imitation, not RL**: it's trained with a plain supervised action-prediction loss over a
+  fixed trajectory dataset (no interaction, no rollouts, no exploration), conditioned on a
+  target return-to-go, with **no value function, no critic, and no Bellman backup**. That's a
+  mismatch with this project's self-play PPO loop (see TL;DR above), which depends on
+  generating new experience and improving the policy *beyond* whatever the current
+  policy/opponent pool already produces. Concretely, a DT **cannot stitch together good
+  segments from bad trajectories** — it only reproduces behavior already present in the
+  dataset, filtered by return — so it has no analogue to self-play's iterative improvement
+  step. It's also **fragile under stochastic dynamics**: a high return-to-go in the data may
+  just reflect luck (an opponent misplay, a favorable draw) rather than a good decision, and
+  the model has no mechanism to separate skill from variance the way a bootstrapped value
+  function does. Net: DTCard is evidence that attention *can* represent hidden-info
+  card-game state, but adopting the Decision Transformer recipe wholesale would mean giving
+  up the self-play improvement loop this project is built around — read it as "attention
+  works here," not "use a Decision Transformer."
 
 ## 2. Mastering Strategy Card Game (Legends of Code and Magic) via End-to-End Policy and Optimistic Smooth Fictitious Play  ("ByteRL")
 - **Authors/year:** Xi, Zhang, Xiao et al. (ByteDance), 2023 · **Link:** <https://arxiv.org/abs/2303.04096>
@@ -232,9 +350,13 @@ comes from LOCM, Hearthstone, and MTG. Concrete carry-overs:
    Transformers / Deep Sets** as the fix for card-order invariance; #Part-2 #1 shows transformer
    policies for variable action spaces. A **permutation-equivariant (set-attention) encoder over
    your board/hand entities** is the well-motivated architecture to try.
-4. **Self-play reaches SOTA but is exploitable.** ByteRL (#2, #3) + its exploitation (#4) argue
-   for **fictitious-play / population-based self-play** over naive self-play, and for measuring
-   exploitability.
+4. **Self-play reaches SOTA but is exploitable, and the degree is measurable, not assumed.**
+   See "Synthesis: SOTA Mechanisms and Gaps" above for the specifics: OSFP's opponent-pool
+   mixture + threshold gating is what naive self-play (#6, #8) lacks, and exploitability
+   against a frozen checkpoint scales smoothly with how narrow the eval's matchup distribution
+   is (#4, Table 1: 0.904 win rate at 32 decks down to 0.542 at 1024). Build a
+   behavior-clone-then-fine-tune challenger into the eval loop rather than trusting a single
+   self-play win-rate number.
 5. **Card representation generalization matters.** #9's generalised embeddings (numeric + text +
    image + meta) predicting choices for **unseen cards** is the template for encoding a large,
    evolving Pokémon card pool.
