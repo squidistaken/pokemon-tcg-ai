@@ -5,6 +5,9 @@ deck1: decks/example.csv
 # Padded size of the option space (stop action excluded); must exceed the
 # largest option list the engine can offer, or options get truncated.
 max_options: 96
+# Observation encoder: "structured" (default, card-aware tokens) or "flat"
+# (the 36-dim vector the Phase-1 PPO/MLP baseline is built against).
+encoder: structured
 # Number of environment instances to run, each with its own battle handle.
 num_workers: 16
 # Collect with a multiprocess ParallelEnv (true) or a single-process SerialEnv (false).

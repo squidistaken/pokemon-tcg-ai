@@ -241,6 +241,28 @@ class PPOTrainer(Trainer):
             self._autocast_ctx = contextlib.nullcontext()
             self._scaler = None
 
+        logger.info(
+            "PPOTrainer initialized: device=%s frames_per_batch=%d total_frames=%d "
+            "num_epochs=%d sub_batch_size=%d lr=%g gamma=%g lmbda=%g clip_epsilon=%g "
+            "entropy_coeff=%g target_kl=%s rpo_alpha=%s use_amp=%s lr_anneal=%s "
+            "ent_anneal=%s",
+            self._device,
+            frames_per_batch,
+            total_frames,
+            num_epochs,
+            self._sub_batch_size,
+            lr,
+            gamma,
+            lmbda,
+            clip_epsilon,
+            entropy_coeff,
+            target_kl,
+            rpo_alpha,
+            use_amp,
+            lr_anneal,
+            ent_anneal,
+        )
+
     @property
     def actor_critic(self) -> ActorCritic:
         """
@@ -297,6 +319,14 @@ class PPOTrainer(Trainer):
                 decay = (progress - self._ent_warm_frac) / (1.0 - self._ent_warm_frac)
                 coeff = self._initial_entropy_coeff * (1.0 - decay)
             self._set_entropy_coeff(coeff)
+        logger.debug(
+            "Annealing step %d/%d (progress=%.3f): lr=%s entropy_coeff=%s",
+            self._updates_done,
+            self._total_updates,
+            progress,
+            self._optim.param_groups[0]["lr"] if self._lr_anneal else "unchanged",
+            coeff if self._ent_anneal else "unchanged",
+        )
 
     def _update(self, data: TensorDict) -> dict[str, float] | None:
         """
@@ -321,6 +351,14 @@ class PPOTrainer(Trainer):
         grad_norm_accum = 0.0
         loss_counts = 0
         skipped_minibatches = 0
+
+        logger.debug(
+            "Update %d starting: batch=%d num_epochs=%d sub_batch_size=%d",
+            self._updates_done + 1,
+            batch,
+            self._num_epochs,
+            self._sub_batch_size,
+        )
 
         # Enable RPO perturbation only during the loss pass; the finally block
         # guarantees the process-global flag is cleared even on exception, so
@@ -380,6 +418,12 @@ class PPOTrainer(Trainer):
                     and n_minibatches > 0
                     and (epoch_kl / n_minibatches) > self._target_kl_multiplier * self._target_kl
                 ):
+                    logger.info(
+                        "Early-stopping epoch loop: mean kl_approx=%.4f exceeded "
+                        "target_kl_multiplier * target_kl=%.4f",
+                        epoch_kl / n_minibatches,
+                        self._target_kl_multiplier * self._target_kl,
+                    )
                     break
         finally:
             if self._rpo_alpha is not None:
@@ -396,7 +440,9 @@ class PPOTrainer(Trainer):
                 loss_counts,
             )
         if loss_counts == 0:
+            logger.warning("Update %d produced no applied minibatches; skipping.", self._updates_done)
             return None
         result = {key: value / loss_counts for key, value in loss_accum.items()}
         result["grad_norm"] = grad_norm_accum / loss_counts
+        logger.debug("Update %d finished: %s", self._updates_done, result)
         return result
