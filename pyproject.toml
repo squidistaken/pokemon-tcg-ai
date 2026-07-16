@@ -13,12 +13,14 @@ dependencies = [
     "pandas>=3.0.3",
     "plotly>=6.9.0",
     "pytest>=9.1.1",
+    "python-dotenv>=1.2.2",
     "seaborn>=0.13.2",
     "tensordict>=0.13.0",
     "torch>=2.13.0",
     "torchrl>=0.13.2",
     "torchvision>=0.28.0",
     "tqdm>=4.68.4",
+    "ty>=0.0.60",
     "wandb>=0.28.0",
 ]
 

@@ -73,13 +73,20 @@ src/
     base_trainer.py             BaseTrainer interface
     ppo_trainer.py               PPOTrainer: Trainer subclass running GAE + ClipPPOLoss optimization
     env_factory.py               Builds TransformedEnv instances (deck + opponent + ActionMask) for the collector
+    callbacks/                  Metric sinks; the trainer emits, these decide where it goes
+      base.py                     TrainingCallback hooks + CallbackList (fan-out, isolates failures)
+      wandb_callback.py           WeightsAndBiases: the only module that imports wandb
   train.py                    Hydra entry point (python -m src.train)
 
-conf/                        Hydra configs (config.yaml + env/, agent/, model/, train/, collector/ groups)
+conf/                        Hydra configs (config.yaml + env/, agent/, model/, train/, collector/, logging/ groups)
   model/
     default.yaml                Composes one backbone + one head, holds shared dims (embed_dim, value_head)
     backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
     head/linear.yaml             Flat logits head (more heads added as separate config files as they land)
+  logging/
+    wandb.yaml                  Default: Weights & Biases run (project/entity/group/tags/mode)
+    none.yaml                    Console/Hydra log lines only; for throwaway runs
+.env.example                 Template for the untracked .env holding secrets (WANDB_API_KEY)
 scripts/                     Standalone dev scripts (not part of the training entry point)
   bench_throughput.py          Collection throughput benchmark (naive vs SerialEnv vs ParallelEnv)
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/

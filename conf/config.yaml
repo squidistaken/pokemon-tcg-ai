@@ -1,12 +1,14 @@
 # Hydra docs: https://hydra.cc/docs/intro/
 # Random baseline (default):  python -m src.train
 # PPO/MLP baseline:           python -m src.train agent=ppo
+# No W&B run:     python -m src.train logging=none
 defaults:
   - agent: dummy
   - env: default
   - collector: default
   - model: default
   - train: ppo_selfplay
+  - logging: wandb
   - _self_
 
 seed: 42
