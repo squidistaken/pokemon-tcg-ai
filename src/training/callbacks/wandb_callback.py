@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal, cast, get_args
+from typing import Any, Literal, cast, get_args
+
+from wandb.sdk.wandb_run import Run
 
 from src.training.callbacks.base import TrainingCallback
-
-if TYPE_CHECKING:
-    from wandb.sdk.wandb_run import Run
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +62,6 @@ class WeightsAndBiases(TrainingCallback):
         self._group = group
         self._job_type = job_type
         self._tags = list(tags) if tags is not None else None
-        # Annotated so the narrowing in _resolve_mode keeps the Literal wandb wants.
         self._mode: WandbMode = cast(WandbMode, mode)
         self._notes = notes
         self._run: Run | None = None
