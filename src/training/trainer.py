@@ -53,7 +53,7 @@ class Trainer(BaseTrainer):
         :param mp_start_method: Multiprocessing start method for ParallelEnv workers.
         :param serial_for_single: Fall back to a single-process env when there is
             only one worker, instead of paying ParallelEnv's process overhead.
-        :param callbacks: Observers notified of run start, every batch and run
+        :param callbacks: Observers notified of run start, every rollout and run
             end. None attaches nothing, leaving console logging as the only sink.
         :param run_config: Opaque run metadata (in practice the resolved Hydra
             config) forwarded verbatim to ``on_train_start``; never read here.
@@ -70,7 +70,7 @@ class Trainer(BaseTrainer):
 
     def train(self) -> dict[str, float]:
         """
-        Run collection until ``total_frames``, updating after every batch.
+        Run collection until ``total_frames``, updating after every rollout.
 
         :return: Aggregate statistics: frames, episodes, win/draw rate and fps.
         """
@@ -95,6 +95,7 @@ class Trainer(BaseTrainer):
         try:
             with tqdm(total=self._total_frames, unit="frame") as progress_bar:
                 for data in collector:
+                    self._callbacks.on_rollout_start(frames)
                     assert isinstance(data, TensorDict)
                     batch_frames = data.numel()
                     frames += batch_frames
@@ -110,7 +111,7 @@ class Trainer(BaseTrainer):
                     progress_bar.update(batch_frames)
                     self._log_progress(progress_bar, episodes, wins, losses)
                     self._log_metrics(metrics)
-                    self._callbacks.on_batch_end(frames, metrics)
+                    self._callbacks.on_rollout_end(frames, metrics)
         finally:
             collector.shutdown()
             summary = self._metrics(frames, episodes, wins, draws, time.time() - start_time)

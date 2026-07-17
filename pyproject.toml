@@ -20,28 +20,27 @@ dependencies = [
     "torchrl>=0.13.2",
     "torchvision>=0.28.0",
     "tqdm>=4.68.4",
-    "ty>=0.0.60",
     "wandb>=0.28.0",
 ]
 
 [dependency-groups]
 dev = [
-    "pyright>=1.1.411",
     "ruff>=0.15.21",
+    "ty>=0.0.60",
 ]
 
-[tool.pyright]
+[tool.ty.src]
 # cg/ is vendored engine API code and is deliberately not checked or modified.
 include = ["src", "tests", "scripts", "main.py"]
-typeCheckingMode = "basic"
+
+[tool.ty.rules]
 # tensordict ships no py.typed and types TensorDict.__getitem__ as a broad union
-# (Self | Tensor | ... | Any), so pyright flags valid nested-key indexing like
-# obs["opp", "discard_mask"] against Tensor's overloads. These three rules are
+# (Self | Tensor | ... | Any), so ty flags valid nested-key indexing like
+# obs["opp", "discard_mask"] against Tensor's overloads. These rules are
 # disabled to silence that false-positive class; Optional-access and the other
 # basic checks stay on.
-reportArgumentType = "none"
-reportCallIssue = "none"
-reportIndexIssue = "none"
+invalid-argument-type = "ignore"  # reportArgumentType and reportIndexIssue
+call-non-callable = "ignore"      # reportCallIssue
 
 [tool.pytest.ini_options]
 filterwarnings = [

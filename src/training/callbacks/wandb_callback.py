@@ -139,7 +139,15 @@ class WeightsAndBiases(TrainingCallback):
             mode,
         )
 
-    def on_batch_end(self, step: int, metrics: Mapping[str, float]) -> None:
+    def on_rollout_start(self, step: int) -> None:
+        """
+        Trigger on rollout start; W&B logs a training point at :meth:`on_rollout_end`,
+        so there is nothing to record when a rollout begins.
+
+        :param step: Total frames collected before this rollout; unused.
+        """
+
+    def on_rollout_end(self, step: int, metrics: Mapping[str, float]) -> None:
         """
         Log one training point, x-axed by collected frames.
 

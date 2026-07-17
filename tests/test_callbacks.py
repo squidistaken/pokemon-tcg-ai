@@ -1,3 +1,4 @@
+import inspect
 import logging
 import sys
 from collections.abc import Mapping
@@ -41,14 +42,22 @@ class RecordingCallback(TrainingCallback):
         """
         self.events.append((self.name, "start", dict(run_config)))
 
-    def on_batch_end(self, step: int, metrics: Mapping[str, float]) -> None:
+    def on_rollout_start(self, step: int) -> None:
         """
-        Record a batch.
+        Record a rollout start.
+
+        :param step: Total frames collected before this rollout.
+        """
+        self.events.append((self.name, "rollout_start", step))
+
+    def on_rollout_end(self, step: int, metrics: Mapping[str, float]) -> None:
+        """
+        Record a rollout.
 
         :param step: Total frames collected so far.
         :param metrics: Metrics at ``step``.
         """
-        self.events.append((self.name, "batch", step, dict(metrics)))
+        self.events.append((self.name, "rollout_end", step, dict(metrics)))
 
     def on_eval_end(self, step: int, metrics: Mapping[str, float]) -> None:
         """
@@ -82,13 +91,30 @@ class ExplodingCallback(TrainingCallback):
         raise RuntimeError("backend down: on_train_start")
 
     @override
-    def on_batch_end(self, step: int, metrics: Mapping[str, float]) -> None:
+    def on_rollout_start(self, step: int) -> None:
+        """
+        :param step: Ignored.
+        :raises RuntimeError: Always.
+        """
+        raise RuntimeError("backend down: on_rollout_start")
+
+    @override
+    def on_rollout_end(self, step: int, metrics: Mapping[str, float]) -> None:
         """
         :param step: Ignored.
         :param metrics: Ignored.
         :raises RuntimeError: Always.
         """
-        raise RuntimeError("backend down: on_batch_end")
+        raise RuntimeError("backend down: on_rollout_end")
+
+    @override
+    def on_eval_end(self, step: int, metrics: Mapping[str, float]) -> None:
+        """
+        :param step: Ignored.
+        :param metrics: Ignored.
+        :raises RuntimeError: Always.
+        """
+        raise RuntimeError("backend down: on_eval_end")
 
     @override
     def on_train_end(self, summary: Mapping[str, float]) -> None:
@@ -234,15 +260,12 @@ def make_trainer(callbacks: list[TrainingCallback], **kwargs: Any) -> Trainer:
     )
 
 
-def test_base_callback_hooks_are_noops() -> None:
+def test_base_callback_is_abstract() -> None:
     """
-    The base class is usable as-is, so subclasses may override a subset.
+    The interface is abstract: every hook must be implemented, so a callback
+    that omits one cannot be instantiated.
     """
-    callback = TrainingCallback()
-    callback.on_train_start({"seed": 0})
-    callback.on_batch_end(0, {"win_rate": 0.0})
-    callback.on_eval_end(0, {"win_rate": 0.0})
-    callback.on_train_end({"frames": 0})
+    assert inspect.isabstract(TrainingCallback)
 
 
 def test_callback_list_fans_out_to_every_member_in_order() -> None:
@@ -253,15 +276,18 @@ def test_callback_list_fans_out_to_every_member_in_order() -> None:
     callbacks = CallbackList([RecordingCallback("first", events), RecordingCallback("second", events)])
 
     callbacks.on_train_start({"seed": 1})
-    callbacks.on_batch_end(10, {"win_rate": 0.5})
+    callbacks.on_rollout_start(0)
+    callbacks.on_rollout_end(10, {"win_rate": 0.5})
     callbacks.on_eval_end(10, {"win_rate": 0.7})
     callbacks.on_train_end({"frames": 10})
 
     assert [(name, hook) for name, hook, *_ in events] == [
         ("first", "start"),
         ("second", "start"),
-        ("first", "batch"),
-        ("second", "batch"),
+        ("first", "rollout_start"),
+        ("second", "rollout_start"),
+        ("first", "rollout_end"),
+        ("second", "rollout_end"),
         ("first", "eval"),
         ("second", "eval"),
         ("first", "end"),
@@ -280,13 +306,13 @@ def test_callback_list_isolates_a_failing_member(caplog: pytest.LogCaptureFixtur
 
     with caplog.at_level(logging.ERROR):
         callbacks.on_train_start({"seed": 2})
-        callbacks.on_batch_end(5, {"win_rate": 1.0})
+        callbacks.on_rollout_end(5, {"win_rate": 1.0})
         callbacks.on_train_end({"frames": 5})
 
-    assert [hook for _, hook, *_ in healthy.events] == ["start", "batch", "end"]
-    assert ("healthy", "batch", 5, {"win_rate": 1.0}) in healthy.events
+    assert [hook for _, hook, *_ in healthy.events] == ["start", "rollout_end", "end"]
+    assert ("healthy", "rollout_end", 5, {"win_rate": 1.0}) in healthy.events
     assert "ExplodingCallback" in caplog.text
-    assert "backend down: on_batch_end" in caplog.text
+    assert "backend down: on_rollout_end" in caplog.text
 
 
 def test_trainer_notifies_callbacks_across_the_run() -> None:
@@ -301,13 +327,18 @@ def test_trainer_notifies_callbacks_across_the_run() -> None:
     hooks = [hook for _, hook, *_ in recorder.events]
     assert hooks[0] == "start"
     assert hooks[-1] == "end"
-    assert hooks.count("batch") == 2
+    assert hooks.count("rollout_end") == 2
 
     assert recorder.events[0][2] == {"seed": 0, "agent": {"name": "dummy"}}
 
-    batches = [event for event in recorder.events if event[1] == "batch"]
-    assert [step for _, _, step, _ in batches] == [64, 128]
-    for _, _, step, metrics in batches:
+    # Each rollout is bracketed: it starts at the frames collected so far and
+    # ends once its own frames are added.
+    rollout_starts = [event for event in recorder.events if event[1] == "rollout_start"]
+    assert [step for _, _, step in rollout_starts] == [0, 64]
+
+    rollouts = [event for event in recorder.events if event[1] == "rollout_end"]
+    assert [step for _, _, step, _ in rollouts] == [64, 128]
+    for _, _, step, metrics in rollouts:
         assert set(metrics) >= CORE_METRICS
         assert metrics["frames"] == step
         assert 0.0 <= metrics["win_rate"] <= 1.0
@@ -368,7 +399,7 @@ def test_wandb_callback_records_config_and_namespaces_metrics(
     assert module.init_kwargs["mode"] == "offline"
     assert module.init_kwargs["config"] == {"seed": 7}
 
-    callback.on_batch_end(64, {"win_rate": 0.5, "loss_objective": -0.2})
+    callback.on_rollout_end(64, {"win_rate": 0.5, "loss_objective": -0.2})
     assert run.logged[-1] == ({"train/win_rate": 0.5, "train/loss_objective": -0.2}, 64)
 
     callback.on_eval_end(64, {"win_rate": 0.9})
@@ -450,7 +481,8 @@ def test_wandb_callback_hooks_are_inert_without_a_run() -> None:
     instead of raising on every batch.
     """
     callback = WeightsAndBiases(project="pokemon-tcg-ai")
-    callback.on_batch_end(1, {"win_rate": 1.0})
+    callback.on_rollout_start(1)
+    callback.on_rollout_end(1, {"win_rate": 1.0})
     callback.on_eval_end(1, {"win_rate": 1.0})
     callback.on_train_end({"frames": 1})
 
@@ -471,5 +503,5 @@ def test_wandb_init_failure_does_not_break_training(monkeypatch: pytest.MonkeyPa
 
     callbacks = CallbackList([WeightsAndBiases(project="pokemon-tcg-ai")])
     callbacks.on_train_start({"seed": 0})
-    callbacks.on_batch_end(64, {"win_rate": 0.5})
+    callbacks.on_rollout_end(64, {"win_rate": 0.5})
     callbacks.on_train_end({"frames": 64})

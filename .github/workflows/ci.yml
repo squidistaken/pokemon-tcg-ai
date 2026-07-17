@@ -77,8 +77,8 @@ jobs:
         run: uv run ruff check .
 
       - name: Type-check
-        # Run Pyright to catch static typing errors.
-        run: uv run pyright
+        # Run ty to catch static typing errors.
+        run: uv run ty check
 
       - name: Run tests
         # Run the pytest suite and fail on test failures or unignored warnings.
