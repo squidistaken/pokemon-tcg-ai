@@ -26,7 +26,9 @@ def main(cfg: DictConfig) -> None:
 
     :param cfg: Hydra configuration object, composed from conf/config.yaml.
     """
-    print(OmegaConf.to_yaml(cfg))
+    # Resolved, so the callbacks block shows the W&B values it interpolates
+    # from cfg.wandb rather than the raw ${wandb.*} references.
+    print(OmegaConf.to_yaml(cfg, resolve=True))
     if cfg.set_seed:
         random.seed(cfg.seed)
         torch.manual_seed(cfg.seed)
