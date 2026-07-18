@@ -1,16 +1,23 @@
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, cast
 
 from tensordict import TensorDict
-from torch import nn
+from torch import Tensor, nn
 from torchrl.collectors import Collector
 from torchrl.envs import EnvBase, ParallelEnv, SerialEnv
 from tqdm import tqdm
 
 from src.training.base_trainer import BaseTrainer
+from src.training.callbacks import CallbackList, TrainingCallback
 
 logger = logging.getLogger(__name__)
+
+# Metrics every iteration reports.
+# Anything else in a metrics mapping comes from the algorithm's _update and is
+# formatted generically.
+_CORE_METRICS = ("frames", "episodes", "win_rate", "draw_rate", "fps")
 
 
 class Trainer(BaseTrainer):
@@ -34,6 +41,8 @@ class Trainer(BaseTrainer):
             use_parallel_env: bool = True,
             mp_start_method: str = "fork",
             serial_for_single: bool = True,
+            callbacks: Iterable[TrainingCallback] | None = None,
+            run_config: Mapping[str, Any] | None = None,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -44,6 +53,10 @@ class Trainer(BaseTrainer):
         :param mp_start_method: Multiprocessing start method for ParallelEnv workers.
         :param serial_for_single: Fall back to a single-process env when there is
             only one worker, instead of paying ParallelEnv's process overhead.
+        :param callbacks: Observers notified of run start, every rollout and run
+            end. None attaches nothing, leaving console logging as the only sink.
+        :param run_config: Opaque run metadata (in practice the resolved Hydra
+            config) forwarded verbatim to ``on_train_start``; never read here.
         """
         self._env_factories = env_factories
         self._policy = policy
@@ -52,10 +65,12 @@ class Trainer(BaseTrainer):
         self._use_parallel_env = use_parallel_env
         self._mp_start_method = mp_start_method
         self._serial_for_single = serial_for_single
+        self._callbacks = CallbackList(callbacks or ())
+        self._run_config = run_config if run_config is not None else {}
 
     def train(self) -> dict[str, float]:
         """
-        Run collection until ``total_frames``, updating after every batch.
+        Run collection until ``total_frames``, updating after every rollout.
 
         :return: Aggregate statistics: frames, episodes, win/draw rate and fps.
         """
@@ -76,30 +91,64 @@ class Trainer(BaseTrainer):
         wins = 0
         draws = 0
         start_time = time.time()
+        self._callbacks.on_train_start(self._run_config)
         try:
             with tqdm(total=self._total_frames, unit="frame") as progress_bar:
                 for data in collector:
+                    self._callbacks.on_rollout_start(frames)
+                    assert isinstance(data, TensorDict)
                     batch_frames = data.numel()
                     frames += batch_frames
-                    done = data["next", "done"].reshape(-1)
-                    final_rewards = data["next", "reward"].reshape(-1)[done]
+                    done = cast(Tensor, data["next", "done"]).reshape(-1)
+                    final_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[done]
                     episodes += int(done.sum())
                     wins += int((final_rewards > 0).sum())
                     draws += int((final_rewards == 0).sum())
                     losses = self._update(data)
+                    metrics = self._metrics(
+                        frames, episodes, wins, draws, time.time() - start_time, losses
+                    )
                     progress_bar.update(batch_frames)
-                    self._log_progress(progress_bar, episodes, wins, losses)
-                    self._log_metrics(frames, episodes, wins, draws, time.time() - start_time, losses)
+                    self._log_progress(progress_bar, metrics)
+                    self._callbacks.on_rollout_end(frames, metrics)
         finally:
             collector.shutdown()
-        elapsed = time.time() - start_time
-        return {
+            summary = self._metrics(frames, episodes, wins, draws, time.time() - start_time)
+            self._callbacks.on_train_end(summary)
+        return summary
+
+    @staticmethod
+    def _metrics(
+            frames: int,
+            episodes: int,
+            wins: int,
+            draws: int,
+            elapsed: float,
+            losses: dict[str, float] | None = None,
+    ) -> dict[str, float]:
+        """
+        Build the metrics mapping for the run so far.
+
+        :param frames: Total frames collected so far.
+        :param episodes: Total episodes finished so far.
+        :param wins: Total wins so far.
+        :param draws: Total draws so far.
+        :param elapsed: Wall-clock seconds since training started.
+        :param losses: Loss values from the last update, merged in if present.
+        :return: Metrics keyed by :data:`_CORE_METRICS` plus any loss keys.
+        """
+        metrics: dict[str, float] = {
             "frames": frames,
             "episodes": episodes,
             "win_rate": wins / max(episodes, 1),
             "draw_rate": draws / max(episodes, 1),
-            "fps": frames / elapsed,
+            # Guarded because a fast first batch can land inside the clock's
+            # resolution, making elapsed 0.
+            "fps": frames / max(elapsed, 1e-9),
         }
+        if losses:
+            metrics.update(losses)
+        return metrics
 
     # Instance method (not static) so subclasses can override with instance
     # state; the base returns no extra kwargs, leaving collection unchanged.
@@ -177,59 +226,30 @@ class Trainer(BaseTrainer):
                          create_env_fn=self._env_factories)
 
     @staticmethod
-    def _log_progress(
-            progress_bar: tqdm,
-            episodes: int,
-            wins: int,
-            losses: dict[str, float] | None,
-    ) -> None:
+    def _log_progress(progress_bar: tqdm, metrics: Mapping[str, float]) -> None:
         """
-        Update the progress bar's postfix with episode and loss statistics.
+        Show the running training metrics in the progress bar's postfix.
+
+        All routine per-iteration data lives in the bar itself rather than in
+        printed lines, so the terminal shows a single live bar instead of one
+        metrics line per iteration. Frames and fps are omitted from the
+        postfix because the bar's counter and rate already display them.
+        Keys outside :data:`_CORE_METRICS` (the loss terms) are appended
+        generically, so a new loss term needs no change here.
 
         :param progress_bar: tqdm bar tracking collected frames.
-        :param episodes: Total episodes finished so far.
-        :param wins: Total wins so far.
-        :param losses: Loss values from the last update, if any.
+        :param metrics: Mapping from :meth:`_metrics`.
         """
-        postfix = {"episodes": episodes, "win_rate": f"{wins / max(episodes, 1):.3f}"}
-        if losses:
-            postfix.update({key: f"{value:.4f}" for key, value in losses.items()})
+        postfix: dict[str, str] = {
+            "episodes": str(int(metrics["episodes"])),
+            "win_rate": f"{metrics['win_rate']:.3f}",
+            "draw_rate": f"{metrics['draw_rate']:.3f}",
+        }
+        postfix.update(
+            {
+                key: f"{value:.4f}"
+                for key, value in metrics.items()
+                if key not in _CORE_METRICS
+            }
+        )
         progress_bar.set_postfix(postfix)
-
-    def _log_metrics(
-            self,
-            frames: int,
-            episodes: int,
-            wins: int,
-            draws: int,
-            elapsed: float,
-            losses: dict[str, float] | None,
-    ) -> None:
-        """
-        Emit one timestamped log line per collector iteration with the
-        running training metrics.
-
-        The tqdm progress bar (:meth:`_log_progress`) only overwrites a
-        single terminal line in place, so it leaves no persistent record of
-        metrics over time; this writes through the standard ``logging``
-        module instead (picked up by Hydra's default handler, so every line
-        carries a timestamp), independent of whether a progress bar is
-        attached to a terminal.
-
-        :param frames: Total frames collected so far.
-        :param episodes: Total episodes finished so far.
-        :param wins: Total wins so far.
-        :param draws: Total draws so far.
-        :param elapsed: Wall-clock seconds since training started.
-        :param losses: Loss values from the last update, if any.
-        """
-        parts = [
-            f"frames={frames}/{self._total_frames}",
-            f"episodes={episodes}",
-            f"win_rate={wins / max(episodes, 1):.3f}",
-            f"draw_rate={draws / max(episodes, 1):.3f}",
-            f"fps={frames / elapsed:.1f}",
-        ]
-        if losses:
-            parts.extend(f"{key}={value:.4f}" for key, value in losses.items())
-        logger.info(" ".join(parts))

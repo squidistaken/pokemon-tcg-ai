@@ -1,0 +1,4 @@
+# @package _global_
+# No metric backends: the trainer's progress bar is the only sink.
+# python -m src.train callbacks=none
+callbacks: []
