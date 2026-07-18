@@ -1,0 +1,9 @@
+# Hydra docs: https://hydra.cc/docs/intro/
+defaults:
+  - agent: dummy
+  - env: default
+  - collector: default
+  - _self_
+
+seed: 42
+set_seed: false
