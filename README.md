@@ -78,7 +78,7 @@ src/
       wandb_callback.py           WeightsAndBiases: the only module that imports wandb
   train.py                    Hydra entry point (python -m src.train)
 
-conf/                        Hydra configs (config.yaml + env/, agent/, model/, train/, collector/, logging/ groups)
+conf/                        Hydra configs (config.yaml + env/, agent/, model/, train/, collector/, callbacks/ groups)
   model/
     default.yaml                Composes one backbone + one head, holds shared dims (embed_dim, value_head)
     backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
@@ -108,6 +108,14 @@ python -m src.train
 Config is managed by [Hydra](https://hydra.cc/) (`conf/config.yaml`); override any field on the command line, e.g.:
 ```bash
 python -m src.train collector.total_frames=100000 env.num_workers=4 set_seed=true
+```
+
+Metric backends are selected by the `callbacks` group, and the W&B run is
+labelled from the top-level `wandb` block:
+```bash
+python -m src.train agent=ppo wandb.group=ablation-lr wandb.tags=[baseline]
+python -m src.train agent=ppo wandb.mode=offline    # record now, `wandb sync` later
+python -m src.train agent=ppo callbacks=none        # no metric backend at all
 ```
 
 ## CI
