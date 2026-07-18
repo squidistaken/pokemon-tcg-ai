@@ -1,3 +1,0 @@
-# No metric backends: the trainer's console/Hydra log lines are the only sink.
-# python -m src.train logging=none
-callbacks: []

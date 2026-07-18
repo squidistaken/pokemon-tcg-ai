@@ -59,12 +59,12 @@ def main(cfg: DictConfig) -> None:
 
 def _build_callbacks(cfg: DictConfig) -> list[TrainingCallback]:
     """
-    Instantiate the metric backends selected by the ``logging`` config group.
+    Instantiate the metric backends selected by the ``callbacks`` config group.
 
-    :param cfg: Hydra configuration with a ``logging.callbacks`` list.
-    :return: Instantiated callbacks; empty for ``logging=none``.
+    :param cfg: Hydra configuration with a top-level ``callbacks`` list.
+    :return: Instantiated callbacks; empty for ``callbacks=none``.
     """
-    return [hydra.utils.instantiate(callback) for callback in cfg.logging.callbacks]
+    return [hydra.utils.instantiate(callback) for callback in cfg.callbacks]
 
 
 def _run_config(cfg: DictConfig) -> dict[str, Any]:
