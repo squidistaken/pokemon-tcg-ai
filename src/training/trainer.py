@@ -109,8 +109,7 @@ class Trainer(BaseTrainer):
                         frames, episodes, wins, draws, time.time() - start_time, losses
                     )
                     progress_bar.update(batch_frames)
-                    self._log_progress(progress_bar, episodes, wins, losses)
-                    self._log_metrics(metrics)
+                    self._log_progress(progress_bar, metrics)
                     self._callbacks.on_rollout_end(frames, metrics)
         finally:
             collector.shutdown()
@@ -227,51 +226,30 @@ class Trainer(BaseTrainer):
                          create_env_fn=self._env_factories)
 
     @staticmethod
-    def _log_progress(
-            progress_bar: tqdm,
-            episodes: int,
-            wins: int,
-            losses: dict[str, float] | None,
-    ) -> None:
+    def _log_progress(progress_bar: tqdm, metrics: Mapping[str, float]) -> None:
         """
-        Update the progress bar's postfix with episode and loss statistics.
+        Show the running training metrics in the progress bar's postfix.
+
+        All routine per-iteration data lives in the bar itself rather than in
+        printed lines, so the terminal shows a single live bar instead of one
+        metrics line per iteration. Frames and fps are omitted from the
+        postfix because the bar's counter and rate already display them.
+        Keys outside :data:`_CORE_METRICS` (the loss terms) are appended
+        generically, so a new loss term needs no change here.
 
         :param progress_bar: tqdm bar tracking collected frames.
-        :param episodes: Total episodes finished so far.
-        :param wins: Total wins so far.
-        :param losses: Loss values from the last update, if any.
+        :param metrics: Mapping from :meth:`_metrics`.
         """
-        postfix = {"episodes": episodes, "win_rate": f"{wins / max(episodes, 1):.3f}"}
-        if losses:
-            postfix.update({key: f"{value:.4f}" for key, value in losses.items()})
-        progress_bar.set_postfix(postfix)
-
-    def _log_metrics(self, metrics: Mapping[str, float]) -> None:
-        """
-        Emit one timestamped log line per collector iteration with the
-        running training metrics.
-
-        The tqdm progress bar (:meth:`_log_progress`) only overwrites a
-        single terminal line in place, so it leaves no persistent record of
-        metrics over time; this writes through the standard ``logging``
-        module instead (picked up by Hydra's default handler, so every line
-        carries a timestamp), independent of whether a progress bar is
-        attached to a terminal.
-
-        :param metrics: Mapping from :meth:`_metrics`. Keys outside
-            :data:`_CORE_METRICS` are appended generically, so a new loss
-            term needs no change here.
-        """
-        parts = [
-            f"frames={int(metrics['frames'])}/{self._total_frames}",
-            f"episodes={int(metrics['episodes'])}",
-            f"win_rate={metrics['win_rate']:.3f}",
-            f"draw_rate={metrics['draw_rate']:.3f}",
-            f"fps={metrics['fps']:.1f}",
-        ]
-        parts.extend(
-            f"{key}={value:.4f}"
-            for key, value in metrics.items()
-            if key not in _CORE_METRICS
+        postfix: dict[str, str] = {
+            "episodes": str(int(metrics["episodes"])),
+            "win_rate": f"{metrics['win_rate']:.3f}",
+            "draw_rate": f"{metrics['draw_rate']:.3f}",
+        }
+        postfix.update(
+            {
+                key: f"{value:.4f}"
+                for key, value in metrics.items()
+                if key not in _CORE_METRICS
+            }
         )
-        logger.info(" ".join(parts))
+        progress_bar.set_postfix(postfix)
