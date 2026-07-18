@@ -267,12 +267,20 @@ class PPOTrainer(Trainer):
 
     def _collector_kwargs(self) -> dict:
         """
-        Enable ``torch.compile`` on the collection policy via the Collector.
+        Collector kwargs for the (possibly GPU-resident) policy.
 
-        :return: ``{"compile_policy": True}`` when compilation is requested,
-            else an empty mapping (leaving collection unchanged).
+        ``policy_device`` tells the Collector to cast rollout data onto the
+        policy's device for the forward pass and back for env stepping;
+        without it, data collected by the CPU-only env workers is fed
+        straight into a CUDA policy and errors on the first mismatched
+        buffer. The env stays on CPU regardless (``env_device`` unset).
+
+        :return: Mapping splatted into the ``Collector(...)`` construction.
         """
-        return {"compile_policy": True} if self._compile_policy else {}
+        kwargs: dict = {"policy_device": self._device}
+        if self._compile_policy:
+            kwargs["compile_policy"] = True
+        return kwargs
 
     def _set_entropy_coeff(self, value: float) -> None:
         """

@@ -3,7 +3,7 @@ from torchrl.envs import TransformedEnv
 from torchrl.envs.transforms import ActionMask
 
 from src.env.deck import load_deck
-from src.env.flat_observation_encoder import FlatObservationEncoder
+from src.env.structured_observation_encoder import StructuredObservationEncoder
 from src.env.tcg_env import TCGEnv
 from src.policies.greedy_policy_opponent import (
     GreedyPolicyOpponent,
@@ -12,7 +12,7 @@ from src.policies.greedy_policy_opponent import (
 )
 from src.policies.ppo_actor import build_actor_critic
 from src.policies.random_masked_policy import RandomMaskedPolicy
-from tests.conftest import DECK_PATH, N_ACTIONS
+from tests.conftest import DECK_PATH, MAX_OPTIONS, N_ACTIONS
 
 DECK = load_deck(DECK_PATH)
 
@@ -73,7 +73,13 @@ def _run_episode(opponent) -> torch.Tensor:
     :return: The rollout's ``("next", "done")`` flags.
     """
     env = TransformedEnv(
-        TCGEnv(DECK, DECK, seed=3, opponent=opponent, encoder=FlatObservationEncoder()),
+        TCGEnv(
+            DECK,
+            DECK,
+            seed=3,
+            opponent=opponent,
+            encoder=StructuredObservationEncoder(max_options=MAX_OPTIONS),
+        ),
         ActionMask(),
     )
     try:
@@ -83,28 +89,32 @@ def _run_episode(opponent) -> torch.Tensor:
     return rollout["next", "done"]
 
 
-def test_greedy_opponent_plays_legal_episode(model_cfg, flat_obs_spec, action_spec) -> None:
+def test_greedy_opponent_plays_legal_episode(structured_model_cfg, structured_obs_spec, action_spec) -> None:
     """
     A greedy opponent plays a full episode without the engine rejecting a
     selection (an illegal pick would raise inside the engine).
     """
-    actor_critic = build_actor_critic(model_cfg, flat_obs_spec, action_spec)
-    opponent = GreedyPolicyOpponent(actor_critic, FlatObservationEncoder())
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    opponent = GreedyPolicyOpponent(actor_critic, StructuredObservationEncoder(max_options=MAX_OPTIONS))
     done = _run_episode(opponent)
     assert bool(done.any())
 
 
-def test_snapshot_roundtrip_plays(tmp_path, model_cfg, flat_obs_spec, action_spec) -> None:
+def test_snapshot_roundtrip_plays(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
     """
     A snapshot saved to disk reloads into a greedy opponent that plays legally
     (the documented self-play checkpoint cycle).
     """
-    actor_critic = build_actor_critic(model_cfg, flat_obs_spec, action_spec)
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
     checkpoint = save_actor_critic(actor_critic, tmp_path / "snapshot.pt")
     assert checkpoint.exists()
 
     opponent = load_greedy_opponent(
-        checkpoint, model_cfg, flat_obs_spec, action_spec, FlatObservationEncoder()
+        checkpoint,
+        structured_model_cfg,
+        structured_obs_spec,
+        action_spec,
+        StructuredObservationEncoder(max_options=MAX_OPTIONS),
     )
     done = _run_episode(opponent)
     assert bool(done.any())

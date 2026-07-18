@@ -54,13 +54,13 @@ src/
     observation_encoder.py      ObservationEncoder: abstract base class for observation encoders
     structured_observation_encoder.py  Structured observation contract: card-ID/option/board tensors (docs/torchrl_environment.md)
     option_reference_resolver.py      OptionReferenceResolver: stateless option -> (card, target, attack) ID lookups
-    flat_observation_encoder.py       Legacy flat-vector encoder (deprecated, testing only)
     card_database.py            Static card-ID-indexed lookup tables (for model-side embeddings)
     deck.py                     Deck CSV loading
     opponent_pool.py            Self-play opponent pool (samples/holds frozen policy snapshots)
     random_opponent.py          Uniform-random opponent baseline
   models/                     Actor-critic network, independent of the policy/training wiring
     backbone.py                  Backbone ABC + MLPBackbone (DeepSets/SetTransformer/TemporalTransformer/Recurrent planned)
+    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, pools zones for the MLP
     heads.py                     LinearPolicyHead (flat logits over actions) + ValueHead (scalar critic)
     actor_critic.py              ActorCritic: shared trunk feeding both heads, tensordict-in/tensordict-out
     transformer.py                Set-transformer building blocks (placeholder, not yet implemented)

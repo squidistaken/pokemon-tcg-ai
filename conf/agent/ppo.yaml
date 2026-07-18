@@ -17,6 +17,9 @@ sub_batch_size: 256
 frames_per_batch: 4096
 # Gradient-norm clipping threshold.
 max_grad_norm: 1.0
+# Device for the model and the PPO update ("cpu" or "cuda"). Environments
+# always step on CPU; the collector moves data to this device for updates.
+device: cpu
 
 # --- Adopted TorchRLTrainer features (all additive; defaults preserve prior behaviour) ---
 # Early-stop the epoch loop once mean approx-KL exceeds

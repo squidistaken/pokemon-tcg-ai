@@ -122,6 +122,7 @@ def _build_ppo_trainer(
         num_epochs=cfg.agent.num_epochs,
         sub_batch_size=cfg.agent.sub_batch_size,
         max_grad_norm=cfg.agent.max_grad_norm,
+        device=cfg.agent.get("device", "cpu"),
         use_parallel_env=cfg.env.parallel,
         mp_start_method=cfg.env.mp_start_method,
         serial_for_single=cfg.env.serial_for_single,
