@@ -67,6 +67,16 @@ class StructuredObsAdapter(nn.Module):
     #: count, then the 12-type provided-energy histogram.
     POKEMON_FEATURE_SCALES = (400.0, 400.0, 1.0, 1.0, 1.0, 2.0, 16.0, 2.0) + (4.0,) * 12
 
+    #: Declared types for the ``register_buffer`` attributes set in
+    #: :meth:`__init__`; ``nn.Module``'s dynamic ``__getattr__`` otherwise
+    #: types them as ``Tensor | Module``, which drops shape/operator info.
+    _card_static: torch.Tensor
+    _attack_static: torch.Tensor
+    _select_category_offsets: torch.Tensor
+    _option_category_offsets: torch.Tensor
+    _global_scales: torch.Tensor
+    _pokemon_feature_scales: torch.Tensor
+
     def __init__(
             self,
             obs_spec: Composite,
@@ -193,8 +203,12 @@ class StructuredObsAdapter(nn.Module):
             row_width = 4 * self._card_repr_dim + expected + 1
             return rows * row_width
         if name in ("my", "opp", "select_deck", "looking"):
+            if not isinstance(spec, Composite):
+                raise ValueError(f"Zone group '{name}' must be a composite of ids/mask leaves.")
             pairs: list[tuple[str, str]] = []
             for leaf_name in spec.keys():
+                if not isinstance(leaf_name, str):
+                    continue
                 if leaf_name == "ids" or leaf_name.endswith("_ids"):
                     mask_name = "mask" if leaf_name == "ids" else leaf_name[: -len("_ids")] + "_mask"
                     if mask_name not in spec.keys():
@@ -226,6 +240,7 @@ class StructuredObsAdapter(nn.Module):
         parts: list[torch.Tensor] = []
         for name, value in zip(self._group_names, inputs):
             if name == "globals":
+                assert isinstance(value, torch.Tensor), "globals is a leaf field, never a group."
                 parts.append(value / self._global_scales)
             elif name == "select_cats":
                 parts.append(self._embed_categories(value, self._select_category_offsets))
