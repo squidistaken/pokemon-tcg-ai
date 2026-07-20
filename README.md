@@ -82,7 +82,7 @@ src/
       wandb_callback.py           WeightsAndBiases: the only module that imports wandb
   train.py                    Hydra entry point (python -m src.train)
 
-conf/                        Hydra configs (config.yaml + env/, agent/, model/, train/, collector/, callbacks/ groups)
+conf/                        Hydra configs (config.yaml + env/, agent/, model/, train/, collector/, callbacks/, experiment/ groups)
   model/
     default.yaml                Composes one backbone + one head, holds shared dims (embed_dim, value_head)
     backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
@@ -124,6 +124,13 @@ labelled from the top-level `wandb` block:
 python -m src.train agent=ppo wandb.group=ablation-lr wandb.tags=[baseline]
 python -m src.train agent=ppo wandb.mode=offline    # record now, `wandb sync` later
 python -m src.train agent=ppo callbacks=none        # no metric backend at all
+```
+
+For a quick smoke test of the whole loop there is a debug experiment: PPO
+self-play at 512 frames on a single in-process env, a small model, no metric
+backend and DEBUG logging, finishing in a few seconds:
+```bash
+python -m src.train +experiment=debug
 ```
 
 ### Self-play

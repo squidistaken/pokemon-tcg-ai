@@ -1,12 +1,20 @@
 name: ppo
 # PPO surrogate clipping range.
 clip_epsilon: 0.2
+# Add the entropy term to the loss, rewarding higher-entropy policies as a
+# regularizer against collapsing onto a single action. With this false the term
+# is dropped and entropy_coeff (and ent_anneal below) do nothing.
+entropy_bonus: true
 # Entropy-bonus weight.
 entropy_coeff: 0.01
 # Discount factor for GAE.
 gamma: 0.99
 # GAE trace-decay factor.
 lmbda: 0.95
+# Standardize advantages (zero mean, unit std) over each collected batch. The
+# standard PPO formulation; keeps the surrogate's scale independent of the
+# reward magnitude.
+average_gae: true
 # Adam learning rate.
 lr: 3.0e-4
 # Optimization epochs over each collected batch.

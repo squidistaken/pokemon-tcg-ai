@@ -41,23 +41,11 @@ class PPOTrainer(Trainer):
     both heads. The wrapped :class:`~src.models.actor_critic.ActorCritic` is
     kept for snapshotting into a self-play pool.
 
-    This trainer absorbs the feature set of a colleague's ``TorchRLTrainer``
-    (AMP, ``torch.compile``, ``target_kl`` early stopping, generic loss
-    aggregation, NaN/Inf guarding, LR/entropy annealing) while
-    keeping the friendly hyperparameter constructor. Several of those features
-    change training behaviour or were reconstructed from an unseen base class;
-    each such point is flagged inline and in
-    ``docs/architecture/ppo-transformer-actor-critic.md``.
-
-    Notable behavioural differences from the previous implementation:
-
-    * **GAE is computed once per collected batch** (before the epoch loop),
+    * GAE is computed once per collected batch (before the epoch loop),
       not re-estimated every epoch as before. This is the more common PPO
       formulation but is a real learning-dynamics change.
-    * **Minibatching uses a shuffled permutation with contiguous slicing**, so
-      the final (smaller) minibatch is used; the previous
-      ``ReplayBuffer``/floor-division path silently dropped up to
-      ``sub_batch_size - 1`` frames each epoch.
+    * Minibatching uses a shuffled permutation with contiguous slicing, so
+      the final (smaller) minibatch is used;
     """
 
     def __init__(
@@ -68,9 +56,11 @@ class PPOTrainer(Trainer):
             frames_per_batch: int,
             total_frames: int,
             clip_epsilon: float = 0.2,
+            entropy_bonus: bool = True,
             entropy_coeff: float = 0.01,
             gamma: float = 0.99,
             lmbda: float = 0.95,
+            average_gae: bool = True,
             lr: float = 3.0e-4,
             num_epochs: int = 4,
             sub_batch_size: int = 256,
@@ -101,9 +91,18 @@ class PPOTrainer(Trainer):
         :param frames_per_batch: Frames collected per collector iteration.
         :param total_frames: Total frames to collect over the run.
         :param clip_epsilon: PPO surrogate clipping range.
+        :param entropy_bonus: Add the entropy term to the loss, rewarding
+            higher-entropy policies as a regularizer against premature collapse
+            onto a single action. On by default. When ``False`` the term is
+            dropped entirely and ``entropy_coeff`` has no effect.
         :param entropy_coeff: Entropy-bonus weight (the annealing start value).
+            Ignored unless ``entropy_bonus`` is set.
         :param gamma: Discount factor for GAE.
         :param lmbda: GAE trace-decay factor.
+        :param average_gae: Standardize the advantages (subtract the mean,
+            divide by the std) over each collected batch. On by default: this is
+            the standard PPO formulation and it keeps the surrogate objective's
+            scale independent of the reward magnitude.
         :param lr: Adam learning rate (the annealing start value).
         :param num_epochs: Optimization epochs over each collected batch.
         :param sub_batch_size: Minibatch size for the inner epoch loop.
@@ -177,7 +176,7 @@ class PPOTrainer(Trainer):
             gamma=gamma,
             lmbda=lmbda,
             value_network=self._operator.get_value_operator(),
-            average_gae=True,
+            average_gae=average_gae,
         )
         self._loss = ClipPPOLoss(
             actor_network=cast(
@@ -185,24 +184,27 @@ class PPOTrainer(Trainer):
             ),
             critic_network=self._operator.get_value_operator(),
             clip_epsilon=clip_epsilon,
-            entropy_bonus=True,
+            entropy_bonus=entropy_bonus,
             entropy_coeff=entropy_coeff,
         )
+        # The optimizer is hardcoded here, but there is no real reason for us
+        # to change it.
         self._optim = torch.optim.Adam(self._loss.parameters(), lr=lr)
-        # Inferred to match the previous implementation, which clipped
-        # ``self._loss.parameters()``. The colleague's base passed ``clip_params``
-        # in from an unseen ``_BaseTrainer``; the same author wrote our
-        # ``Trainer``, so this is assumed faithful.
+
         self._clip_params = list(self._loss.parameters())
-        # ``torch.compile`` shares parameters/buffers with the wrapped module, so
-        # ``self._loss`` stays the source of truth for parameters() and the
-        # entropy-coeff buffer; only the forward call is routed through the
-        # compiled wrapper. (No type annotation: ``torch.compile`` is typed as
-        # returning a callable, not an ``nn.Module``.)
+
         self._loss_fwd = torch.compile(self._loss) if compile_loss else self._loss
 
         # Annealing state.
         self._lr_anneal = lr_anneal
+        # Annealing a coefficient the loss never applies is a silent no-op, so
+        # disable it rather than let the run look like it is scheduling entropy.
+        if ent_anneal and not entropy_bonus:
+            logger.warning(
+                "ent_anneal=True has no effect while entropy_bonus=False; "
+                "disabling entropy annealing."
+            )
+            ent_anneal = False
         self._ent_anneal = ent_anneal
         self._ent_warm_frac = ent_warm_frac
         self._initial_lr = lr
@@ -228,7 +230,7 @@ class PPOTrainer(Trainer):
         logger.info(
             "PPOTrainer initialized: device=%s frames_per_batch=%d total_frames=%d "
             "num_epochs=%d sub_batch_size=%d lr=%g gamma=%g lmbda=%g clip_epsilon=%g "
-            "entropy_coeff=%g target_kl=%s use_amp=%s lr_anneal=%s "
+            "entropy_bonus=%s entropy_coeff=%g target_kl=%s use_amp=%s lr_anneal=%s "
             "ent_anneal=%s",
             self._device,
             frames_per_batch,
@@ -239,6 +241,7 @@ class PPOTrainer(Trainer):
             gamma,
             lmbda,
             clip_epsilon,
+            entropy_bonus,
             entropy_coeff,
             target_kl,
             use_amp,

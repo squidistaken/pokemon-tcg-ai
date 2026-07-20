@@ -117,7 +117,7 @@ class Trainer(BaseTrainer):
         # transforms are managed explicitly by the env factories, and the
         # policies used here read "action_mask" directly without needing the
         # InitTracker transform the collector's heuristic would append.
-        collector = Collector(   # Maybe move to data member
+        collector = Collector(
             create_env_fn=self._make_vec_env(),
             policy=self._policy,
             frames_per_batch=self._frames_per_batch,
@@ -144,7 +144,10 @@ class Trainer(BaseTrainer):
                     episodes += int(done.sum())
                     wins += int((final_rewards > 0).sum())
                     draws += int((final_rewards == 0).sum())
+                    
+                    # Perform update step (return surrgate loss)
                     losses = self._update(data)
+                    
                     metrics = self._metrics(
                         frames, episodes, wins, draws, time.time() - start_time, losses
                     )
@@ -241,9 +244,6 @@ class Trainer(BaseTrainer):
     def _update(self, data: TensorDict) -> dict[str, float] | None:  # noqa: ARG002, PLR6301
         """
         Run the algorithm-specific update on a collected batch.
-
-        TODO: No-op in the base class; PPO overrides this with the
-        advantage/minibatch/optimizer loop.
 
         :param data: One batch of ``frames_per_batch`` transitions from the
             Collector, as a TensorDict shaped ``(B, T)`` where ``B`` is
