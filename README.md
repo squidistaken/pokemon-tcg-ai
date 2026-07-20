@@ -76,6 +76,7 @@ src/
   train.py                    Hydra entry point (python -m src.train)
 
 conf/                        Hydra configs (config.yaml + env/, agent/, model/, train/, collector/ groups)
+  paths/default.yaml          Scheduler-independent input and output locations
   model/
     default.yaml                Composes one backbone + one head, holds shared dims (embed_dim, value_head)
     backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
@@ -87,6 +88,7 @@ decks/                       Example deck CSVs
 docs/                        Design docs (torchrl_environment.md, game.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
 main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
+slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts
 ```
 
 The **backbone** and **head** are independent Hydra config groups, so any backbone can be paired
@@ -103,9 +105,12 @@ Config is managed by [Hydra](https://hydra.cc/) (`conf/config.yaml`); override a
 python -m src.train collector.total_frames=100000 env.num_workers=4 set_seed=true
 ```
 
+Slurm support is kept separately in [`slurm-conf/`](slurm-conf/README.md). The
+profiles select a normal Hydra config and add scheduler-specific overrides;
+they do not participate in local Hydra composition.
+
 ## CI
 
 GitHub Actions runs linting, type-checking, and tests for pull requests that
 are ready for review. Draft pull requests intentionally skip CI to stay within
 the GitHub Actions free-plan budget.
-

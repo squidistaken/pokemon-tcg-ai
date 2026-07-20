@@ -2,6 +2,7 @@
 # Random baseline (default):  python -m src.train
 # PPO/MLP baseline:           python -m src.train agent=ppo
 defaults:
+  - paths: default
   - agent: dummy
   - env: default
   - collector: default
@@ -11,3 +12,13 @@ defaults:
 
 seed: 42
 set_seed: false
+
+# Keep Hydra's own logs and multirun artifacts under the configured output
+# location as well. The default expands to Hydra's usual outputs/date/time
+# layout; Slurm profiles can redirect the root to scratch storage.
+hydra:
+  run:
+    dir: ${paths.output_dir}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ${paths.output_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

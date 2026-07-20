@@ -254,12 +254,23 @@ class PPOTrainer(Trainer):
 
     def _collector_kwargs(self) -> dict:
         """
-        Enable ``torch.compile`` on the collection policy via the Collector.
+        Place env/storage tensors on CPU and policy inference on the train device.
 
-        :return: ``{"compile_policy": True}`` when compilation is requested,
-            else an empty mapping (leaving collection unchanged).
+        TorchRL does not infer ``policy_device`` from a policy module that was
+        already moved to CUDA. Declaring all three devices makes the collector
+        transfer observations to the policy and bring rollout storage back to
+        CPU explicitly. This is a no-op transfer-wise for local CPU training.
+
+        :return: Collector device placement plus optional policy compilation.
         """
-        return {"compile_policy": True} if self._compile_policy else {}
+        kwargs = {
+            "policy_device": self._device,
+            "env_device": torch.device("cpu"),
+            "storing_device": torch.device("cpu"),
+        }
+        if self._compile_policy:
+            kwargs["compile_policy"] = True
+        return kwargs
 
     def _set_entropy_coeff(self, value: float) -> None:
         """
