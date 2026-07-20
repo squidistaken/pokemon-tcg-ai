@@ -17,6 +17,7 @@ from src.training import (
     SnapshotCallback,
     Trainer,
     TrainingCallback,
+    build_eval_opponent_factory,
     build_opponent_factory,
     make_env_factories,
 )
@@ -187,9 +188,11 @@ def _build_evaluator(cfg: DictConfig) -> Evaluator | None:
     """
     Build the fixed-opponent evaluator selected by ``cfg.train``.
 
-    The evaluation environment always uses the default random opponent (no
-    ``opponent_factory``), giving a reference point that does not move with the
-    learner — the only way to read progress off a self-play run.
+    The evaluation environment is given its opponent explicitly, from
+    ``cfg.train.eval_opponent``, rather than inheriting whichever opponent
+    :class:`~src.env.tcg_env.TCGEnv` happens to default to. Under self-play the
+    collected ``win_rate`` is pinned near 0.5 by construction, so this fixed
+    reference is what makes the run's progress readable.
 
     :param cfg: Hydra configuration with a ``train`` section.
     :return: An evaluator, or None when ``eval_interval`` disables evaluation.
@@ -197,7 +200,9 @@ def _build_evaluator(cfg: DictConfig) -> Evaluator | None:
     if int(cfg.train.get("eval_interval", 0)) <= 0:
         return None
     return Evaluator(
-        env_factory=make_env_factories(cfg)[0],
+        env_factory=make_env_factories(
+            cfg, opponent_factory=build_eval_opponent_factory(cfg)
+        )[0],
         n_episodes=int(cfg.train.get("eval_episodes", 100)),
         device=cfg.agent.get("device", "cpu"),
         deterministic=bool(cfg.train.get("eval_deterministic", True)),

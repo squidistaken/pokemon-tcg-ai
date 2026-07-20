@@ -22,3 +22,9 @@ eval_episodes: 15
 # Take the policy's argmax (true) or sample from it (false). Deterministic
 # gives a lower-variance curve; stochastic matches collection-time behaviour.
 eval_deterministic: true
+# Fixed opponent the evaluator scores against, set explicitly rather than
+# inherited from the environment's default. It must not move with the learner,
+# or the eval curve stops being comparable across the run. "random" is the only
+# implemented value. Note that it saturates: once the policy reliably beats
+# random the curve flattens.
+eval_opponent: random

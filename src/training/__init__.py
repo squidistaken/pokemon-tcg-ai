@@ -8,7 +8,7 @@ from .callbacks import (
 from .env_factory import make_env, make_env_factories
 from .evaluator import Evaluator
 from .ppo_trainer import PPOTrainer
-from .self_play import build_opponent_factory
+from .self_play import build_eval_opponent_factory, build_opponent_factory
 from .trainer import Trainer
 
 __all__ = [
@@ -20,6 +20,7 @@ __all__ = [
     "Trainer",
     "TrainingCallback",
     "WeightsAndBiases",
+    "build_eval_opponent_factory",
     "build_opponent_factory",
     "make_env",
     "make_env_factories",

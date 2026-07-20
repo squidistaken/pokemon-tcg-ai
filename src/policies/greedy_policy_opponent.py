@@ -86,7 +86,7 @@ class GreedyPolicyOpponent:
             {"observation": self._encoder.encode(observation, seat, 0)},
             batch_size=torch.Size(()),
         )
-        # Guarded: on CPU (the usual case here) .to() would still walk and copy
+        # Guarded: on CPU .to() would still walk and copy
         # every leaf for nothing, on every opponent move.
         if self._device.type != "cpu":
             encoded = encoded.to(self._device)

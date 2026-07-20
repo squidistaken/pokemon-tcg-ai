@@ -10,7 +10,7 @@ from src.policies.ppo_actor import build_actor_critic, build_ppo_actor_critic
 from src.training.callbacks import SnapshotCallback
 from src.training.env_factory import make_env_factories
 from src.training.evaluator import Evaluator
-from src.training.self_play import build_opponent_factory
+from src.training.self_play import build_eval_opponent_factory, build_opponent_factory
 from tests.conftest import structured_env_cfg
 
 
@@ -256,6 +256,29 @@ def test_league_members_share_one_encoder(tmp_path, structured_model_cfg, struct
     members = pool._opponents  # noqa: SLF001
     encoders = {id(member._encoder) for member in members if hasattr(member, "_encoder")}  # noqa: SLF001
     assert len(encoders) == 1
+
+
+def test_eval_opponent_factory_builds_the_configured_reference(tmp_path, structured_model_cfg) -> None:
+    """
+    The evaluator's opponent comes from ``train.eval_opponent`` explicitly,
+    rather than from whatever the environment happens to default to.
+    """
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    cfg.seed = 7
+    assert isinstance(build_eval_opponent_factory(cfg)(), RandomOpponent)
+
+
+def test_unsupported_eval_opponent_is_rejected(tmp_path, structured_model_cfg) -> None:
+    """
+    An unimplemented reference fails loudly at build time. Falling back to the
+    random opponent would silently score the run against something other than
+    what the config asked for.
+    """
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    cfg.seed = 7
+    cfg.train.eval_opponent = "snapshot"
+    with pytest.raises(ValueError, match="eval_opponent"):
+        build_eval_opponent_factory(cfg)
 
 
 @pytest.mark.parametrize("deterministic", [True, False])

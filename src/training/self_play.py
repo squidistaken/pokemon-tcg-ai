@@ -16,6 +16,27 @@ from src.training.env_factory import OpponentFactory, make_encoder
 logger = logging.getLogger(__name__)
 
 
+def build_eval_opponent_factory(cfg: DictConfig) -> OpponentFactory:
+    """
+    Build the fixed reference opponent the evaluator scores against.
+
+    The reference must not move with the learner, or the ``eval/`` win-rate
+    stops being comparable across the run — that comparability is the whole
+    point of evaluating separately from collection.
+
+    :param cfg: Hydra config with a ``train`` section and a top-level ``seed``.
+    :return: Factory building the reference opponent.
+    :raises ValueError: If ``eval_opponent`` names an unsupported opponent.
+    """
+    name = str(cfg.train.get("eval_opponent", "random"))
+    if name != "random":
+        raise ValueError(
+            f"Unsupported eval_opponent '{name}'; only 'random' is implemented. "
+            f"A snapshot-backed reference needs a checkpoint to score against."
+        )
+    return partial(RandomOpponent, seed=int(cfg.seed))
+
+
 def build_opponent_factory(
         cfg: DictConfig,
         obs_spec: Composite,

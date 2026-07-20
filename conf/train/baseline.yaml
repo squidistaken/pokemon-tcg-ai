@@ -17,3 +17,6 @@ eval_episodes: 100
 # Take the policy's argmax (true) or sample from it (false). Deterministic
 # gives a lower-variance curve; stochastic matches collection-time behaviour.
 eval_deterministic: true
+# Fixed opponent the evaluator scores against, if eval_interval enables it.
+# Kept here so `train=baseline` and `train=ppo_selfplay` expose the same keys.
+eval_opponent: random
