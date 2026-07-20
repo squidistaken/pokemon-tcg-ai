@@ -60,7 +60,14 @@ def make_env(
         opponent=opponent,
         encoder=make_encoder(encoder, max_options),
     )
-    return TransformedEnv(base_env, ActionMask())
+    env = TransformedEnv(base_env, ActionMask())
+    # TransformedEnv is created unlocked, and torchrl only caches its key lists
+    # and step_mdp helper while the specs are locked. Left unlocked it rebuilds
+    # all of them on every step, which measures as ~30% of env stepping time.
+    # ActionMask mutates the mask in place rather than reassigning the spec, so
+    # locking does not interfere with it.
+    env.set_spec_lock_(True)
+    return env
 
 
 def make_env_factories(cfg: DictConfig, opponent_factory: OpponentFactory | None = None) -> list[Callable[[], EnvBase]]:

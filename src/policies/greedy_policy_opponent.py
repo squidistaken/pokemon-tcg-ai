@@ -66,7 +66,7 @@ class GreedyPolicyOpponent:
         self._actor_critic = actor_critic.to(self._device).eval()
         self._encoder = encoder
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def __call__(self, observation: Observation) -> list[int]:
         """
         Choose a greedy legal selection for the acting seat.
@@ -85,8 +85,12 @@ class GreedyPolicyOpponent:
         encoded = TensorDict(
             {"observation": self._encoder.encode(observation, seat, 0)},
             batch_size=torch.Size(()),
-        ).to(self._device)
-        logits = self._actor_critic(encoded)["logits"]
+        )
+        # Guarded: on CPU (the usual case here) .to() would still walk and copy
+        # every leaf for nothing, on every opponent move.
+        if self._device.type != "cpu":
+            encoded = encoded.to(self._device)
+        logits = self._actor_critic.policy_logits(encoded)
         return self.greedy_select(
             logits,
             n_options=len(select.option),

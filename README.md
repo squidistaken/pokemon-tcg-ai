@@ -57,6 +57,7 @@ src/
     card_database.py            Static card-ID-indexed lookup tables (for model-side embeddings)
     deck.py                     Deck CSV loading
     opponent_pool.py            Self-play opponent pool (samples/holds frozen policy snapshots)
+    snapshot_opponent_pool.py   OpponentPool that discovers new learner snapshots from disk (ParallelEnv-safe)
     random_opponent.py          Uniform-random opponent baseline
   models/                     Actor-critic network, independent of the policy/training wiring
     backbone.py                  Backbone ABC + MLPBackbone (DeepSets/SetTransformer/TemporalTransformer/Recurrent planned)
@@ -73,8 +74,11 @@ src/
     base_trainer.py             BaseTrainer interface
     ppo_trainer.py               PPOTrainer: Trainer subclass running GAE + ClipPPOLoss optimization
     env_factory.py               Builds TransformedEnv instances (deck + opponent + ActionMask) for the collector
+    self_play.py                 build_opponent_factory: the picklable self-play league factory handed to each env worker
+    evaluator.py                 Evaluator: scores the policy against a fixed opponent (readable curve under self-play)
     callbacks/                  Metric sinks; the trainer emits, these decide where it goes
       base.py                     TrainingCallback hooks + CallbackList (fan-out, isolates failures)
+      snapshot_callback.py        SnapshotCallback: freezes the learner into the self-play league at a frame interval
       wandb_callback.py           WeightsAndBiases: the only module that imports wandb
   train.py                    Hydra entry point (python -m src.train)
 
@@ -83,6 +87,9 @@ conf/                        Hydra configs (config.yaml + env/, agent/, model/, 
     default.yaml                Composes one backbone + one head, holds shared dims (embed_dim, value_head)
     backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
     head/linear.yaml             Flat logits head (more heads added as separate config files as they land)
+  train/
+    baseline.yaml               Default: fixed random opponent, no snapshotting; the control for self-play runs
+    ppo_selfplay.yaml            Self-play league: snapshot interval, pool size, periodic fixed-opponent evaluation
   logging/
     wandb.yaml                  Default: Weights & Biases run (project/entity/group/tags/mode)
     none.yaml                    Console/Hydra log lines only; for throwaway runs
@@ -117,6 +124,32 @@ python -m src.train agent=ppo wandb.group=ablation-lr wandb.tags=[baseline]
 python -m src.train agent=ppo wandb.mode=offline    # record now, `wandb sync` later
 python -m src.train agent=ppo callbacks=none        # no metric backend at all
 ```
+
+### Self-play
+
+By default (`train=baseline`) the agent trains against the built-in
+uniform-random opponent. `train=ppo_selfplay` instead builds a self-play league:
+```bash
+python -m src.train agent=ppo train=ppo_selfplay
+```
+Every `train.snapshot_interval` frames the learner is frozen to disk, and each
+environment worker adds that snapshot to the pool it samples an opponent from
+per episode, keeping the newest `train.pool_size` of them. The random opponent
+stays a permanent league member, so the agent always retains a fixed reference
+point instead of drifting against copies of itself. Snapshots go to the Hydra
+run directory, so runs never inherit each other's opponents.
+
+Because the league tracks the learner, the collected `win_rate` sits near 0.5
+regardless of how strong the policy gets. The readable progress signal is
+instead the periodic evaluation against a *fixed* random opponent, logged under
+`eval/` every `train.eval_interval` frames:
+```bash
+python -m src.train agent=ppo train=ppo_selfplay train.eval_interval=100000 train.eval_episodes=200
+```
+Evaluation is serial and costs collection throughput, so it is a trade between
+curve resolution and speed. `train.eval_deterministic` (default `true`) scores
+the policy's argmax; set it to `false` to score the sampling behaviour used
+during collection.
 
 ## CI
 

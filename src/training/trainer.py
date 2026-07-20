@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from src.training.base_trainer import BaseTrainer
 from src.training.callbacks import CallbackList, TrainingCallback
+from src.training.evaluator import Evaluator
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,8 @@ class Trainer(BaseTrainer):
             serial_for_single: bool = True,
             callbacks: Iterable[TrainingCallback] | None = None,
             run_config: Mapping[str, Any] | None = None,
+            evaluator: Evaluator | None = None,
+            eval_interval: int = 0,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -57,6 +60,12 @@ class Trainer(BaseTrainer):
             end. None attaches nothing, leaving console logging as the only sink.
         :param run_config: Opaque run metadata (in practice the resolved Hydra
             config) forwarded verbatim to ``on_train_start``; never read here.
+        :param evaluator: Scores the policy against a fixed reference opponent
+            every ``eval_interval`` frames, reporting through ``on_eval_end``.
+            None skips evaluation entirely. Needed under self-play, where the
+            collected win-rate is pinned near 0.5 by construction.
+        :param eval_interval: Frames between evaluations; ``0`` disables them
+            even when an evaluator is supplied.
         """
         self._env_factories = env_factories
         self._policy = policy
@@ -67,6 +76,8 @@ class Trainer(BaseTrainer):
         self._serial_for_single = serial_for_single
         self._callbacks = CallbackList(callbacks or ())
         self._run_config = run_config if run_config is not None else {}
+        self._evaluator = evaluator
+        self._eval_interval = eval_interval
 
     def train(self) -> dict[str, float]:
         """
@@ -90,6 +101,7 @@ class Trainer(BaseTrainer):
         episodes = 0
         wins = 0
         draws = 0
+        last_eval_frames = 0
         start_time = time.time()
         self._callbacks.on_train_start(self._run_config)
         try:
@@ -111,11 +123,33 @@ class Trainer(BaseTrainer):
                     progress_bar.update(batch_frames)
                     self._log_progress(progress_bar, metrics)
                     self._callbacks.on_rollout_end(frames, metrics)
+                    if self._should_evaluate(frames, last_eval_frames):
+                        last_eval_frames = frames
+                        assert self._evaluator is not None
+                        self._callbacks.on_eval_end(
+                            frames, self._evaluator.evaluate(self._policy)
+                        )
         finally:
+            if self._evaluator is not None:
+                self._evaluator.close()
             collector.shutdown()
             summary = self._metrics(frames, episodes, wins, draws, time.time() - start_time)
             self._callbacks.on_train_end(summary)
         return summary
+
+    def _should_evaluate(self, frames: int, last_eval_frames: int) -> bool:
+        """
+        Whether an evaluation round is due after the rollout just finished.
+
+        :param frames: Total frames collected so far.
+        :param last_eval_frames: Frame count at the previous evaluation.
+        :return: True if an evaluator is attached and the interval has elapsed.
+        """
+        return (
+            self._evaluator is not None
+            and self._eval_interval > 0
+            and frames - last_eval_frames >= self._eval_interval
+        )
 
     @staticmethod
     def _metrics(

@@ -27,14 +27,8 @@ class OpponentPool:
         :param weights: Sampling weight per member; uniform if None.
         :param seed: Seed for the sampling random number generator.
         """
-        if not opponents:
-            raise ValueError("OpponentPool needs at least one opponent.")
-        if weights is not None and len(weights) != len(opponents):
-            raise ValueError("weights must have the same length as opponents.")
-        self._opponents = list(opponents)
-        self._weights = list(weights) if weights is not None else [1.0] * len(opponents)
         self._rng = random.Random(seed)
-        self._active = self._opponents[0]
+        self.set_opponents(opponents, weights)
 
     @property
     def active(self) -> Callable[[Observation], list[int]]:
@@ -44,6 +38,37 @@ class OpponentPool:
         :return: The active opponent callable.
         """
         return self._active
+
+    def set_opponents(
+            self,
+            opponents: list[Callable[[Observation], list[int]]],
+            weights: list[float] | None = None,
+    ) -> None:
+        """
+        Replace the pool's members wholesale.
+
+        Used by leagues that rotate their membership rather than only growing
+        it (see :class:`~src.env.snapshot_opponent_pool.SnapshotOpponentPool`,
+        which evicts the oldest snapshots as newer ones appear). The member
+        currently playing is preserved if it survives the replacement, so a
+        rotation mid-episode cannot swap the opponent out from under the
+        environment.
+
+        :param opponents: New pool members.
+        :param weights: Sampling weight per member; uniform if None.
+        :raises ValueError: If ``opponents`` is empty or ``weights`` has a
+            different length.
+        """
+        if not opponents:
+            raise ValueError("OpponentPool needs at least one opponent.")
+        if weights is not None and len(weights) != len(opponents):
+            raise ValueError("weights must have the same length as opponents.")
+        self._opponents = list(opponents)
+        self._weights = list(weights) if weights is not None else [1.0] * len(opponents)
+        active = getattr(self, "_active", None)
+        # Identity, not equality: opponents are unhashable modules/callables.
+        if not any(member is active for member in self._opponents):
+            self._active = self._opponents[0]
 
     def add(self, opponent: Callable[[Observation], list[int]], weight: float = 1.0) -> None:
         """

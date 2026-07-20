@@ -1,11 +1,24 @@
 # Self-play training configuration.
-# Opponent to face before the first snapshot exists: "random" or "self".
+# Opponent to face before the first snapshot exists: "random" is the only
+# implemented option, and it stays a permanent league member so the agent keeps
+# a fixed reference point instead of drifting against copies of itself.
 warmup_opponent: random
 # Freeze the learner into the self-play pool every N collected frames
 # (0 disables snapshotting -> train against the warmup opponent only).
 snapshot_interval: 50000
 # Directory learner snapshots are written to and reloaded from (ParallelEnv
 # workers reload from disk; no shared Python object across processes).
+# Relative paths resolve inside the Hydra run directory, so each run gets a
+# fresh league and cannot inherit a previous run's snapshots.
 checkpoint_dir: checkpoints
 # Number of most-recent snapshots kept in the opponent pool.
 pool_size: 5
+
+# Periodic evaluation against a fixed RandomOpponent, logged to W&B under
+# "eval/". Essential here: under self-play the collected win_rate is pinned
+# near 0.5 by construction, so it says nothing about whether the agent improved.
+eval_interval: 50000
+eval_episodes: 15
+# Take the policy's argmax (true) or sample from it (false). Deterministic
+# gives a lower-variance curve; stochastic matches collection-time behaviour.
+eval_deterministic: true

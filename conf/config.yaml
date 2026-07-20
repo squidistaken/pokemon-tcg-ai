@@ -1,6 +1,7 @@
 # Hydra docs: https://hydra.cc/docs/intro/
 # Random baseline (default):  python -m src.train
 # PPO/MLP baseline:           python -m src.train agent=ppo
+# PPO/MLP self-play:          python -m src.train agent=ppo train=ppo_selfplay
 # No W&B run:                 python -m src.train callbacks=none
 # Label a run:                python -m src.train agent=ppo wandb.group=ablation-lr
 defaults:
@@ -8,7 +9,7 @@ defaults:
   - env: default
   - collector: default
   - model: default
-  - train: ppo_selfplay
+  - train: baseline
   - callbacks: wandb
   - _self_
 

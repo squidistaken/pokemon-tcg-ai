@@ -18,6 +18,7 @@ from torchrl.objectives.value import GAE
 from src.models.actor_critic import ActorCritic
 from src.policies.ppo_actor import build_ppo_operator
 from src.training.callbacks import TrainingCallback
+from src.training.evaluator import Evaluator
 from src.training.loss._helpers import _sum_loss_keys
 from src.training.trainer import Trainer
 
@@ -90,6 +91,8 @@ class PPOTrainer(Trainer):
             ncl_model: nn.Module | None = None,
             callbacks: Iterable[TrainingCallback] | None = None,
             run_config: Mapping[str, Any] | None = None,
+            evaluator: Evaluator | None = None,
+            eval_interval: int = 0,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -142,6 +145,10 @@ class PPOTrainer(Trainer):
             :meth:`_update` reach them without any extra wiring here.
         :param run_config: Opaque run metadata forwarded to
             :class:`~src.training.trainer.Trainer`.
+        :param evaluator: Fixed-opponent evaluator forwarded to
+            :class:`~src.training.trainer.Trainer`; required for a readable
+            learning curve under self-play.
+        :param eval_interval: Frames between evaluation rounds; ``0`` disables.
         """
         # NCL: accepted for interface parity with the colleague's file, but the
         # FIM-estimation / gradient-projection machinery is not implemented here.
@@ -173,6 +180,8 @@ class PPOTrainer(Trainer):
             serial_for_single=serial_for_single,
             callbacks=callbacks,
             run_config=run_config,
+            evaluator=evaluator,
+            eval_interval=eval_interval,
         )
         self._device = torch.device(device)
         self._num_epochs = num_epochs
