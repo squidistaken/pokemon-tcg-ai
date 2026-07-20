@@ -1,8 +1,6 @@
 import math
 
-import pytest
 import torch
-from torch import nn
 from torchrl.collectors import Collector
 from torchrl.envs import SerialEnv
 
@@ -122,15 +120,6 @@ def test_ppo_trainer_self_play_pool(structured_model_cfg, structured_obs_spec, a
     trainer = _make_trainer(actor_critic, action_spec, opponent_factory=make_random_pool)
     stats = trainer.train()
     assert stats["frames"] == 128
-
-
-def test_ncl_model_is_guarded_stub(structured_model_cfg, structured_obs_spec, action_spec) -> None:
-    """
-    Passing a non-None ``ncl_model`` raises ``NotImplementedError`` (guarded stub).
-    """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
-    with pytest.raises(NotImplementedError):
-        _make_trainer(actor_critic, action_spec, ncl_model=nn.Linear(2, 2))
 
 
 def test_target_kl_early_stops_epoch_loop(structured_model_cfg, structured_obs_spec, action_spec) -> None:

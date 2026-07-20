@@ -43,7 +43,7 @@ class PPOTrainer(Trainer):
 
     This trainer absorbs the feature set of a colleague's ``TorchRLTrainer``
     (AMP, ``torch.compile``, ``target_kl`` early stopping, generic loss
-    aggregation, NaN/Inf guarding, LR/entropy annealing, an NCL hook) while
+    aggregation, NaN/Inf guarding, LR/entropy annealing) while
     keeping the friendly hyperparameter constructor. Several of those features
     change training behaviour or were reconstructed from an unseen base class;
     each such point is flagged inline and in
@@ -88,7 +88,6 @@ class PPOTrainer(Trainer):
             ent_anneal: bool = False,
             ent_warm_frac: float = 0.5,
             reward_scaling: float = 1.0,
-            ncl_model: nn.Module | None = None,
             callbacks: Iterable[TrainingCallback] | None = None,
             run_config: Mapping[str, Any] | None = None,
             evaluator: Evaluator | None = None,
@@ -136,10 +135,6 @@ class PPOTrainer(Trainer):
             current stats**: win/draw rates in :meth:`Trainer.train` are computed
             from the reward *sign*, not its magnitude; this would only matter for
             future magnitude logging.
-        :param ncl_model: **Guarded stub.** Natural Continual Learning FIM
-            estimation / grad clipping is not implemented; passing a non-None
-            module raises ``NotImplementedError``. See the NCL note in
-            ``docs/architecture/ppo-transformer-actor-critic.md``.
         :param callbacks: Metric observers, forwarded to
             :class:`~src.training.trainer.Trainer`. The PPO losses returned by
             :meth:`_update` reach them without any extra wiring here.
@@ -150,20 +145,6 @@ class PPOTrainer(Trainer):
             learning curve under self-play.
         :param eval_interval: Frames between evaluation rounds; ``0`` disables.
         """
-        # NCL: accepted for interface parity with the colleague's file, but the
-        # FIM-estimation / gradient-projection machinery is not implemented here.
-        # Its only plausible merit is anti-forgetting under self-play (not yet
-        # wired); see the arch-doc NCL note for the full rationale.
-        self._ncl_model = ncl_model
-        if ncl_model is not None:
-            raise NotImplementedError(
-                "ncl_model (Natural Continual Learning FIM estimation / grad "
-                "clipping) is a guarded stub: the parameter is accepted for "
-                "interface parity but NCL is not implemented. See "
-                "docs/architecture/ppo-transformer-actor-critic.md (NCL note) for "
-                "the rationale and when to revisit."
-            )
-
         self._actor_critic = actor_critic
 
         self._operator = cast(

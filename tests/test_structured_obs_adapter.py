@@ -94,7 +94,7 @@ def test_padding_card_id_encodes_to_zero(adapter, structured_obs_spec) -> None:
     obs = _zero_obs(structured_obs_spec, batch=1)
     encoded = adapter(*_adapter_inputs(obs))
     assert torch.all(torch.isfinite(encoded))
-    card_zero = adapter._card_repr(torch.zeros(1, dtype=torch.int64))
+    card_zero = adapter._card_repr(torch.zeros(1, dtype=torch.int64))  # noqa: SLF001
     assert torch.all(card_zero == 0.0)
 
 
@@ -107,7 +107,7 @@ def test_gradients_reach_card_embedding(adapter, structured_obs_spec) -> None:
     obs[("observation", "my", "hand_mask")][:, 0] = True
     adapter.zero_grad()
     adapter(*_adapter_inputs(obs)).sum().backward()
-    grad = adapter._card_embedding.weight.grad
+    grad = adapter._card_embedding.weight.grad  # noqa: SLF001
     assert grad is not None and torch.any(grad[5] != 0)
 
 

@@ -1,3 +1,5 @@
+from typing import cast
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -5,6 +7,7 @@ from torchrl.data import Composite
 
 from src.models import LinearPolicyHead, MLPBackbone, ValueHead
 from src.models.backbone import activation_class
+from src.models.structured_obs_adapter import StructuredObsAdapter
 from src.policies.ppo_actor import build_actor_critic
 from tests.conftest import N_ACTIONS
 
@@ -60,8 +63,12 @@ def test_gradients_reach_trunk_and_both_heads(
     out = actor_critic(_dummy_obs(structured_obs_spec, 4))
     (out["logits"].sum() + out["state_value"].sum()).backward()
 
-    trunk = next(actor_critic.backbone.mlp.parameters())
-    embedding = actor_critic.backbone.adapter._card_embedding.weight
+    # nn.Module.__getattr__ is typed as returning Tensor | Module, so walking
+    # into the submodules needs the concrete type restated for the checker.
+    backbone = cast(MLPBackbone, actor_critic.backbone)
+    adapter = cast(StructuredObsAdapter, backbone.adapter)
+    trunk = next(backbone.mlp.parameters())
+    embedding = adapter._card_embedding.weight  # noqa: SLF001
     policy = next(actor_critic.policy_head.parameters())
     value = next(actor_critic.value_head.parameters())
     assert trunk.grad is not None and torch.any(trunk.grad != 0)

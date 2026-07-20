@@ -9,7 +9,7 @@ from src.env.deck import load_deck
 from src.env.structured_observation_encoder import StructuredObservationEncoder
 from src.env.tcg_env import TCGEnv
 from src.policies.ppo_actor import build_ppo_actor_critic
-from tests.conftest import DECK_PATH, MAX_OPTIONS, N_ACTIONS
+from tests.conftest import DECK_PATH, MAX_OPTIONS
 
 DECK = load_deck(DECK_PATH)
 

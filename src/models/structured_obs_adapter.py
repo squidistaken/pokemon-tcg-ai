@@ -206,12 +206,12 @@ class StructuredObsAdapter(nn.Module):
             if not isinstance(spec, Composite):
                 raise ValueError(f"Zone group '{name}' must be a composite of ids/mask leaves.")
             pairs: list[tuple[str, str]] = []
-            for leaf_name in spec.keys():
+            for leaf_name in spec:
                 if not isinstance(leaf_name, str):
                     continue
                 if leaf_name == "ids" or leaf_name.endswith("_ids"):
                     mask_name = "mask" if leaf_name == "ids" else leaf_name[: -len("_ids")] + "_mask"
-                    if mask_name not in spec.keys():
+                    if mask_name not in spec:
                         raise ValueError(f"Zone group '{name}' has '{leaf_name}' without '{mask_name}'.")
                     pairs.append((leaf_name, mask_name))
             if len(pairs) == 0:
@@ -238,7 +238,7 @@ class StructuredObsAdapter(nn.Module):
                 f"{self._group_names}, got {len(inputs)}."
             )
         parts: list[torch.Tensor] = []
-        for name, value in zip(self._group_names, inputs):
+        for name, value in zip(self._group_names, inputs, strict=True):
             if name == "globals":
                 assert isinstance(value, torch.Tensor), "globals is a leaf field, never a group."
                 parts.append(value / self._global_scales)
