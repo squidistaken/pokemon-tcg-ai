@@ -13,7 +13,8 @@ Run the setup for the GPU type you will use:
 ```
 
 These create `.venv` and `.venv-rtx`, respectively. Setup uses `uv.lock` and
-checks that PyTorch and the included Linux engine can be loaded.
+checks that PyTorch, W&B, and the included Linux engine can be loaded. Run the
+relevant setup command again after merges or dependency changes.
 
 ## Submit
 
@@ -34,4 +35,6 @@ Extra arguments are passed to Hydra:
 
 Add `--dry-run` to print the `sbatch` command without submitting.
 
-Data and output paths are configured in `conf/paths/default.yaml`.
+Online W&B runs require `WANDB_API_KEY` in the project `.env` or a verified
+`wandb login`. W&B and Hydra files follow the output location configured in
+`conf/paths/default.yaml`.

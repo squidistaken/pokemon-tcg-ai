@@ -2,16 +2,15 @@
 
 set -euo pipefail
 
-if [ "$#" -lt 4 ]; then
-  echo "Usage: run_job.sh PROFILE_PATH CONFIG_NAME GPU_COUNT UV_ENVIRONMENT [HYDRA_OVERRIDE ...]" >&2
+if [ "$#" -lt 3 ]; then
+  echo "Usage: run_job.sh PROFILE_PATH CONFIG_NAME UV_ENVIRONMENT [HYDRA_OVERRIDE ...]" >&2
   exit 2
 fi
 
 PROFILE_PATH="$1"
 CONFIG_NAME="$2"
-GPU_COUNT="$3"
-UV_ENVIRONMENT="$4"
-shift 4
+UV_ENVIRONMENT="$3"
+shift 3
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -33,8 +32,10 @@ JOB_TMP_ROOT="${SLURM_TMPDIR:-${TMPDIR:-/tmp}}"
 export TMPDIR="$JOB_TMP_ROOT/pokemon-tcg-${SLURM_JOB_ID:-manual}"
 mkdir -p "$TMPDIR"
 
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
-export MKL_NUM_THREADS="$OMP_NUM_THREADS"
+# The default run uses 16 collector processes on 16 allocated cores. Prevent
+# each process from creating another full pool of math-library threads.
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
 
 echo "Profile: $PROFILE_PATH"
 echo "Hydra config: conf/$CONFIG_NAME.yaml"
@@ -45,8 +46,7 @@ echo "CPUs: ${SLURM_CPUS_PER_TASK:-unknown}"
 echo "GPUs: ${CUDA_VISIBLE_DEVICES:-none}"
 echo "Start: $(date --iso-8601=seconds)"
 
-if [ "$GPU_COUNT" -gt 0 ]; then
-  uv run --frozen --no-sync python - <<'PY'
+uv run --frozen --no-sync python - <<'PY'
 import torch
 from cg import sim
 
@@ -64,7 +64,6 @@ print(f"Compute capability: {torch.cuda.get_device_capability(0)}")
 print(f"CUDA calculation result: {result.item():.0f}")
 print(f"Engine: {sim.lib._name}")
 PY
-fi
 
 srun uv run --frozen --no-sync python -m src.train --config-name "$CONFIG_NAME" "$@"
 

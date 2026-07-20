@@ -84,7 +84,7 @@ conf/                        Hydra configs (config.yaml + env/, agent/, model/, 
     default.yaml                Composes one backbone + one head, holds shared dims (embed_dim, value_head)
     backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
     head/linear.yaml             Flat logits head (more heads added as separate config files as they land)
-  logging/
+  callbacks/
     wandb.yaml                  Default: Weights & Biases run (project/entity/group/tags/mode)
     none.yaml                    Console/Hydra log lines only; for throwaway runs
 .env.example                 Template for the untracked .env holding secrets (WANDB_API_KEY)
@@ -119,6 +119,11 @@ python -m src.train agent=ppo wandb.group=ablation-lr wandb.tags=[baseline]
 python -m src.train agent=ppo wandb.mode=offline    # record now, `wandb sync` later
 python -m src.train agent=ppo callbacks=none        # no metric backend at all
 ```
+
+Online W&B logging is required when selected: configure `WANDB_API_KEY` in an
+untracked `.env` or run `wandb login --verify`. Authentication, connection, or
+logging failures stop training. Use `wandb.mode=offline` only when local
+recording for a later `wandb sync` is intentional.
 
 Slurm support is kept separately in [`slurm-conf/`](slurm-conf/README.md). The
 profiles select a normal Hydra config and add scheduler-specific overrides;

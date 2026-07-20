@@ -29,9 +29,11 @@ wandb:
   group: null
   job_type: train
   tags: []
-  # online, offline (record for a later `wandb sync`), disabled or shared.
+  # online requires working credentials/network; offline is an explicit choice.
   mode: online
   notes: null
+  # Keep W&B's local files beside this Hydra run, including on scratch.
+  dir: ${hydra:runtime.output_dir}
 
 # Keep Hydra's own logs and multirun artifacts under the configured output
 # location as well. The default expands to Hydra's usual outputs/date/time

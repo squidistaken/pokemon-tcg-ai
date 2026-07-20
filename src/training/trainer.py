@@ -91,8 +91,8 @@ class Trainer(BaseTrainer):
         wins = 0
         draws = 0
         start_time = time.time()
-        self._callbacks.on_train_start(self._run_config)
         try:
+            self._callbacks.on_train_start(self._run_config)
             with tqdm(total=self._total_frames, unit="frame") as progress_bar:
                 for data in collector:
                     self._callbacks.on_rollout_start(frames)

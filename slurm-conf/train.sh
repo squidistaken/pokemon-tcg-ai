@@ -12,42 +12,19 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
-SLURM_CONFIG=""
-EXPECT_SLURM_CONFIG=false
-for ARG in "$@"; do
-  if [ "$EXPECT_SLURM_CONFIG" = true ]; then
-    SLURM_CONFIG="$ARG"
-    EXPECT_SLURM_CONFIG=false
-  elif [ "$ARG" = "--slurm-config" ]; then
-    EXPECT_SLURM_CONFIG=true
-  fi
-done
-
-if [ -z "$SLURM_CONFIG" ]; then
-  echo "ERROR: --slurm-config must be followed by a config name" >&2
-  exit 2
-fi
-
-case "$(basename "$SLURM_CONFIG")" in
-  train_gpu_rtx|train_gpu_rtx.yaml)
-    UV_ENVIRONMENT=".venv-rtx"
-    SETUP_COMMAND="./slurm-conf/setup_uv.sh --use-rtx"
-    ;;
-  *)
-    UV_ENVIRONMENT=".venv"
-    SETUP_COMMAND="./slurm-conf/setup_uv.sh"
-    ;;
-esac
-
 module purge
 module load "$PYTHON_MODULE"
 module load "$UV_MODULE"
 
 cd "$PROJECT_ROOT"
-export UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/$UV_ENVIRONMENT"
-if [ ! -x "$UV_PROJECT_ENVIRONMENT/bin/python" ]; then
-  echo "ERROR: required environment $UV_ENVIRONMENT is missing; run: $SETUP_COMMAND" >&2
+if [ -x "$PROJECT_ROOT/.venv/bin/python" ]; then
+  CONTROL_ENVIRONMENT=".venv"
+elif [ -x "$PROJECT_ROOT/.venv-rtx/bin/python" ]; then
+  CONTROL_ENVIRONMENT=".venv-rtx"
+else
+  echo "ERROR: no uv environment is available; run: ./slurm-conf/setup_uv.sh" >&2
   exit 1
 fi
+export UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/$CONTROL_ENVIRONMENT"
 
 exec uv run --frozen --no-sync python "$SCRIPT_DIR/submit.py" "$@"

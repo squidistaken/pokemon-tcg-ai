@@ -66,11 +66,14 @@ uv sync --frozen
 uv run --frozen --no-sync python - <<'PY'
 import platform
 
+import dotenv
 import torch
+import wandb
 from cg import sim
 
 print(f"Platform: {platform.platform()}")
 print(f"PyTorch: {torch.__version__}")
+print(f"W&B: {wandb.__version__}")
 print(f"Engine: {sim.lib._name}")
 print("Environment check passed")
 PY
