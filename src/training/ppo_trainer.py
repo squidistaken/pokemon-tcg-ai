@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Callable
-from typing import cast
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, cast
 
 import torch
 from tensordict import TensorDict
+from tensordict.nn import ProbabilisticTensorDictSequential
 from torch import nn
 from torchrl.data import Categorical
 from torchrl.envs import EnvBase
@@ -16,6 +17,7 @@ from torchrl.objectives.value import GAE
 
 from src.models.actor_critic import ActorCritic
 from src.policies.ppo_actor import build_ppo_operator
+from src.training.callbacks import TrainingCallback
 from src.training.loss._helpers import _sum_loss_keys
 from src.training.trainer import Trainer
 
@@ -86,6 +88,8 @@ class PPOTrainer(Trainer):
             ent_warm_frac: float = 0.5,
             reward_scaling: float = 1.0,
             ncl_model: nn.Module | None = None,
+            callbacks: Iterable[TrainingCallback] | None = None,
+            run_config: Mapping[str, Any] | None = None,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -133,6 +137,11 @@ class PPOTrainer(Trainer):
             estimation / grad clipping is not implemented; passing a non-None
             module raises ``NotImplementedError``. See the NCL note in
             ``docs/architecture/ppo-transformer-actor-critic.md``.
+        :param callbacks: Metric observers, forwarded to
+            :class:`~src.training.trainer.Trainer`. The PPO losses returned by
+            :meth:`_update` reach them without any extra wiring here.
+        :param run_config: Opaque run metadata forwarded to
+            :class:`~src.training.trainer.Trainer`.
         """
         # NCL: accepted for interface parity with the colleague's file, but the
         # FIM-estimation / gradient-projection machinery is not implemented here.
@@ -162,6 +171,8 @@ class PPOTrainer(Trainer):
             use_parallel_env=use_parallel_env,
             mp_start_method=mp_start_method,
             serial_for_single=serial_for_single,
+            callbacks=callbacks,
+            run_config=run_config,
         )
         self._device = torch.device(device)
         self._num_epochs = num_epochs
@@ -179,7 +190,9 @@ class PPOTrainer(Trainer):
             average_gae=True,
         )
         self._loss = ClipPPOLoss(
-            actor_network=self._operator.get_policy_operator(),
+            actor_network=cast(
+                ProbabilisticTensorDictSequential, self._operator.get_policy_operator()
+            ),
             critic_network=self._operator.get_value_operator(),
             clip_epsilon=clip_epsilon,
             entropy_bonus=True,

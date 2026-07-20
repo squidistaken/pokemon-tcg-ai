@@ -1,12 +1,18 @@
 import random
+from pathlib import Path
+from typing import Any, cast
 
 import hydra
 import torch
+from dotenv import load_dotenv
 from omegaconf import DictConfig, OmegaConf
+from torchrl.data import Categorical
 
 from src.policies.ppo_actor import build_actor_critic
 from src.policies.random_masked_policy import RandomMaskedPolicy
-from src.training import PPOTrainer, Trainer, make_env_factories
+from src.training import PPOTrainer, Trainer, TrainingCallback, make_env_factories
+
+load_dotenv(Path(__file__).parents[1] / ".env", override=False)
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
@@ -20,13 +26,18 @@ def main(cfg: DictConfig) -> None:
 
     :param cfg: Hydra configuration object, composed from conf/config.yaml.
     """
-    print(OmegaConf.to_yaml(cfg))
+    # Resolved, so the callbacks block shows the W&B values it interpolates
+    # from cfg.wandb rather than the raw ${wandb.*} references.
+    print(OmegaConf.to_yaml(cfg, resolve=True))
     if cfg.set_seed:
         random.seed(cfg.seed)
         torch.manual_seed(cfg.seed)
 
+    callbacks = _build_callbacks(cfg)
+    run_config = _run_config(cfg)
+
     if cfg.agent.name == "ppo":
-        trainer = _build_ppo_trainer(cfg)
+        trainer = _build_ppo_trainer(cfg, callbacks, run_config)
     else:
         trainer = Trainer(
             env_factories=make_env_factories(cfg),
@@ -36,6 +47,8 @@ def main(cfg: DictConfig) -> None:
             use_parallel_env=cfg.env.parallel,
             mp_start_method=cfg.env.mp_start_method,
             serial_for_single=cfg.env.serial_for_single,
+            callbacks=callbacks,
+            run_config=run_config,
         )
 
     stats = trainer.train()
@@ -46,7 +59,31 @@ def main(cfg: DictConfig) -> None:
     )
 
 
-def _build_ppo_trainer(cfg: DictConfig) -> PPOTrainer:
+def _build_callbacks(cfg: DictConfig) -> list[TrainingCallback]:
+    """
+    Instantiate the metric backends selected by the ``callbacks`` config group.
+
+    :param cfg: Hydra configuration with a top-level ``callbacks`` list.
+    :return: Instantiated callbacks; empty for ``callbacks=none``.
+    """
+    return [hydra.utils.instantiate(callback) for callback in cfg.callbacks]
+
+
+def _run_config(cfg: DictConfig) -> dict[str, Any]:
+    """
+    Resolve the Hydra config into a plain dict for the callbacks.
+
+    :param cfg: Hydra configuration object.
+    :return: The fully resolved config as nested plain Python types.
+    """
+    return cast(dict[str, Any], OmegaConf.to_container(cfg, resolve=True))
+
+
+def _build_ppo_trainer(
+        cfg: DictConfig,
+        callbacks: list[TrainingCallback],
+        run_config: dict[str, Any],
+) -> PPOTrainer:
     """
     Assemble the PPO trainer, actor-critic and environment from the config.
 
@@ -56,6 +93,8 @@ def _build_ppo_trainer(cfg: DictConfig) -> PPOTrainer:
 
     :param cfg: Hydra configuration with ``agent`` (PPO hyperparameters),
         ``model`` and ``env`` sections.
+    :param callbacks: Metric backends to attach to the trainer.
+    :param run_config: Resolved run config, forwarded to the callbacks.
     :return: A configured :class:`~src.training.ppo_trainer.PPOTrainer`.
     """
     env_factories = make_env_factories(cfg)
@@ -65,6 +104,7 @@ def _build_ppo_trainer(cfg: DictConfig) -> PPOTrainer:
         action_spec = probe_env.action_spec
     finally:
         probe_env.close()
+    assert isinstance(action_spec, Categorical), "env action spec must be Categorical"
 
     actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
     frames_per_batch = int(cfg.agent.get("frames_per_batch", cfg.collector.frames_per_batch))
@@ -95,6 +135,8 @@ def _build_ppo_trainer(cfg: DictConfig) -> PPOTrainer:
         ent_anneal=cfg.agent.get("ent_anneal", False),
         ent_warm_frac=cfg.agent.get("ent_warm_frac", 0.5),
         reward_scaling=cfg.agent.get("reward_scaling", 1.0),
+        callbacks=callbacks,
+        run_config=run_config,
     )
 
 
