@@ -7,6 +7,7 @@ from omegaconf import DictConfig
 from torchrl.data import Categorical, Composite
 
 from cg.api import Observation
+from src.env.observation_encoder import ObservationEncoder
 from src.env.random_opponent import RandomOpponent
 from src.env.snapshot_opponent_pool import SnapshotOpponentPool
 from src.policies.greedy_policy_opponent import load_greedy_opponent
@@ -82,10 +83,20 @@ def _make_pool(
     :param seed: Seed for the league's member sampler.
     :return: The league for this worker.
     """
+    # One encoder shared by every snapshot this worker loads. Encoders are
+    # stateless between calls (their scratch buffers are cloned on the way out)
+    # and only the pool's active member ever runs, so sharing is safe. Building
+    # one per snapshot instead would allocate a fresh set of buffers per league
+    # member, and would re-arm each encoder's one-shot truncation warning.
+    encoder = make_encoder(cfg.env.get("encoder", "structured"), int(cfg.env.max_options))
     return SnapshotOpponentPool(
         checkpoint_dir=checkpoint_dir,
         load_snapshot=partial(
-            _load_snapshot, cfg=cfg, obs_spec=obs_spec, action_spec=action_spec
+            _load_snapshot,
+            cfg=cfg,
+            obs_spec=obs_spec,
+            action_spec=action_spec,
+            encoder=encoder,
         ),
         warmup_opponents=[RandomOpponent(seed=seed)],
         pool_size=pool_size,
@@ -98,21 +109,21 @@ def _load_snapshot(
         cfg: DictConfig,
         obs_spec: Composite,
         action_spec: Categorical,
+        encoder: ObservationEncoder,
 ) -> Callable[[Observation], list[int]]:
     """
     Load one snapshot into a greedy opponent inside the calling worker.
-
-    The observation encoder is built here rather than passed in, so nothing
-    encoder-shaped has to cross the process boundary.
 
     :param checkpoint_path: Snapshot written by
         :func:`~src.policies.greedy_policy_opponent.save_actor_critic`.
     :param cfg: Hydra config used to rebuild the matching architecture.
     :param obs_spec: Environment observation composite spec.
     :param action_spec: Environment action spec.
+    :param encoder: Observation encoder, shared with this worker's other
+        league members; built inside the worker so nothing encoder-shaped has
+        to cross the process boundary.
     :return: A greedy opponent playing that snapshot.
     """
-    encoder = make_encoder(cfg.env.get("encoder", "structured"), int(cfg.env.max_options))
     # Opponents always infer on CPU: they run inside the env workers, which are
     # CPU-only, and a per-worker CUDA context would be far costlier than the
     # small MLP forward it would accelerate.

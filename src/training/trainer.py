@@ -1,6 +1,8 @@
 import logging
+import signal
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any, cast
 
 from tensordict import TensorDict
@@ -19,6 +21,31 @@ logger = logging.getLogger(__name__)
 # Anything else in a metrics mapping comes from the algorithm's _update and is
 # formatted generically.
 _CORE_METRICS = ("frames", "episodes", "win_rate", "draw_rate", "fps")
+
+
+@contextmanager
+def _deferred_interrupt() -> Iterator[None]:
+    """
+    Ignore SIGINT for the duration of the block, restoring the handler after.
+
+    Shutdown must not itself be interruptible. A second Ctrl-C arriving while
+    the collector is tearing down leaves the ParallelEnv workers orphaned and
+    their semaphores unreleased, which is precisely the mess the first Ctrl-C
+    was trying to avoid.
+
+    :return: Context manager yielding nothing.
+    """
+    try:
+        previous_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except ValueError:
+        # Signal handlers can only be installed from the main thread; off it,
+        # cleanup simply runs unprotected rather than failing.
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
 
 
 class Trainer(BaseTrainer):
@@ -83,7 +110,8 @@ class Trainer(BaseTrainer):
         """
         Run collection until ``total_frames``, updating after every rollout.
 
-        :return: Aggregate statistics: frames, episodes, win/draw rate and fps.
+        :return: Aggregate statistics: frames, episodes, win/draw rate and fps,
+            covering the frames collected before any interruption.
         """
         # Opt out of torchrl's automatic policy-transform registration: env
         # transforms are managed explicitly by the env factories, and the
@@ -129,10 +157,17 @@ class Trainer(BaseTrainer):
                         self._callbacks.on_eval_end(
                             frames, self._evaluator.evaluate(self._policy)
                         )
+        except KeyboardInterrupt:
+            logger.warning(
+                "Interrupted at %d frames; shutting down and reporting partial results. "
+                "Press Ctrl-C again only if shutdown hangs.",
+                frames,
+            )
         finally:
-            if self._evaluator is not None:
-                self._evaluator.close()
-            collector.shutdown()
+            with _deferred_interrupt():
+                if self._evaluator is not None:
+                    self._evaluator.close()
+                collector.shutdown()
             summary = self._metrics(frames, episodes, wins, draws, time.time() - start_time)
             self._callbacks.on_train_end(summary)
         return summary

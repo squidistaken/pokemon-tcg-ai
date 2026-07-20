@@ -97,6 +97,7 @@ conf/                        Hydra configs (config.yaml + env/, agent/, model/, 
 scripts/                     Standalone dev scripts (not part of the training entry point)
   bench_throughput.py          Collection throughput benchmark (naive vs SerialEnv vs ParallelEnv)
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
+  run_selfplay_compile.sh      1M-frame self-play run with torch.compile (caps Inductor's compile workers)
 decks/                       Example deck CSVs
 docs/                        Design docs (torchrl_environment.md, game.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)

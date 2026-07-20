@@ -117,7 +117,7 @@ class StructuredObservationEncoder(ObservationEncoder):
             prize_cap: int = 6,
             deck_cap: int = 60,
             looking_cap: int = 60,
-            energy_cap: int = 16,
+            energy_cap: int = 24,
             evolution_cap: int = 2,
     ) -> None:
         """
@@ -150,7 +150,10 @@ class StructuredObservationEncoder(ObservationEncoder):
             Matches ``DECK_SIZE``, for the same reason as ``deck_cap``.
         :param energy_cap: Padded number of attached energy cards per
             Pokemon. No engine limit; headroom above realistic attachment
-            counts.
+            counts. Raised from 16 after long stalling games were observed
+            exceeding it. Note that overflow only drops the surplus cards'
+            identities: the attachment count and the per-type histogram in
+            ``features`` are both computed from the untruncated list.
         :param evolution_cap: Padded number of pre-evolution cards per
             Pokemon. Matches the fixed evolution chain depth: Basic ->
             Stage 1 -> Stage 2 is at most 2 pre-evolutions.

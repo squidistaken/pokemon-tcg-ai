@@ -233,6 +233,31 @@ def test_real_snapshot_loads_back_into_the_league(tmp_path, structured_model_cfg
     assert pool.snapshot_count == 1
 
 
+def test_league_members_share_one_encoder(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+    """
+    Every snapshot a worker loads reuses that worker's single encoder, rather
+    than allocating a fresh set of scratch buffers (and a fresh one-shot
+    truncation warning) per league member.
+    """
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    callback = SnapshotCallback(actor_critic, tmp_path, interval=100)
+    for frames in (100, 200, 300):
+        callback.on_rollout_end(frames, {})
+
+    factory = build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
+    assert factory is not None
+    pool = factory()
+    pool.on_reset()
+    assert pool.snapshot_count == 3
+
+    # Sharing is an internal arrangement with no public surface, so the
+    # assertion has to reach for the private members to observe it.
+    members = pool._opponents  # noqa: SLF001
+    encoders = {id(member._encoder) for member in members if hasattr(member, "_encoder")}  # noqa: SLF001
+    assert len(encoders) == 1
+
+
 @pytest.mark.parametrize("deterministic", [True, False])
 def test_evaluator_scores_policy_against_fixed_opponent(structured_model_cfg, deterministic) -> None:
     """

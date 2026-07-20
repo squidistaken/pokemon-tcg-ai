@@ -17,7 +17,7 @@ pool_size: 5
 # Periodic evaluation against a fixed RandomOpponent, logged to W&B under
 # "eval/". Essential here: under self-play the collected win_rate is pinned
 # near 0.5 by construction, so it says nothing about whether the agent improved.
-eval_interval: 50000
+eval_interval: 50000  # every X timesteps
 eval_episodes: 15
 # Take the policy's argmax (true) or sample from it (false). Deterministic
 # gives a lower-variance curve; stochastic matches collection-time behaviour.
