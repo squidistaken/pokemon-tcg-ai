@@ -10,6 +10,7 @@ from torchrl.modules.distributions import MaskedCategorical
 from src.models.actor_critic import ActorCritic
 from src.models.backbone import Backbone
 from src.models.heads import ValueHead
+from src.models.structured_obs_adapter import StructuredObsAdapter
 
 HIDDEN_KEY = "hidden"
 OPTION_REPR_KEY = "option_repr"
@@ -87,8 +88,15 @@ def build_actor_critic(
     spec-derived dimensions injected, so which backbone and head are used is a
     pure config choice. The value head is built from ``cfg.model.value_head``.
 
+    When any in-key names a composite group (the structured encoder's
+    ``options``/``pokemon``/zone tables), a
+    :class:`~src.models.structured_obs_adapter.StructuredObsAdapter` is built
+    from ``cfg.model.adapter`` (defaults when absent) and handed to the
+    backbone, which then consumes the adapter's embedded/normalized feature
+    vector instead of naively flattened raw fields.
+
     :param cfg: Hydra config carrying a ``model`` section (``embed_dim``,
-        ``backbone``, ``head``, ``value_head``).
+        ``backbone``, ``head``, ``value_head``, optionally ``adapter``).
     :param obs_spec: Environment observation composite spec.
     :param action_spec: Environment action spec (a ``Categorical``); its size
         is ``max_options + 1``.
@@ -100,12 +108,15 @@ def build_actor_critic(
     n_actions = int(action_spec.space.n)
 
     in_keys = _normalize_keys(cfg.model.backbone.get("in_keys", DEFAULT_IN_KEYS))
-    input_dim = _input_dim(obs_spec, in_keys)
-    backbone: Backbone = instantiate(
-        cfg.model.backbone,
-        input_dim=input_dim,
-        out_features=embed_dim,
-    )
+    backbone_kwargs: dict = {"out_features": embed_dim}
+    if any(isinstance(obs_spec[key], Composite) for key in in_keys):
+        adapter_kwargs = dict(cfg.model.get("adapter", None) or {})
+        adapter = StructuredObsAdapter(obs_spec=obs_spec, in_keys=in_keys, **adapter_kwargs)
+        backbone_kwargs["adapter"] = adapter
+        backbone_kwargs["input_dim"] = adapter.out_features
+    else:
+        backbone_kwargs["input_dim"] = _input_dim(obs_spec, in_keys)
+    backbone: Backbone = instantiate(cfg.model.backbone, **backbone_kwargs)
     # Hydra re-wraps list kwargs as ListConfig; set the normalized (nested-key
     # tuple) form directly so tensordict key lookups resolve.
     backbone.in_keys = in_keys

@@ -1,6 +1,8 @@
 import logging
+import signal
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
+from contextlib import contextmanager
 from typing import Any, cast
 
 from tensordict import TensorDict
@@ -11,6 +13,7 @@ from tqdm import tqdm
 
 from src.training.base_trainer import BaseTrainer
 from src.training.callbacks import CallbackList, TrainingCallback
+from src.training.evaluator import Evaluator
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,34 @@ logger = logging.getLogger(__name__)
 # Anything else in a metrics mapping comes from the algorithm's _update and is
 # formatted generically.
 _CORE_METRICS = ("frames", "episodes", "win_rate", "draw_rate", "fps")
+
+
+@contextmanager
+def _deferred_interrupt() -> Generator[None, None, None]:
+    """
+    Ignore SIGINT for the duration of the block, restoring the handler after.
+
+    Shutdown must not itself be interruptible. A second Ctrl-C arriving while
+    the collector is tearing down leaves the ParallelEnv workers orphaned and
+    their semaphores unreleased, which is precisely the mess the first Ctrl-C
+    was trying to avoid.
+
+    :return: Context manager yielding nothing.
+    """
+    try:
+        previous_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except ValueError:
+        # Signal handlers can only be installed from the main thread; off it,
+        # cleanup simply runs unprotected rather than failing.
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(
+            signal.SIGINT,
+            previous_handler if previous_handler is not None else signal.default_int_handler,
+        )
 
 
 class Trainer(BaseTrainer):
@@ -43,6 +74,8 @@ class Trainer(BaseTrainer):
             serial_for_single: bool = True,
             callbacks: Iterable[TrainingCallback] | None = None,
             run_config: Mapping[str, Any] | None = None,
+            evaluator: Evaluator | None = None,
+            eval_interval: int = 0,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -57,6 +90,12 @@ class Trainer(BaseTrainer):
             end. None attaches nothing, leaving console logging as the only sink.
         :param run_config: Opaque run metadata (in practice the resolved Hydra
             config) forwarded verbatim to ``on_train_start``; never read here.
+        :param evaluator: Scores the policy against a fixed reference opponent
+            every ``eval_interval`` frames, reporting through ``on_eval_end``.
+            None skips evaluation entirely. Needed under self-play, where the
+            collected win-rate is pinned near 0.5 by construction.
+        :param eval_interval: Frames between evaluations; ``0`` disables them
+            even when an evaluator is supplied.
         """
         self._env_factories = env_factories
         self._policy = policy
@@ -67,18 +106,21 @@ class Trainer(BaseTrainer):
         self._serial_for_single = serial_for_single
         self._callbacks = CallbackList(callbacks or ())
         self._run_config = run_config if run_config is not None else {}
+        self._evaluator = evaluator
+        self._eval_interval = eval_interval
 
     def train(self) -> dict[str, float]:
         """
         Run collection until ``total_frames``, updating after every rollout.
 
-        :return: Aggregate statistics: frames, episodes, win/draw rate and fps.
+        :return: Aggregate statistics: frames, episodes, win/draw rate and fps,
+            covering the frames collected before any interruption.
         """
         # Opt out of torchrl's automatic policy-transform registration: env
         # transforms are managed explicitly by the env factories, and the
         # policies used here read "action_mask" directly without needing the
         # InitTracker transform the collector's heuristic would append.
-        collector = Collector(   # Maybe move to data member
+        collector = Collector(
             create_env_fn=self._make_vec_env(),
             policy=self._policy,
             frames_per_batch=self._frames_per_batch,
@@ -90,6 +132,7 @@ class Trainer(BaseTrainer):
         episodes = 0
         wins = 0
         draws = 0
+        last_eval_frames = 0
         start_time = time.time()
         try:
             self._callbacks.on_train_start(self._run_config)
@@ -104,18 +147,50 @@ class Trainer(BaseTrainer):
                     episodes += int(done.sum())
                     wins += int((final_rewards > 0).sum())
                     draws += int((final_rewards == 0).sum())
+
+                    # Perform update step (return surrgate loss)
                     losses = self._update(data)
+
                     metrics = self._metrics(
                         frames, episodes, wins, draws, time.time() - start_time, losses
                     )
                     progress_bar.update(batch_frames)
                     self._log_progress(progress_bar, metrics)
                     self._callbacks.on_rollout_end(frames, metrics)
+                    if self._should_evaluate(frames, last_eval_frames):
+                        last_eval_frames = frames
+                        assert self._evaluator is not None
+                        self._callbacks.on_eval_end(
+                            frames, self._evaluator.evaluate(self._policy)
+                        )
+        except KeyboardInterrupt:
+            logger.warning(
+                "Interrupted at %d frames; shutting down and reporting partial results. "
+                "Press Ctrl-C again only if shutdown hangs.",
+                frames,
+            )
         finally:
-            collector.shutdown()
+            with _deferred_interrupt():
+                if self._evaluator is not None:
+                    self._evaluator.close()
+                collector.shutdown()
             summary = self._metrics(frames, episodes, wins, draws, time.time() - start_time)
             self._callbacks.on_train_end(summary)
         return summary
+
+    def _should_evaluate(self, frames: int, last_eval_frames: int) -> bool:
+        """
+        Whether an evaluation round is due after the rollout just finished.
+
+        :param frames: Total frames collected so far.
+        :param last_eval_frames: Frame count at the previous evaluation.
+        :return: True if an evaluator is attached and the interval has elapsed.
+        """
+        return (
+            self._evaluator is not None
+            and self._eval_interval > 0
+            and frames - last_eval_frames >= self._eval_interval
+        )
 
     @staticmethod
     def _metrics(
@@ -172,9 +247,6 @@ class Trainer(BaseTrainer):
     def _update(self, data: TensorDict) -> dict[str, float] | None:  # noqa: ARG002, PLR6301
         """
         Run the algorithm-specific update on a collected batch.
-
-        TODO: No-op in the base class; PPO overrides this with the
-        advantage/minibatch/optimizer loop.
 
         :param data: One batch of ``frames_per_batch`` transitions from the
             Collector, as a TensorDict shaped ``(B, T)`` where ``B`` is

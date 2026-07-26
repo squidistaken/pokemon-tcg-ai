@@ -1,5 +1,5 @@
 from tensordict import TensorDictBase
-from torch import nn
+from torch import Tensor, nn
 
 from .backbone import Backbone
 
@@ -59,3 +59,23 @@ class ActorCritic(nn.Module):
         tensordict.set("logits", self.policy_head(state_repr, option_repr))
         tensordict.set("state_value", self.value_head(state_repr))
         return tensordict
+
+    def policy_logits(self, tensordict: TensorDictBase) -> Tensor:
+        """
+        Compute action logits only, skipping the value head.
+
+        Used by inference-time consumers that never read the critic, most
+        notably :class:`~src.policies.greedy_policy_opponent.GreedyPolicyOpponent`
+        running inside the environment workers, where the discarded value pass
+        is pure overhead on every opponent move.
+
+        :param tensordict: Input tensordict carrying the backbone's ``in_keys``.
+        :return: Action logits of shape ``(..., n_actions)``.
+        """
+        inputs = [tensordict.get(key) for key in self.backbone.in_keys]
+        encoded = self.backbone(*inputs)
+        if self.backbone.produces_option_repr:
+            state_repr, option_repr = encoded
+        else:
+            state_repr, option_repr = encoded, None
+        return self.policy_head(state_repr, option_repr)

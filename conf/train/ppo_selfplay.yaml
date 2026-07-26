@@ -1,14 +1,15 @@
-# Self-play training configuration.
-# Device used by the PPO policy and optimizer. Slurm GPU profiles override this
-# with "cuda"; local runs remain CPU-only by default.
-device: cpu
-# Opponent to face before the first snapshot exists: "random" or "self".
-warmup_opponent: random
-# Freeze the learner into the self-play pool every N collected frames
-# (0 disables snapshotting -> train against the warmup opponent only).
+# Self-play training: the learner is periodically frozen into an opponent pool
+# the environments sample from. Everything not listed below comes from
+# default.yaml.
+defaults:
+  - default
+  - _self_
+
 snapshot_interval: 50000
-# Directory learner snapshots are written to and reloaded from (ParallelEnv
-# workers reload from disk; no shared Python object across processes).
-checkpoint_dir: ${paths.checkpoint_dir}
-# Number of most-recent snapshots kept in the opponent pool.
-pool_size: 5
+# Periodic evaluation is essential here: under self-play the collected win_rate
+# is pinned near 0.5 by construction, so it says nothing about whether the agent
+# improved. The evaluator faces the fixed `eval_opponent` instead.
+eval_interval: 50000  # every X timesteps
+# Fewer episodes than the default: this runs repeatedly during a run, and each
+# evaluation episode is time not spent collecting.
+eval_episodes: 15

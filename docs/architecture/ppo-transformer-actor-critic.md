@@ -181,27 +181,29 @@ layer). Adopted features: AMP (`torch.amp`), `torch.compile` (loss + policy),
 - **AMP uses `torch.amp`** (not the deprecated `torch.cuda.amp`), required by the test suite's
   `filterwarnings=error`. `compile_*` defaults **off** (slow/fragile on the CPU dev box).
 
-#### NCL (`ncl_model`) — guarded stub, deferred
+#### NCL (`ncl_model`) — removed
 
 The colleague's trainer exposed an `ncl_model` parameter for **Natural Continual Learning**: a
 Fisher-Information-Matrix estimate that anchors the weights important to previously-learned tasks
-and projects/clips gradients to resist **catastrophic forgetting**. It is carried here as a
-**guarded stub** — the parameter is accepted for interface parity, but passing a non-None module
-raises `NotImplementedError`.
+and projects/clips gradients to resist **catastrophic forgetting**. It was carried here for a time
+as a guarded stub that accepted the parameter and raised `NotImplementedError`. That stub has since
+been **removed** — an always-raising parameter bought interface parity at the cost of implying a
+capability that never existed.
 
-*Why it is not merely academic here:* this project is building toward **self-play against a shifting
-`OpponentPool`**, a non-stationary / quasi-continual problem, and the
+The rationale is kept because the underlying question is still open, and is now *more* live than
+when it was written. Self-play **is** wired into the training entrypoint (`train=ppo_selfplay`), so
+the non-stationarity that motivates NCL can now actually manifest; the
 [self-play exploitability review](self-play-exploitability-review.md) names catastrophic forgetting
-/ cycling (best-responding only to the latest opponent) as the central risk. FIM weight-anchoring is
-a *candidate* mitigation for that forgetting.
+/ cycling (best-responding only to the latest opponent) as the central risk, and FIM
+weight-anchoring is a *candidate* mitigation.
 
-*Why it is nonetheless deferred:* (1) the canonical fix in this project's chosen literature
-(ByteRL/OSFP) addresses forgetting at the **opponent-sampling** level — a win-rate-gated diverse
-mixture — not via optimizer-side weight regularization; (2) self-play is **not yet wired into the
-training entrypoint** (review finding #1), so the forgetting problem cannot manifest today; (3)
-EWC/NCL-style FIM regularization in deep RL is finicky (noisy/expensive FIM, can suppress
-plasticity), and there is no in-repo spec for the intended contract. Revisit only once self-play is
-live and forgetting is empirically observed — trying OSFP-style opponent gating first.
+It remains deferred because (1) the canonical fix in this project's chosen literature (ByteRL/OSFP)
+addresses forgetting at the **opponent-sampling** level — a win-rate-gated diverse mixture — not via
+optimizer-side weight regularization, and the current league already keeps a permanent fixed
+reference member in that spirit; (2) EWC/NCL-style FIM regularization in deep RL is finicky
+(noisy/expensive FIM, can suppress plasticity), and there is no in-repo spec for the intended
+contract. Revisit only once forgetting is empirically observed on the `eval/` curve — trying
+OSFP-style opponent gating first.
 
 ### 7. Self-play (reuse existing scaffold)
 

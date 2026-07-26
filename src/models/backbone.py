@@ -81,22 +81,22 @@ class MLPBackbone(Backbone):
     """
     Flat multi-layer-perceptron trunk — the literature's proven PPO baseline.
 
-    Flattens every input into a per-sample feature vector, concatenates them
+    Turns every input into a per-sample feature vector, concatenates them
     along the last dimension, and runs the result through a fully-connected
-    stack. This is the honest control every richer (permutation-invariant)
-    backbone must beat. It reads only global state, so it emits no per-option
-    tokens (:attr:`produces_option_repr` is False) and pairs with
+    stack. This is the honest control every richer (per-option-token)
+    backbone must beat. It emits no per-option tokens
+    (:attr:`produces_option_repr` is False) and pairs with
     :class:`~src.models.heads.LinearPolicyHead`.
 
-    Each positional input is either a plain tensor already shaped
-    ``(*batch, features)`` (used as-is, e.g. the flat 36-dim observation or
-    the structured encoder's scalar leaves like ``globals``), or a nested
-    :class:`~tensordict.TensorDictBase` (e.g. the structured encoder's
-    ``options``/``pokemon``/zone groups), whose leaves are individually
-    flattened past its own ``batch_size`` and concatenated. Card/attack IDs
-    and boolean masks are cast to float and concatenated like any other
-    feature — this is a deliberately naive baseline; embedding lookups and
-    permutation-invariant pooling are future backbones' job, not this one's.
+    With a :class:`~src.models.structured_obs_adapter.StructuredObsAdapter`
+    attached (the standard pairing, wired by
+    :func:`~src.policies.ppo_actor.build_actor_critic`), the adapter performs
+    the model-side half of the observation contract — embedding card/attack
+    IDs, normalizing scalars, pooling unordered zones — before the MLP.
+    Without one, each input is naively flattened and cast to float: plain
+    tensors past their last dimension, nested
+    :class:`~tensordict.TensorDictBase` groups leaf by leaf past their own
+    ``batch_size``.
     """
 
     produces_option_repr = False
@@ -108,17 +108,30 @@ class MLPBackbone(Backbone):
             num_cells: list[int],
             activation: str = "tanh",
             in_keys: list[str] | None = None,
+            adapter: nn.Module | None = None,
     ) -> None:
         """
-        :param input_dim: Summed width of the concatenated input vectors.
+        :param input_dim: Width of the concatenated feature vector fed to the
+            MLP; with an adapter this must equal its ``out_features``.
         :param out_features: Width of the produced ``state_repr``.
         :param num_cells: Hidden layer widths of the MLP.
         :param activation: Hidden activation name (see :func:`activation_class`).
         :param in_keys: Observation keys to consume; defaults to
-            ``["observation"]`` (the flat observation).
+            ``["observation"]`` (a single pre-built feature vector).
+        :param adapter: Optional :class:`~src.models.structured_obs_adapter.
+            StructuredObsAdapter` handling the structured groups; None falls
+            back to naive flattening.
+        :raises ValueError: If the adapter's output width disagrees with
+            ``input_dim``.
         """
         super().__init__(in_keys=in_keys or ["observation"], out_features=out_features)
+        if adapter is not None and adapter.out_features != input_dim:
+            raise ValueError(
+                f"Adapter produces {adapter.out_features} features but the MLP expects "
+                f"input_dim={input_dim}."
+            )
         self.input_dim = input_dim
+        self.adapter = adapter
         self.mlp = MLP(
             in_features=input_dim,
             out_features=out_features,
@@ -128,11 +141,12 @@ class MLPBackbone(Backbone):
 
     def forward(self, *inputs: torch.Tensor | TensorDictBase) -> torch.Tensor:
         """
-        Flatten, concatenate and encode the inputs into ``state_repr``.
+        Vectorize, concatenate and encode the inputs into ``state_repr``.
 
         :param inputs: One entry per :attr:`in_keys`: either a per-sample
             feature vector shaped ``(*batch, features)``, or a nested
-            tensordict whose leaves are flattened past its own ``batch_size``.
+            tensordict group handed to the adapter (or naively flattened
+            leaf by leaf when no adapter is attached).
         :return: ``state_repr`` of shape ``(*batch, out_features)``.
         """
         if len(inputs) != len(self.in_keys):
@@ -140,6 +154,8 @@ class MLPBackbone(Backbone):
                 f"MLPBackbone expected {len(self.in_keys)} inputs for keys "
                 f"{self.in_keys}, got {len(inputs)}."
             )
+        if self.adapter is not None:
+            return self.mlp(self.adapter(*inputs))
         flat_parts: list[torch.Tensor] = []
         for value in inputs:
             if isinstance(value, TensorDictBase):
