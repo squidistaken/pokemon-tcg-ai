@@ -8,7 +8,6 @@ from torchrl.envs.transforms import ActionMask
 
 from cg.api import Observation
 from src.env.deck import load_deck
-from src.env.flat_observation_encoder import FlatObservationEncoder
 from src.env.observation_encoder import ObservationEncoder
 from src.env.structured_observation_encoder import StructuredObservationEncoder
 from src.env.tcg_env import TCGEnv
@@ -20,19 +19,14 @@ def make_encoder(name: str, max_options: int) -> ObservationEncoder:
     """
     Build the observation encoder selected by name.
 
-    :param name: ``structured`` (default env encoder; ``MLPBackbone`` and
-        future backbones train against this) or ``flat`` (legacy 36-dim
-        vector, kept only for regression testing / reference comparison —
-        not a supported training path).
+    :param name: Encoder name; ``structured`` is the only supported encoder.
     :param max_options: Padded option-space size of the environment.
     :return: A matching :class:`~src.env.observation_encoder.ObservationEncoder`.
     :raises ValueError: If the name is unknown.
     """
     if name == "structured":
         return StructuredObservationEncoder(max_options=max_options)
-    if name == "flat":
-        return FlatObservationEncoder()
-    raise ValueError(f"Unknown observation encoder '{name}'; expected 'structured' or 'flat'.")
+    raise ValueError(f"Unknown observation encoder '{name}'; expected 'structured'.")
 
 
 def make_env(
@@ -66,7 +60,14 @@ def make_env(
         opponent=opponent,
         encoder=make_encoder(encoder, max_options),
     )
-    return TransformedEnv(base_env, ActionMask())
+    env = TransformedEnv(base_env, ActionMask())
+    # TransformedEnv is created unlocked, and torchrl only caches its key lists
+    # and step_mdp helper while the specs are locked. Left unlocked it rebuilds
+    # all of them on every step, which measures as ~30% of env stepping time.
+    # ActionMask mutates the mask in place rather than reassigning the spec, so
+    # locking does not interfere with it.
+    env.set_spec_lock_(True)
+    return env
 
 
 def make_env_factories(cfg: DictConfig, opponent_factory: OpponentFactory | None = None) -> list[Callable[[], EnvBase]]:

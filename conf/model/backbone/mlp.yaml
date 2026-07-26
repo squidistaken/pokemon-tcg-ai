@@ -1,14 +1,13 @@
-# The proven PPO baseline trunk: flattens every observation field into one
-# vector and runs it through an MLP. input_dim and out_features are injected
-# by build_actor_critic from the specs.
+# The proven PPO baseline trunk: an MLP over one flat feature vector.
+# input_dim, out_features and the StructuredObsAdapter (which embeds card
+# IDs, normalizes scalars and pools unordered zones before the MLP; widths
+# in model.adapter) are injected by build_actor_critic from the specs.
 _target_: src.models.backbone.MLPBackbone
 num_cells: [256, 256]
 activation: tanh
 # Observation keys to consume, nested under the env's "observation" key.
-# These are StructuredObservationEncoder's top-level groups (see its .spec());
-# MLPBackbone flattens each (including nested per-option/per-Pokemon/zone
-# tables) and concatenates them. Override to [[observation, observation]] to
-# run against the legacy FlatObservationEncoder's single flat vector instead.
+# These are StructuredObservationEncoder's top-level groups (see its .spec()),
+# each handled by the adapter.
 in_keys:
   - [observation, globals]
   - [observation, select_cats]
