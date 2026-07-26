@@ -76,16 +76,24 @@ class Evaluator:
         """
         Play ``n_episodes`` against the reference opponent and score them.
 
+        Episodes that never terminated — cut off by this evaluator's step cap
+        or by the environment's own truncation — produced no outcome, so they
+        are excluded from the rates (their zero reward would otherwise read as
+        a draw) and reported separately as ``unfinished_episodes``.
+
         :param policy: Collection policy (any tensordict module writing
             ``action``); used in eval mode and restored to its previous mode
             afterwards.
-        :return: Win/draw/loss rates, episode count and mean episode length.
+        :return: Win/draw/loss rates over the episodes that terminated, plus
+            the terminated and unfinished episode counts and the mean length
+            of a terminated episode.
         """
         env = self._get_env()
         was_training = policy.training
         policy.eval()
         wins = 0
         draws = 0
+        unfinished = 0
         total_steps = 0
         exploration = (
             ExplorationType.DETERMINISTIC if self._deterministic else ExplorationType.RANDOM
@@ -93,30 +101,42 @@ class Evaluator:
         try:
             with set_exploration_type(exploration):
                 for _ in range(self._n_episodes):
-                    reward, steps = self._play_episode(env, policy)
+                    reward, steps, terminated = self._play_episode(env, policy)
+                    if not terminated:
+                        unfinished += 1
+                        continue
                     wins += int(reward > 0)
                     draws += int(reward == 0)
                     total_steps += steps
         finally:
             policy.train(was_training)
 
-        episodes = max(self._n_episodes, 1)
+        episodes = max(self._n_episodes - unfinished, 0)
+        scored = max(episodes, 1)
         metrics = {
-            "win_rate": wins / episodes,
-            "draw_rate": draws / episodes,
-            "loss_rate": (episodes - wins - draws) / episodes,
+            "win_rate": wins / scored,
+            "draw_rate": draws / scored,
+            "loss_rate": (episodes - wins - draws) / scored,
             "episodes": float(episodes),
-            "mean_episode_length": total_steps / episodes,
+            "unfinished_episodes": float(unfinished),
+            "mean_episode_length": total_steps / scored,
         }
+        if unfinished:
+            logger.warning(
+                "%d of %d evaluation episodes did not terminate and are excluded from the "
+                "rates; raise max_steps if this persists.",
+                unfinished,
+                self._n_episodes,
+            )
         logger.info(
-            "Evaluation over %d episodes: win_rate=%.3f draw_rate=%.3f",
+            "Evaluation over %d terminated episodes: win_rate=%.3f draw_rate=%.3f",
             episodes,
             metrics["win_rate"],
             metrics["draw_rate"],
         )
         return metrics
 
-    def _play_episode(self, env: EnvBase, policy: nn.Module) -> tuple[float, int]:
+    def _play_episode(self, env: EnvBase, policy: nn.Module) -> tuple[float, int, bool]:
         """
         Play one episode to termination and report its outcome.
 
@@ -126,7 +146,11 @@ class Evaluator:
 
         :param env: Environment to play in.
         :param policy: Policy producing the action.
-        :return: Terminal reward (the win/draw/loss signal) and step count.
+        :return: Terminal reward (the win/draw/loss signal), step count, and
+            whether the episode terminated. The environment can also end an
+            episode by truncation (its engine-selection cap), which is done
+            but not terminated and carries a zero reward, so termination
+            rather than doneness is what makes the reward meaningful.
         """
         tensordict = env.reset()
         assert isinstance(tensordict, TensorDict)
@@ -138,10 +162,10 @@ class Evaluator:
             steps += 1
             reward = float(tensordict["next", "reward"].reshape(-1)[-1])
             if bool(tensordict["next", "done"].reshape(-1)[-1]):
-                return reward, steps
+                return reward, steps, bool(tensordict["next", "terminated"].reshape(-1)[-1])
             tensordict = step_mdp(tensordict)
         logger.warning("Evaluation episode hit the %d-step cap without terminating.", self._max_steps)
-        return reward, steps
+        return reward, steps, False
 
     def close(self) -> None:
         """

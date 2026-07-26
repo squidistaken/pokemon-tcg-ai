@@ -1,7 +1,7 @@
 import logging
 import signal
 import time
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
 from typing import Any, cast
 
@@ -24,7 +24,7 @@ _CORE_METRICS = ("frames", "episodes", "win_rate", "draw_rate", "fps")
 
 
 @contextmanager
-def _deferred_interrupt() -> Iterator[None]:
+def _deferred_interrupt() -> Generator[None, None, None]:
     """
     Ignore SIGINT for the duration of the block, restoring the handler after.
 
@@ -45,7 +45,10 @@ def _deferred_interrupt() -> Iterator[None]:
     try:
         yield
     finally:
-        signal.signal(signal.SIGINT, previous_handler)
+        signal.signal(
+            signal.SIGINT,
+            previous_handler if previous_handler is not None else signal.default_int_handler,
+        )
 
 
 class Trainer(BaseTrainer):

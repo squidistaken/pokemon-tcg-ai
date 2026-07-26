@@ -288,7 +288,7 @@ observation
 ├── pokemon                                   18 rows: both boards
 │   ├── card_id          (18,)      int64     0 = empty slot or face-down
 │   ├── tool_id          (18,)      int64     first attached tool's card ID (only the first)
-│   ├── energy_card_ids  (18, 24)   int64     attached energy card IDs, padded with 0
+│   ├── energy_card_ids  (18, 40)   int64     attached energy card IDs, padded with 0
 │   ├── pre_evolution_ids (18, 2)   int64     cards underneath (evolution history), padded with 0
 │   ├── features         (18, 20)   float32   HP / flags / attachment counts / energy histogram
 │   └── mask             (18,)      bool      True = slot occupied (also True for face-down active)
@@ -474,7 +474,7 @@ Every cap is an `__init__` parameter of the encoder; the defaults trace to engin
 | `prize_cap` | 6 | `PRIZE_SIZE` — always exactly 6 by rule |
 | `deck_cap` | 60 | `DECK_SIZE` — largest possible deck-search reveal |
 | `looking_cap` | 60 | `DECK_SIZE` |
-| `energy_cap` | 24 | Headroom; no engine limit on attachments |
+| `energy_cap` | 40 | Headroom; no engine limit on attachments |
 | `evolution_cap` | 2 | Basic → Stage 1 → Stage 2 = at most 2 pre-evolutions |
 
 Derived: `pokemon_rows = 2 * (1 + bench_cap) = 18`.

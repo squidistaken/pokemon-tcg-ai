@@ -67,7 +67,7 @@ Engine Observation --> StructuredObservationEncoder --> TensorDict
 - **Agent-relative**: owner = 1 (agent), 2 (opponent). Agent rows in `pokemon` precede opponent's.
 - **Boolean masks**: `True` = occupied (including face-down cards with ID 0).
 - **Floats are raw**: normalization is model-side.
-- **Truncation**: zones exceeding their cap are silently truncated (one-time warning). Caps are constructor parameters (`bench_cap=8`, `hand_cap=30`, `discard_cap=60`, `prize_cap=6`, `energy_cap=24`, etc.).
+- **Truncation**: zones exceeding their cap are silently truncated (one-time warning). Caps are constructor parameters (`bench_cap=8`, `hand_cap=30`, `discard_cap=60`, `prize_cap=6`, `energy_cap=40`, etc.).
 
 ### Schema
 
@@ -98,7 +98,7 @@ observation
 ├── pokemon              nested (18 = 2 x (1+8))
 │   ├── card_id          int64   (18,)           Pokemon card ID
 │   ├── tool_id          int64   (18,)           tool card ID
-│   ├── energy_card_ids  int64   (18, 24)        attached energy card IDs
+│   ├── energy_card_ids  int64   (18, 40)        attached energy card IDs
 │   ├── pre_evolution_ids int64  (18, 2)         evolved-from card IDs
 │   ├── features         float32 (18, 20)        hp, hp%, status, energy counts
 │   └── mask             bool    (18,)           occupied slots
