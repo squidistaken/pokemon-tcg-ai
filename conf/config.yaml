@@ -9,7 +9,7 @@ defaults:
   - env: default
   - collector: default
   - model: default
-  - train: baseline
+  - train: fixed_opponent
   - callbacks: wandb
   - _self_
 

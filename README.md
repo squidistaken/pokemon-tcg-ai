@@ -88,9 +88,10 @@ conf/                        Hydra configs (config.yaml + env/, agent/, model/, 
     backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
     head/linear.yaml             Flat logits head (more heads added as separate config files as they land)
   train/
-    baseline.yaml               Default: fixed random opponent, no snapshotting; the control for self-play runs
+    default.yaml                Keys shared by every training variant; the variants below override only what differs
+    fixed_opponent.yaml          Default: fixed random opponent, no snapshotting; the control for self-play runs
     ppo_selfplay.yaml            Self-play league: snapshot interval, pool size, periodic fixed-opponent evaluation
-  logging/
+  callbacks/
     wandb.yaml                  Default: Weights & Biases run (project/entity/group/tags/mode)
     none.yaml                    Console/Hydra log lines only; for throwaway runs
 .env.example                 Template for the untracked .env holding secrets (WANDB_API_KEY)
@@ -135,7 +136,7 @@ python -m src.train +experiment=debug
 
 ### Self-play
 
-By default (`train=baseline`) the agent trains against the built-in
+By default (`train=fixed_opponent`) the agent trains against the built-in
 uniform-random opponent. `train=ppo_selfplay` instead builds a self-play league:
 ```bash
 python -m src.train agent=ppo train=ppo_selfplay
