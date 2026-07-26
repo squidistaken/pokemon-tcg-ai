@@ -1,22 +1,33 @@
 name: ppo
 # PPO surrogate clipping range.
 clip_epsilon: 0.2
+# Add the entropy term to the loss, rewarding higher-entropy policies as a
+# regularizer against collapsing onto a single action. With this false the term
+# is dropped and entropy_coeff (and ent_anneal below) do nothing.
+entropy_bonus: true
 # Entropy-bonus weight.
 entropy_coeff: 0.01
 # Discount factor for GAE.
 gamma: 0.99
 # GAE trace-decay factor.
 lmbda: 0.95
+# Standardize advantages (zero mean, unit std) over each collected batch. The
+# standard PPO formulation; keeps the surrogate's scale independent of the
+# reward magnitude.
+average_gae: true
 # Adam learning rate.
 lr: 3.0e-4
 # Optimization epochs over each collected batch.
 num_epochs: 4
 # Minibatch size drawn from the replay buffer per optimizer step.
-sub_batch_size: 256
+sub_batch_size: 4096  # NOTE: Reduce if not a lot of memory
 # Frames collected per collector iteration (overrides collector.frames_per_batch).
 frames_per_batch: 4096
 # Gradient-norm clipping threshold.
 max_grad_norm: 1.0
+# Device for the model and the PPO update ("cpu" or "cuda"). Environments
+# always step on CPU; the collector moves data to this device for updates.
+device: cpu
 
 # --- Adopted TorchRLTrainer features (all additive; defaults preserve prior behaviour) ---
 # Early-stop the epoch loop once mean approx-KL exceeds
@@ -26,8 +37,7 @@ target_kl_multiplier: 1.5
 # Automatic mixed precision for the update step (float16+GradScaler on CUDA,
 # bfloat16 elsewhere).
 use_amp: false
-# torch.compile the loss module / collection policy. Default off: compile is
-# slow/fragile on the CPU dev box (CUDA unavailable here).
+# torch.compile the loss module / collection policy. 
 compile_loss: false
 compile_policy: false
 # Linearly anneal the learning rate to 0 over training.

@@ -18,6 +18,7 @@ from torchrl.objectives.value import GAE
 from src.models.actor_critic import ActorCritic
 from src.policies.ppo_actor import build_ppo_operator
 from src.training.callbacks import TrainingCallback
+from src.training.evaluator import Evaluator
 from src.training.loss._helpers import _sum_loss_keys
 from src.training.trainer import Trainer
 
@@ -40,23 +41,11 @@ class PPOTrainer(Trainer):
     both heads. The wrapped :class:`~src.models.actor_critic.ActorCritic` is
     kept for snapshotting into a self-play pool.
 
-    This trainer absorbs the feature set of a colleague's ``TorchRLTrainer``
-    (AMP, ``torch.compile``, ``target_kl`` early stopping, generic loss
-    aggregation, NaN/Inf guarding, LR/entropy annealing, an NCL hook) while
-    keeping the friendly hyperparameter constructor. Several of those features
-    change training behaviour or were reconstructed from an unseen base class;
-    each such point is flagged inline and in
-    ``docs/architecture/ppo-transformer-actor-critic.md``.
-
-    Notable behavioural differences from the previous implementation:
-
-    * **GAE is computed once per collected batch** (before the epoch loop),
+    * GAE is computed once per collected batch (before the epoch loop),
       not re-estimated every epoch as before. This is the more common PPO
       formulation but is a real learning-dynamics change.
-    * **Minibatching uses a shuffled permutation with contiguous slicing**, so
-      the final (smaller) minibatch is used; the previous
-      ``ReplayBuffer``/floor-division path silently dropped up to
-      ``sub_batch_size - 1`` frames each epoch.
+    * Minibatching uses a shuffled permutation with contiguous slicing, so
+      the final (smaller) minibatch is used;
     """
 
     def __init__(
@@ -67,9 +56,11 @@ class PPOTrainer(Trainer):
             frames_per_batch: int,
             total_frames: int,
             clip_epsilon: float = 0.2,
+            entropy_bonus: bool = True,
             entropy_coeff: float = 0.01,
             gamma: float = 0.99,
             lmbda: float = 0.95,
+            average_gae: bool = True,
             lr: float = 3.0e-4,
             num_epochs: int = 4,
             sub_batch_size: int = 256,
@@ -87,9 +78,10 @@ class PPOTrainer(Trainer):
             ent_anneal: bool = False,
             ent_warm_frac: float = 0.5,
             reward_scaling: float = 1.0,
-            ncl_model: nn.Module | None = None,
             callbacks: Iterable[TrainingCallback] | None = None,
             run_config: Mapping[str, Any] | None = None,
+            evaluator: Evaluator | None = None,
+            eval_interval: int = 0,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -99,9 +91,18 @@ class PPOTrainer(Trainer):
         :param frames_per_batch: Frames collected per collector iteration.
         :param total_frames: Total frames to collect over the run.
         :param clip_epsilon: PPO surrogate clipping range.
+        :param entropy_bonus: Add the entropy term to the loss, rewarding
+            higher-entropy policies as a regularizer against premature collapse
+            onto a single action. On by default. When ``False`` the term is
+            dropped entirely and ``entropy_coeff`` has no effect.
         :param entropy_coeff: Entropy-bonus weight (the annealing start value).
+            Ignored unless ``entropy_bonus`` is set.
         :param gamma: Discount factor for GAE.
         :param lmbda: GAE trace-decay factor.
+        :param average_gae: Standardize the advantages (subtract the mean,
+            divide by the std) over each collected batch. On by default: this is
+            the standard PPO formulation and it keeps the surrogate objective's
+            scale independent of the reward magnitude.
         :param lr: Adam learning rate (the annealing start value).
         :param num_epochs: Optimization epochs over each collected batch.
         :param sub_batch_size: Minibatch size for the inner epoch loop.
@@ -133,30 +134,16 @@ class PPOTrainer(Trainer):
             current stats**: win/draw rates in :meth:`Trainer.train` are computed
             from the reward *sign*, not its magnitude; this would only matter for
             future magnitude logging.
-        :param ncl_model: **Guarded stub.** Natural Continual Learning FIM
-            estimation / grad clipping is not implemented; passing a non-None
-            module raises ``NotImplementedError``. See the NCL note in
-            ``docs/architecture/ppo-transformer-actor-critic.md``.
         :param callbacks: Metric observers, forwarded to
             :class:`~src.training.trainer.Trainer`. The PPO losses returned by
             :meth:`_update` reach them without any extra wiring here.
         :param run_config: Opaque run metadata forwarded to
             :class:`~src.training.trainer.Trainer`.
+        :param evaluator: Fixed-opponent evaluator forwarded to
+            :class:`~src.training.trainer.Trainer`; required for a readable
+            learning curve under self-play.
+        :param eval_interval: Frames between evaluation rounds; ``0`` disables.
         """
-        # NCL: accepted for interface parity with the colleague's file, but the
-        # FIM-estimation / gradient-projection machinery is not implemented here.
-        # Its only plausible merit is anti-forgetting under self-play (not yet
-        # wired); see the arch-doc NCL note for the full rationale.
-        self._ncl_model = ncl_model
-        if ncl_model is not None:
-            raise NotImplementedError(
-                "ncl_model (Natural Continual Learning FIM estimation / grad "
-                "clipping) is a guarded stub: the parameter is accepted for "
-                "interface parity but NCL is not implemented. See "
-                "docs/architecture/ppo-transformer-actor-critic.md (NCL note) for "
-                "the rationale and when to revisit."
-            )
-
         self._actor_critic = actor_critic
 
         self._operator = cast(
@@ -173,6 +160,8 @@ class PPOTrainer(Trainer):
             serial_for_single=serial_for_single,
             callbacks=callbacks,
             run_config=run_config,
+            evaluator=evaluator,
+            eval_interval=eval_interval,
         )
         self._device = torch.device(device)
         self._num_epochs = num_epochs
@@ -187,7 +176,7 @@ class PPOTrainer(Trainer):
             gamma=gamma,
             lmbda=lmbda,
             value_network=self._operator.get_value_operator(),
-            average_gae=True,
+            average_gae=average_gae,
         )
         self._loss = ClipPPOLoss(
             actor_network=cast(
@@ -195,24 +184,27 @@ class PPOTrainer(Trainer):
             ),
             critic_network=self._operator.get_value_operator(),
             clip_epsilon=clip_epsilon,
-            entropy_bonus=True,
+            entropy_bonus=entropy_bonus,
             entropy_coeff=entropy_coeff,
         )
+        # The optimizer is hardcoded here, but there is no real reason for us
+        # to change it.
         self._optim = torch.optim.Adam(self._loss.parameters(), lr=lr)
-        # Inferred to match the previous implementation, which clipped
-        # ``self._loss.parameters()``. The colleague's base passed ``clip_params``
-        # in from an unseen ``_BaseTrainer``; the same author wrote our
-        # ``Trainer``, so this is assumed faithful.
+
         self._clip_params = list(self._loss.parameters())
-        # ``torch.compile`` shares parameters/buffers with the wrapped module, so
-        # ``self._loss`` stays the source of truth for parameters() and the
-        # entropy-coeff buffer; only the forward call is routed through the
-        # compiled wrapper. (No type annotation: ``torch.compile`` is typed as
-        # returning a callable, not an ``nn.Module``.)
+
         self._loss_fwd = torch.compile(self._loss) if compile_loss else self._loss
 
         # Annealing state.
         self._lr_anneal = lr_anneal
+        # Annealing a coefficient the loss never applies is a silent no-op, so
+        # disable it rather than let the run look like it is scheduling entropy.
+        if ent_anneal and not entropy_bonus:
+            logger.warning(
+                "ent_anneal=True has no effect while entropy_bonus=False; "
+                "disabling entropy annealing."
+            )
+            ent_anneal = False
         self._ent_anneal = ent_anneal
         self._ent_warm_frac = ent_warm_frac
         self._initial_lr = lr
@@ -238,7 +230,7 @@ class PPOTrainer(Trainer):
         logger.info(
             "PPOTrainer initialized: device=%s frames_per_batch=%d total_frames=%d "
             "num_epochs=%d sub_batch_size=%d lr=%g gamma=%g lmbda=%g clip_epsilon=%g "
-            "entropy_coeff=%g target_kl=%s use_amp=%s lr_anneal=%s "
+            "entropy_bonus=%s entropy_coeff=%g target_kl=%s use_amp=%s lr_anneal=%s "
             "ent_anneal=%s",
             self._device,
             frames_per_batch,
@@ -249,6 +241,7 @@ class PPOTrainer(Trainer):
             gamma,
             lmbda,
             clip_epsilon,
+            entropy_bonus,
             entropy_coeff,
             target_kl,
             use_amp,
@@ -267,12 +260,20 @@ class PPOTrainer(Trainer):
 
     def _collector_kwargs(self) -> dict:
         """
-        Enable ``torch.compile`` on the collection policy via the Collector.
+        Collector kwargs for the (possibly GPU-resident) policy.
 
-        :return: ``{"compile_policy": True}`` when compilation is requested,
-            else an empty mapping (leaving collection unchanged).
+        ``policy_device`` tells the Collector to cast rollout data onto the
+        policy's device for the forward pass and back for env stepping;
+        without it, data collected by the CPU-only env workers is fed
+        straight into a CUDA policy and errors on the first mismatched
+        buffer. The env stays on CPU regardless (``env_device`` unset).
+
+        :return: Mapping splatted into the ``Collector(...)`` construction.
         """
-        return {"compile_policy": True} if self._compile_policy else {}
+        kwargs: dict = {"policy_device": self._device}
+        if self._compile_policy:
+            kwargs["compile_policy"] = True
+        return kwargs
 
     def _set_entropy_coeff(self, value: float) -> None:
         """
