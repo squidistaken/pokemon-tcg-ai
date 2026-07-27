@@ -16,6 +16,14 @@ submit = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(submit)
 
 
+def test_hydra_config_must_be_top_level() -> None:
+    for value in ("ppo", "ppo.yaml", "conf/ppo.yaml"):
+        assert submit._config_name(value) == "ppo"
+
+    with pytest.raises(ValueError, match="must be direct children"):
+        submit._config_name("agent/ppo")
+
+
 @pytest.mark.parametrize(
     ("profile_name", "gpu_type", "environment", "config_name"),
     [

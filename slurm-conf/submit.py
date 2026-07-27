@@ -94,6 +94,10 @@ def _config_name(value: str) -> str:
     path = path.resolve()
     if not path.is_relative_to(CONF_DIR) or not path.is_file():
         raise FileNotFoundError(f"Hydra config not found: {path}")
+    if path.parent != CONF_DIR:
+        raise ValueError(
+            f"Hydra launch configs must be direct children of {CONF_DIR}"
+        )
     return path.relative_to(CONF_DIR).with_suffix("").as_posix()
 
 
