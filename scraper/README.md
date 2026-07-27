@@ -104,15 +104,15 @@ Once decks are scraped, `python -m scraper.analysis` reads a deck directory and
 reports pairwise similarity (set / weighted Jaccard / card-semantic), clustering
 agreement against the manifest's archetype labels, corpus diversity, deck
 structure, and a metagame summary, then writes a plot suite and a captured
-report under `--plot-dir`.
+report to `outputs/deck_analysis/`.
 
 ```bash
 # Full report over decks/ (writes plots + a text report to outputs/deck_analysis/)
 python -m scraper.analysis
 
-# Collapse near-duplicate lists (weighted-Jaccard >= threshold) to one each
-python -m scraper.analysis --prune --dupe-threshold 0.9          # dry run
-python -m scraper.analysis --prune --dupe-threshold 0.9 --apply  # delete
+# Collapse near-duplicate lists (weighted-Jaccard >= threshold) to one each.
+# This DELETES the redundant deck files (and their manifest entries).
+python -m scraper.analysis --prune --dupe-threshold 0.9
 ```
 
 The metric functions are also importable (`from scraper.analysis import

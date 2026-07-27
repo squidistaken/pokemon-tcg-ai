@@ -74,20 +74,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Similarity at/above which a deck pair counts as a near-duplicate.",
     )
     parser.add_argument(
-        "--plot-dir",
-        default="outputs/deck_analysis",
-        help="Directory the report and plot suite are written to.",
-    )
-    parser.add_argument(
         "--prune",
         action="store_true",
         help="Collapse near-duplicate clusters (>= --dupe-threshold) to one "
-        "representative each, then exit. Dry run unless --apply is given.",
-    )
-    parser.add_argument(
-        "--apply",
-        action="store_true",
-        help="With --prune, actually delete the redundant decks.",
+        "representative each (deletes the redundant deck files), then exit.",
     )
     return parser
 
@@ -103,7 +93,7 @@ def main(argv: list[str] | None = None) -> None:
     deck_dir = (REPO_ROOT / args.dir).resolve()
 
     if args.prune:
-        prune_near_duplicates(deck_dir, args.dupe_threshold, apply=args.apply)
+        prune_near_duplicates(deck_dir, args.dupe_threshold)
         return
 
     console.print(f"[dim]Loading decks from[/] {deck_dir} ...")
@@ -177,7 +167,7 @@ def main(argv: list[str] | None = None) -> None:
         report_meta(decks, names, archetypes, load_manifest(deck_dir), db=db)
 
     # Plots
-    out_dir = (REPO_ROOT / args.plot_dir).resolve()
+    out_dir = (REPO_ROOT / "outputs" / "deck_analysis").resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     console.print()
     console.rule("[bold]Plots[/]")

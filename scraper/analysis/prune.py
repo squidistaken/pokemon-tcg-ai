@@ -16,24 +16,23 @@ from .matrices import build_count_matrix
 from .similarity import weighted_jaccard_matrix
 
 
-def prune_near_duplicates(deck_dir: Path, threshold: float, *, apply: bool) -> None:
+def prune_near_duplicates(deck_dir: Path, threshold: float) -> None:
     """
     Collapse each near-duplicate deck cluster down to a single representative.
 
     Decks whose pairwise weighted-Jaccard is ``>= threshold`` are unioned into
     clusters (the same transitive clustering the near-duplicate report counts).
     Each cluster is reduced to its medoid — the list most similar to the rest of
-    its cluster — and the other files are deleted. This removes the ±1-2 tech-card
-    variants that otherwise oversample popular archetypes under a uniform sampler
-    and leak near-identical lists across the train/holdout split (which quietly
-    inflates the unseen-deck eval). Archetypes and genuine variation are kept.
+    its cluster — and the other files are **deleted**: the redundant CSVs are
+    removed, their manifest entries dropped, and any archetype folder left empty
+    is removed. This strips the ±1-2 tech-card variants that otherwise oversample
+    popular archetypes under a uniform sampler and leak near-identical lists
+    across the train/holdout split (which quietly inflates the unseen-deck eval).
+    Archetypes and genuine variation are kept.
 
     :param deck_dir: Corpus directory (searched recursively).
     :param threshold: Weighted-Jaccard at/above which two decks are duplicates.
-    :param apply: When False, only report what would be deleted (dry run); when
-        True, delete the redundant CSVs, drop their manifest entries, and remove
-        any archetype folders left empty.
-    :return: None. Results are printed; files/manifest change only if ``apply``.
+    :return: None. Results are printed; redundant files/manifest entries deleted.
     """
     paths = ordered_deck_paths(deck_dir)
     decks: list[list[int]] = []
@@ -82,10 +81,9 @@ def prune_near_duplicates(deck_dir: Path, threshold: float, *, apply: bool) -> N
         delete_idx.extend(idx for j, idx in enumerate(members) if j != keep_local)
 
     kept = n - len(delete_idx)
-    verb = "Deleting" if apply else "Would delete"
     console.print(
         f"[bold]{n}[/] decks -> [bold green]{kept}[/] kept, "
-        f"[bold red]{len(delete_idx)}[/] {verb.lower()} "
+        f"[bold red]{len(delete_idx)}[/] deleting "
         f"[dim](weighted-Jaccard >= {threshold:.2f})[/]"
     )
     if not delete_idx:
@@ -96,7 +94,7 @@ def prune_near_duplicates(deck_dir: Path, threshold: float, *, apply: bool) -> N
     removed: Counter[str] = Counter(kept_paths[i].parent.name for i in delete_idx)
     table = Table(
         box=ROUNDED,
-        title=f"{verb} per archetype",
+        title="Deleting per archetype",
         title_style="bold",
         title_justify="left",
         header_style="bold magenta",
@@ -110,12 +108,6 @@ def prune_near_duplicates(deck_dir: Path, threshold: float, *, apply: bool) -> N
         if rem:
             table.add_row(arch, str(tot), str(rem), str(tot - rem))
     console.print(table)
-
-    if not apply:
-        console.print(
-            "[yellow]Dry run.[/] Re-run with [bold]--prune --apply[/] to delete."
-        )
-        return
 
     manifest = load_manifest(deck_dir)
     touched_dirs: set[Path] = set()
