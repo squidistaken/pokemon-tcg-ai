@@ -9,6 +9,7 @@ from torchrl.envs import EnvBase
 from cg.api import Observation, SelectData, State
 
 from .battle_handle import BattleHandle
+from .deck_sampler import DeckSampler, FixedDeckSampler
 from .observation_encoder import ObservationEncoder
 from .random_opponent import RandomOpponent
 from .structured_observation_encoder import StructuredObservationEncoder
@@ -37,20 +38,22 @@ class TCGEnv(EnvBase):
     """
 
     def __init__(
-            self,
-            deck0: list[int],
-            deck1: list[int],
-            max_options: int = 96,
-            opponent: Callable[[Observation], list[int]] | None = None,
-            reward_draw: float = 0.0,
-            max_engine_selections: int = 5000,
-            seed: int | None = None,
-            device: torch.device | str | None = None,
-            encoder: ObservationEncoder | None = None,
+        self,
+        deck0: list[int] | None = None,
+        deck1: list[int] | None = None,
+        max_options: int = 96,
+        opponent: Callable[[Observation], list[int]] | None = None,
+        reward_draw: float = 0.0,
+        max_engine_selections: int = 5000,
+        seed: int | None = None,
+        device: torch.device | str | None = None,
+        encoder: ObservationEncoder | None = None,
+        deck_sampler: DeckSampler | None = None,
     ) -> None:
         """
-        :param deck0: 60 card IDs for player 0.
-        :param deck1: 60 card IDs for player 1.
+        :param deck0: 60 card IDs for player 0. Ignored if ``deck_sampler`` is
+            given; otherwise required and wrapped in a fixed sampler.
+        :param deck1: 60 card IDs for player 1. Same handling as ``deck0``.
         :param max_options: Padded size of the option space (stop action excluded).
         :param opponent: Policy playing the non-agent seat; random if None.
             If it exposes ``on_reset()`` (e.g. :class:`OpponentPool`), that is
@@ -64,16 +67,32 @@ class TCGEnv(EnvBase):
         :param encoder: Observation encoder; a default-capacity
             :class:`StructuredObservationEncoder` matching ``max_options``
             if None.
+        :param deck_sampler: Produces the ``(deck0, deck1)`` matchup at each
+            reset. When None, a :class:`FixedDeckSampler` is built from
+            ``deck0``/``deck1`` (which are then required).
+        :raises ValueError: If neither a sampler nor both decks are given.
         """
         super().__init__(device=device, batch_size=torch.Size(()))
-        self._deck0 = list(deck0)
-        self._deck1 = list(deck1)
+        if deck_sampler is None:
+            if deck0 is None or deck1 is None:
+                raise ValueError(
+                    "TCGEnv needs either deck_sampler or both deck0 and deck1"
+                )
+            deck_sampler = FixedDeckSampler(deck0, deck1)
+        self._deck_sampler = deck_sampler
+
+        # The active episode's decks, (re)sampled on every reset.
+        self._deck0, self._deck1 = deck_sampler.sample()
         self._max_options = max_options
         self._stop_index = max_options
         self._reward_draw = reward_draw
         self._max_engine_selections = max_engine_selections
         self._handle = BattleHandle()
-        self._encoder = encoder if encoder is not None else StructuredObservationEncoder(max_options=max_options)
+        self._encoder = (
+            encoder
+            if encoder is not None
+            else StructuredObservationEncoder(max_options=max_options)
+        )
         self._opponent = opponent if opponent is not None else RandomOpponent(seed)
         self._rng = random.Random(seed)
         self._agent_seat = 0
@@ -159,10 +178,13 @@ class TCGEnv(EnvBase):
             on_reset = getattr(self._opponent, "on_reset", None)
             if on_reset is not None:
                 on_reset()
-            self._agent_seat = self._rng.randint(0, 1)   # flip a coin to decide who plays first
+            self._agent_seat = self._rng.randint(
+                0, 1
+            )  # flip a coin to decide who plays first
             self._selection_count = 0
             self._truncate_flag = False
             self._chosen = []
+            self._deck0, self._deck1 = self._deck_sampler.sample()
             observation = self._handle.start(self._deck0, self._deck1)
             observation = self._advance_to_agent(observation)
             if not self._game_over(observation) and not self._truncate_flag:
@@ -203,7 +225,9 @@ class TCGEnv(EnvBase):
         truncated = self._truncate_flag and not terminated
         reward = self._terminal_reward(observation) if terminated else 0.0
         out = self._build_obs_tensordict()
-        self._set_step_keys(out, reward=reward, terminated=terminated, truncated=truncated)
+        self._set_step_keys(
+            out, reward=reward, terminated=terminated, truncated=truncated
+        )
         return out
 
     def _set_seed(self, seed: int | None) -> None:
@@ -217,6 +241,7 @@ class TCGEnv(EnvBase):
         self._rng.seed(seed)
         if hasattr(self._opponent, "seed"):
             self._opponent.seed(seed + 1)
+        self._deck_sampler.seed(seed + 2)
 
     def close(self, *, raise_if_closed: bool = True) -> None:
         """
@@ -240,7 +265,9 @@ class TCGEnv(EnvBase):
         while not self._game_over(observation) and not self._truncate_flag:
             select = observation.select
             if select is None:
-                raise RuntimeError("Engine returned no selection while the battle is running.")
+                raise RuntimeError(
+                    "Engine returned no selection while the battle is running."
+                )
             if select.maxCount == 0:
                 observation = self._engine_select([])
                 continue
@@ -299,7 +326,10 @@ class TCGEnv(EnvBase):
         assert pending is not None, "no pending observation; call reset() first"
         obs = self._encoder.encode(pending, self._agent_seat, len(self._chosen))
         return TensorDict(
-            {"observation": obs.to(self.device), "action_mask": self._build_mask().to(self.device)},
+            {
+                "observation": obs.to(self.device),
+                "action_mask": self._build_mask().to(self.device),
+            },
             batch_size=torch.Size(()),
         )
 
@@ -335,11 +365,11 @@ class TCGEnv(EnvBase):
         return mask
 
     def _set_step_keys(
-            self,
-            tensordict: TensorDict,
-            reward: float,
-            terminated: bool,
-            truncated: bool,
+        self,
+        tensordict: TensorDict,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
     ) -> None:
         """
         Encode reward and done flags into a step output tensordict.
@@ -349,7 +379,11 @@ class TCGEnv(EnvBase):
         :param terminated: Whether the battle reached a terminal state.
         :param truncated: Whether the episode was cut by the selection cap.
         """
-        tensordict.set("reward", torch.tensor([reward], dtype=torch.float32, device=self.device))
+        tensordict.set(
+            "reward", torch.tensor([reward], dtype=torch.float32, device=self.device)
+        )
         tensordict.set("terminated", torch.tensor([terminated], device=self.device))
         tensordict.set("truncated", torch.tensor([truncated], device=self.device))
-        tensordict.set("done", torch.tensor([terminated or truncated], device=self.device))
+        tensordict.set(
+            "done", torch.tensor([terminated or truncated], device=self.device)
+        )

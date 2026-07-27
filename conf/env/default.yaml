@@ -2,6 +2,39 @@
 # can be redirected without changing env settings.
 deck0: ${paths.deck0}
 deck1: ${paths.deck1}
+# Multi-deck training curriculum. When deck_pool is null the env uses the fixed deck0/deck1 pair
+# above. When set to a directory, glob, or list of deck CSVs, each episode instead samples a matchup
+# from the pool, so the policy trains across archetypes instead of overfitting one card pool.
+deck_pool: null
+# How the two seats relate when sampling from a pool:
+#   mirror      -> both seats get the same deck (isolates skill from matchup).
+#   independent -> each seat drawn separately (cross-archetype matchups).
+deck_matchup: mirror
+# Matchup used for the periodic evaluator only (deck_split="eval"); null falls
+# back to deck_matchup. Set this to "mirror" while training on "independent" so
+# the eval win-rate reflects piloting skill rather than deck-vs-deck luck.
+eval_deck_matchup: null
+# Draw strategy over the pool:
+#   uniform     -> each deck equally likely, i.i.d. per episode.
+#   round_robin -> deterministic rotation covering every deck evenly.
+deck_sampling: uniform
+# Probability that a training episode is a mirror match (both seats the same
+# deck); the rest are independent draws. null derives it from deck_matchup
+# (mirror -> 1.0, independent -> 0.0). Set e.g. 0.5 to mix the two, or sweep it
+# across runs to interpolate between them. Training only; eval uses its matchup.
+deck_mirror_prob: null
+# Bias the training deck draw toward stronger decks via manifest.json, so the
+# policy faces a meta-realistic field instead of every list equally often:
+#   null     -> uniform (every deck equally likely).
+#   winrate  -> weight by tournament record W/(W+L).
+#   placing  -> weight by 1/placing (better finishes sampled more).
+# Training only; evaluation always samples the held-out pool uniformly.
+deck_weighting: null
+# Fraction of the pool held out from training and used only for evaluation, so
+# eval measures generalization to unseen decks. 0.0 trains on the whole pool.
+deck_holdout_frac: 0.0
+# Seed for the deterministic train/holdout split.
+deck_split_seed: 0
 # Padded size of the option space (stop action excluded); must exceed the
 # largest option list the engine can offer, or options get truncated.
 max_options: 96
