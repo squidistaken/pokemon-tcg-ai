@@ -147,10 +147,10 @@ class Trainer(BaseTrainer):
                     episodes += int(done.sum())
                     wins += int((final_rewards > 0).sum())
                     draws += int((final_rewards == 0).sum())
-
+                    
                     # Perform update step (return surrgate loss)
                     losses = self._update(data)
-
+                    
                     metrics = self._metrics(
                         frames, episodes, wins, draws, time.time() - start_time, losses
                     )

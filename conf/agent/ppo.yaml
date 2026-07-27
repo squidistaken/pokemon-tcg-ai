@@ -37,7 +37,7 @@ target_kl_multiplier: 1.5
 # Automatic mixed precision for the update step (float16+GradScaler on CUDA,
 # bfloat16 elsewhere).
 use_amp: false
-# torch.compile the loss module / collection policy.
+# torch.compile the loss module / collection policy. 
 compile_loss: false
 compile_policy: false
 # Linearly anneal the learning rate to 0 over training.

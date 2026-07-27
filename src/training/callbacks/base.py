@@ -46,8 +46,8 @@ class TrainingCallback(ABC):
     @abstractmethod
     def on_eval_end(self, step: int, metrics: Mapping[str, float]) -> None:
         """
-        Called after an evaluation round so eval metrics reach the same
-        backends as rollout metrics.
+        Called after an evaluation round. Nothing calls this yet — the Evaluator
+        is not built; the hook exists so eval metrics reach the same backends.
 
         :param step: Frames collected at the time of the evaluation.
         :param metrics: Evaluation metrics (e.g. win rate against a baseline).
