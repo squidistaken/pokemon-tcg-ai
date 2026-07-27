@@ -1,39 +1,45 @@
-# Slurm configuration
+# Slurm
 
-Scheduler profiles and scripts live here, separate from the Hydra configs in
-`conf/`.
+Slurm profiles live here; training configs remain under `conf/`.
 
 ## Setup
 
-Run the setup for the GPU type you will use:
-
 ```bash
-./slurm-conf/setup_uv.sh
-./slurm-conf/setup_uv.sh --use-rtx
+./slurm-conf/setup_uv.sh            # Creates .venv
+./slurm-conf/setup_uv.sh --use-rtx  # Submits a job that creates .venv-rtx
 ```
 
-The normal setup creates `.venv` directly. RTX setup submits a 15-minute RTX
-job and returns immediately; that job creates `.venv-rtx`, checks the GPU, and
-runs a CUDA calculation. Setup uses `uv.lock`; rerun it after merges or
-dependency changes. Wait for the RTX setup job to finish before submitting
-training.
+RTX setup returns immediately; wait for its job to finish before training.
+Setup uses `uv.lock`, so rerun it after merges or dependency changes.
 
-## Submit
+## Smoke test
 
 ```bash
-# Random baseline on A100
+./slurm-conf/train.sh \
+  --config ppo \
+  --slurm-config train_gpu \
+  +experiment=debug
+```
+
+Check the job and its outputs:
+
+```bash
+squeue --me
+JOB_ID=30314565  # Replace with the submitted job ID
+tail -n 50 -f "slurm-conf/logs/pokemon-tcg-train_${JOB_ID}.out"
+tail -n 50 -f "slurm-conf/logs/pokemon-tcg-train_${JOB_ID}.err"
+```
+
+## Training
+
+```bash
 ./slurm-conf/train.sh --config baseline --slurm-config train_gpu
-
-# PPO against the fixed opponent on A100
 ./slurm-conf/train.sh --config ppo --slurm-config train_gpu
-
-# PPO self-play on RTX
 ./slurm-conf/train.sh --config ppo_selfplay --slurm-config train_gpu_rtx
 ```
 
-`--config` selects a complete YAML under `conf/`. `--slurm-config` selects a
-YAML under `slurm-conf/`. Both are required and their order does not matter.
-Extra arguments are passed to Hydra:
+Both options are required and may appear in either order. Additional arguments
+are passed to Hydra:
 
 ```bash
 ./slurm-conf/train.sh --config ppo --slurm-config train_gpu \
@@ -42,8 +48,5 @@ Extra arguments are passed to Hydra:
   paths.output_dir=/scratch/$USER/pokemon-tcg-ai/outputs
 ```
 
-Add `--dry-run` to print the `sbatch` command without submitting.
-
-Online W&B runs require `WANDB_API_KEY` in the project `.env` or a verified
-`wandb login`. W&B and Hydra files follow the output location configured in
-`conf/paths/default.yaml`.
+Use `--dry-run` to print the `sbatch` command without submitting. Online W&B
+requires `WANDB_API_KEY` in `.env` or a verified `wandb login`.
