@@ -12,8 +12,11 @@ CONFIG_NAME="$2"
 UV_ENVIRONMENT="$3"
 shift 3
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Slurm executes a copied script from its spool directory. submit.py sets
+# --chdir to the project root, so use the job's working directory instead of
+# deriving it from BASH_SOURCE.
+PROJECT_ROOT="$(pwd -P)"
+SCRIPT_DIR="$PROJECT_ROOT/slurm-conf"
 PYTHON_MODULE="${PYTHON_MODULE:-Python/3.13.5-GCCcore-14.3.0}"
 UV_MODULE="${UV_MODULE:-uv/0.10.7}"
 
