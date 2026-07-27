@@ -6,8 +6,3 @@ output_dir: outputs
 # Input decks consumed by the environment.
 deck0: ${paths.data_dir}/example.csv
 deck1: ${paths.data_dir}/example.csv
-
-# Training artifacts. Self-play checkpointing is not wired into the entry
-# point yet, but keeping its destination here avoids embedding storage policy
-# in an algorithm config when that support lands.
-checkpoint_dir: ${paths.output_dir}/checkpoints

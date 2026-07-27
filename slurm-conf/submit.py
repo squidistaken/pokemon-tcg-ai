@@ -186,7 +186,7 @@ def _build_command(
             str(profile_path),
             config_name,
             uv_environment,
-            "train.device=cuda",
+            "++agent.device=cuda",
             *extra_overrides,
         ]
     )

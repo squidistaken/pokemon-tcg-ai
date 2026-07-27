@@ -1,0 +1,6 @@
+# PPO with the self-play league and fixed-opponent evaluation.
+defaults:
+  - config
+  - override /agent: ppo
+  - override /train: ppo_selfplay
+  - _self_

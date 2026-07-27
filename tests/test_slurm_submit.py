@@ -17,10 +17,10 @@ SPEC.loader.exec_module(submit)
 
 
 @pytest.mark.parametrize(
-    ("profile_name", "gpu_type", "environment"),
+    ("profile_name", "gpu_type", "environment", "config_name"),
     [
-        ("train_gpu", "a100", ".venv"),
-        ("train_gpu_rtx", "rtx_pro_6000", ".venv-rtx"),
+        ("train_gpu", "a100", ".venv", "baseline"),
+        ("train_gpu_rtx", "rtx_pro_6000", ".venv-rtx", "ppo"),
     ],
 )
 def test_gpu_profiles(
@@ -28,6 +28,7 @@ def test_gpu_profiles(
     profile_name: str,
     gpu_type: str,
     environment: str,
+    config_name: str,
 ) -> None:
     selected: list[str] = []
     monkeypatch.setattr(
@@ -38,12 +39,14 @@ def test_gpu_profiles(
     profile_path = submit._profile_path(profile_name)
 
     command = submit._build_command(
-        profile_path, submit._load_profile(profile_path), "config", []
+        profile_path, submit._load_profile(profile_path), config_name, []
     )
 
     assert selected == [gpu_type]
     assert f"--gpus-per-node={gpu_type}:1" in command
     assert environment in command
+    assert config_name in command
+    assert "++agent.device=cuda" in command
 
 
 @pytest.mark.parametrize("key", ["nodes", "ntasks", "gpus_per_node"])

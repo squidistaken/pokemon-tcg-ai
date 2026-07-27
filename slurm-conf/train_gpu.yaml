@@ -1,6 +1,6 @@
 # Scheduler resources for an A100 GPU.
 slurm:
-  job_name: pokemon-tcg-ppo
+  job_name: pokemon-tcg-train
   time: "12:00:00"
   nodes: 1 # Multi-node training is not supported.
   ntasks: 1 # One training process.

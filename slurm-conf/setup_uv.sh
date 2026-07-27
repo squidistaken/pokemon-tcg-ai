@@ -5,8 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT=""
 USE_RTX=false
-PYTHON_MODULE="${PYTHON_MODULE:-Python/3.13.5-GCCcore-14.3.0}"
-UV_MODULE="${UV_MODULE:-uv/0.10.7}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -33,47 +31,36 @@ while [ "$#" -gt 0 ]; do
 done
 
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-if [ "$USE_RTX" = true ]; then
-  export UV_PROJECT_ENVIRONMENT=".venv-rtx"
-else
-  export UV_PROJECT_ENVIRONMENT=".venv"
-fi
+INSTALL_SCRIPT="$SCRIPT_DIR/install_uv.sh"
 
-if ! command -v module >/dev/null 2>&1; then
-  echo "ERROR: an environment-modules installation is required" >&2
-  exit 1
-fi
 if [ ! -f "$PROJECT_ROOT/pyproject.toml" ] || [ ! -f "$PROJECT_ROOT/uv.lock" ]; then
   echo "ERROR: project root must contain pyproject.toml and uv.lock: $PROJECT_ROOT" >&2
   exit 1
 fi
 
-module purge
-module load "$PYTHON_MODULE"
-module load "$UV_MODULE"
+if [ "$USE_RTX" = false ]; then
+  exec bash "$INSTALL_SCRIPT" .venv "$PROJECT_ROOT"
+fi
 
-cd "$PROJECT_ROOT"
-echo "Python: $(python --version)"
-echo "uv: $(uv --version)"
-echo "Project: $PROJECT_ROOT"
-echo "Environment: $UV_PROJECT_ENVIRONMENT"
+if ! command -v sbatch >/dev/null 2>&1; then
+  echo "ERROR: sbatch is required for RTX setup; run this on a Slurm login node" >&2
+  exit 1
+fi
 
-# Install the exact package versions from uv.lock.
-uv sync --frozen
+LOG_DIR="$PROJECT_ROOT/slurm-conf/logs"
+mkdir -p "$LOG_DIR"
 
-# Check that Python can load PyTorch and the included Linux game engine.
-# This does not build or change the engine.
-uv run --frozen --no-sync python - <<'PY'
-import platform
-
-import dotenv
-import torch
-import wandb
-from cg import sim
-
-print(f"Platform: {platform.platform()}")
-print(f"PyTorch: {torch.__version__}")
-print(f"W&B: {wandb.__version__}")
-print(f"Engine: {sim.lib._name}")
-print("Environment check passed")
-PY
+echo "Submitting a 15-minute RTX environment setup job..."
+exec sbatch \
+  --job-name=pokemon-tcg-setup-rtx \
+  --time=00:15:00 \
+  --nodes=1 \
+  --ntasks=1 \
+  --cpus-per-task=4 \
+  --mem=16G \
+  --partition=gpu \
+  --gpus-per-node=rtx_pro_6000:1 \
+  --chdir="$PROJECT_ROOT" \
+  --output="$LOG_DIR/%x_%j.out" \
+  --error="$LOG_DIR/%x_%j.err" \
+  "$INSTALL_SCRIPT" .venv-rtx "$PROJECT_ROOT"

@@ -77,7 +77,7 @@ src/
     self_play.py                 build_opponent_factory: the picklable self-play league factory handed to each env worker
     evaluator.py                 Evaluator: scores the policy against a fixed opponent (readable curve under self-play)
     callbacks/                  Metric sinks; the trainer emits, these decide where it goes
-      base.py                     TrainingCallback hooks + CallbackList (fan-out, isolates failures)
+      base.py                     TrainingCallback hooks + CallbackList (fan-out, propagates failures)
       snapshot_callback.py        SnapshotCallback: freezes the learner into the self-play league at a frame interval
       wandb_callback.py           WeightsAndBiases: the only module that imports wandb
   train.py                    Hydra entry point (python -m src.train)
@@ -169,7 +169,8 @@ recording for a later `wandb sync` is intentional.
 
 Slurm support is kept separately in [`slurm-conf/`](slurm-conf/README.md). The
 profiles select a normal Hydra config and add scheduler-specific overrides;
-they do not participate in local Hydra composition.
+they do not participate in local Hydra composition. Complete launch configs are
+available as `baseline`, `ppo`, and `ppo_selfplay`.
 
 ## CI
 

@@ -1,6 +1,6 @@
 # Scheduler resources for a RTX Pro 6000 GPU.
 slurm:
-  job_name: pokemon-tcg-ppo-rtx
+  job_name: pokemon-tcg-train-rtx
   time: "12:00:00"
   nodes: 1 # Multi-node training is not supported.
   ntasks: 1 # One training process.
