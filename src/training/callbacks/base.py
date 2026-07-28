@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 
 class TrainingCallback(ABC):
@@ -75,9 +72,8 @@ class CallbackList(TrainingCallback):
     Being a :class:`TrainingCallback` itself lets the trainer hold exactly one
     callback and stay unaware of how many are attached.
 
-    A raising member is logged with its traceback and skipped for that hook, not
-    propagated: logging is a side channel, and a W&B blip should not destroy an
-    otherwise healthy run.
+    Selected callbacks are part of the run contract. A failure propagates so a
+    requested metric backend cannot silently stop recording.
     """
 
     def __init__(self, callbacks: Iterable[TrainingCallback] = ()) -> None:
@@ -103,20 +99,13 @@ class CallbackList(TrainingCallback):
 
     def _dispatch(self, hook: str, *args: Any) -> None:
         """
-        Call ``hook`` on every member, isolating failures.
+        Call ``hook`` on every member in order.
 
         :param hook: Name of the :class:`TrainingCallback` method to invoke.
         :param args: Positional arguments forwarded to the hook.
         """
         for callback in self._callbacks:
-            try:
-                getattr(callback, hook)(*args)
-            except Exception:
-                logger.exception(
-                    "Callback %s.%s raised; continuing without it for this hook.",
-                    type(callback).__name__,
-                    hook,
-                )
+            getattr(callback, hook)(*args)
 
     def on_train_start(self, run_config: Mapping[str, Any]) -> None:
         """

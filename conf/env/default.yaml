@@ -1,7 +1,7 @@
-# Deck CSV for player 0 (the agent), one card ID per line, 60 cards.
-deck0: decks/example.csv
-# Deck CSV for player 1 (the in-env opponent), same format as deck0.
-deck1: decks/example.csv
+# Deck CSVs are defined in the scheduler-independent paths config so storage
+# can be redirected without changing env settings.
+deck0: ${paths.deck0}
+deck1: ${paths.deck1}
 # Padded size of the option space (stop action excluded); must exceed the
 # largest option list the engine can offer, or options get truncated.
 max_options: 96
