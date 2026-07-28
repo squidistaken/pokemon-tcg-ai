@@ -99,9 +99,11 @@ scripts/                     Standalone dev scripts (not part of the training en
   bench_throughput.py          Collection throughput benchmark (naive vs SerialEnv vs ParallelEnv)
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
   run_selfplay_compile.sh      1M-frame self-play run with torch.compile (caps Inductor's compile workers)
+  export_submission_checkpoint.py  Writes checkpoint/model.pt + model_config.yaml for main.py
 decks/                       Example deck CSVs
 docs/                        Design docs (torchrl_environment.md, game.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
+checkpoint/                  Committed Kaggle submission checkpoint (model.pt + model_config.yaml)
 main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
 ```
 
@@ -159,6 +161,28 @@ Evaluation is serial and costs collection throughput, so it is a trade between
 curve resolution and speed. `train.eval_deterministic` (default `true`) scores
 the policy's argmax; set it to `false` to score the sampling behaviour used
 during collection.
+
+## Kaggle submission
+
+`main.py` is the fixed-format Kaggle entry point; its `agent()` loads
+`checkpoint/model.pt` + `checkpoint/model_config.yaml` once (lazily, on the
+first non-deck-selection call) and plays greedily with it via
+`GreedyPolicyOpponent`. Both files are committed so the repository is always a
+self-contained submission; a missing checkpoint or config raises rather than
+silently falling back to random play, since that would mean the submission
+was packaged incorrectly.
+
+**The committed checkpoint is currently a placeholder**: freshly initialized,
+untrained weights, exported purely to exercise the loading path end-to-end.
+Regenerate it from a real training run before actually submitting:
+```bash
+python -m src.train agent=ppo train=ppo_selfplay   # or any other training config
+python scripts/export_submission_checkpoint.py --source-checkpoint <path/to/snapshot.pt>
+```
+Omitting `--source-checkpoint` re-exports a fresh placeholder instead. Pass
+`--overrides` to match whatever `model/backbone` / `model/head` the run used,
+e.g. `--overrides model/backbone=mlp model/head=linear` (the current default,
+so it's rarely needed in practice).
 
 ## CI
 
