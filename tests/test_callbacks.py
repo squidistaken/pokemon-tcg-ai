@@ -1,5 +1,4 @@
 import inspect
-import logging
 import sys
 from collections.abc import Mapping
 from types import ModuleType
@@ -185,19 +184,6 @@ class BrokenWandbModule(ModuleType):
         raise RuntimeError("wandb is down")
 
 
-class FakeApi:
-    """
-    Stand-in for ``wandb.api``, the credential probe.
-    """
-
-    def __init__(self, api_key: str | None) -> None:
-        """
-        :param api_key: Key wandb would resolve, or None for a machine with no
-            credentials from either WANDB_API_KEY or ``~/.netrc``.
-        """
-        self.api_key = api_key
-
-
 class FakeWandbModule(ModuleType):
     """
     Stand-in ``wandb`` module, injected into ``sys.modules``.
@@ -206,14 +192,12 @@ class FakeWandbModule(ModuleType):
     ``on_train_start`` — so no network, credentials or run directory.
     """
 
-    def __init__(self, run: FakeRun, api_key: str | None = "fake-key") -> None:
+    def __init__(self, run: FakeRun) -> None:
         """
         :param run: Run object to hand back from :meth:`init`.
-        :param api_key: Credential the fake ``wandb.api`` reports.
         """
         super().__init__("wandb")
         self.run = run
-        self.api = FakeApi(api_key)
         self.init_kwargs: dict[str, Any] | None = None
 
     def init(self, **kwargs: Any) -> FakeRun:
@@ -296,23 +280,18 @@ def test_callback_list_fans_out_to_every_member_in_order() -> None:
     assert len(callbacks) == 2
 
 
-def test_callback_list_isolates_a_failing_member(caplog: pytest.LogCaptureFixture) -> None:
+def test_callback_list_propagates_a_failing_member() -> None:
     """
-    A raising backend is logged and skipped, not propagated, and does not stop
-    the callbacks after it.
+    A selected backend is required: its failure propagates immediately and
+    callbacks after it are not invoked.
     """
     healthy = RecordingCallback("healthy")
     callbacks = CallbackList([ExplodingCallback(), healthy])
 
-    with caplog.at_level(logging.ERROR):
+    with pytest.raises(RuntimeError, match="backend down: on_train_start"):
         callbacks.on_train_start({"seed": 2})
-        callbacks.on_rollout_end(5, {"win_rate": 1.0})
-        callbacks.on_train_end({"frames": 5})
 
-    assert [hook for _, hook, *_ in healthy.events] == ["start", "rollout_end", "end"]
-    assert ("healthy", "rollout_end", 5, {"win_rate": 1.0}) in healthy.events
-    assert "ExplodingCallback" in caplog.text
-    assert "backend down: on_rollout_end" in caplog.text
+    assert healthy.events == []
 
 
 def test_trainer_notifies_callbacks_across_the_run() -> None:
@@ -388,7 +367,11 @@ def test_wandb_callback_records_config_and_namespaces_metrics(
     """
     module, run = fake_wandb
     callback = WeightsAndBiases(
-        project="pokemon-tcg-ai", entity="team", tags=["baseline"], mode="offline"
+        project="pokemon-tcg-ai",
+        entity="team",
+        tags=["baseline"],
+        mode="offline",
+        dir="/scratch/runs/one",
     )
 
     callback.on_train_start({"seed": 7})
@@ -397,6 +380,8 @@ def test_wandb_callback_records_config_and_namespaces_metrics(
     assert module.init_kwargs["entity"] == "team"
     assert module.init_kwargs["tags"] == ["baseline"]
     assert module.init_kwargs["mode"] == "offline"
+    assert module.init_kwargs["force"] is False
+    assert module.init_kwargs["dir"] == "/scratch/runs/one"
     assert module.init_kwargs["config"] == {"seed": 7}
 
     callback.on_rollout_end(64, {"win_rate": 0.5, "loss_objective": -0.2})
@@ -410,75 +395,40 @@ def test_wandb_callback_records_config_and_namespaces_metrics(
     assert run.finished
 
 
-def test_wandb_callback_stays_online_when_credentials_exist(
+def test_wandb_callback_requires_online_logging(
     fake_wandb: tuple[FakeWandbModule, FakeRun],
 ) -> None:
     """
-    An online run with resolvable credentials is left alone.
+    Online mode tells W&B that authentication is required instead of allowing
+    its automatic offline fallback.
     """
     module, _ = fake_wandb
-    module.api = FakeApi("a-real-key")
 
     WeightsAndBiases(project="pokemon-tcg-ai", mode="online").on_train_start({})
 
     assert module.init_kwargs is not None
     assert module.init_kwargs["mode"] == "online"
+    assert module.init_kwargs["force"] is True
 
 
-def test_wandb_callback_falls_back_to_offline_without_credentials(
+def test_wandb_callback_honours_explicit_offline_mode(
     fake_wandb: tuple[FakeWandbModule, FakeRun],
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """
-    Online with no credentials records offline and says so, rather than blocking
-    on the login prompt or failing the run.
+    Offline recording remains available when the user deliberately requests it.
     """
     module, _ = fake_wandb
-    module.api = FakeApi(None)
 
-    with caplog.at_level(logging.WARNING):
-        WeightsAndBiases(project="pokemon-tcg-ai", mode="online").on_train_start({})
+    WeightsAndBiases(project="pokemon-tcg-ai", mode="offline").on_train_start({})
 
     assert module.init_kwargs is not None
     assert module.init_kwargs["mode"] == "offline"
-    assert "wandb sync" in caplog.text
-
-
-def test_wandb_callback_honours_a_deliberate_non_online_mode(
-    fake_wandb: tuple[FakeWandbModule, FakeRun],
-) -> None:
-    """
-    Modes other than online need no credentials, so the probe leaves them alone.
-    """
-    module, _ = fake_wandb
-    module.api = FakeApi(None)
-
-    WeightsAndBiases(project="pokemon-tcg-ai", mode="disabled").on_train_start({})
-
-    assert module.init_kwargs is not None
-    assert module.init_kwargs["mode"] == "disabled"
-
-
-def test_wandb_callback_defers_to_wandb_when_the_probe_breaks(
-    fake_wandb: tuple[FakeWandbModule, FakeRun],
-) -> None:
-    """
-    ``wandb.api`` is semi-internal: if a future wandb moves it, stay online and
-    let wandb report the problem, rather than downgrading every run to offline.
-    """
-    module, _ = fake_wandb
-    del module.api
-
-    WeightsAndBiases(project="pokemon-tcg-ai", mode="online").on_train_start({})
-
-    assert module.init_kwargs is not None
-    assert module.init_kwargs["mode"] == "online"
+    assert module.init_kwargs["force"] is False
 
 
 def test_wandb_callback_hooks_are_inert_without_a_run() -> None:
     """
-    Metric hooks no-op without a run, so a failed init degrades to "no logging"
-    instead of raising on every batch.
+    Metric hooks no-op without a run so cleanup is safe after startup fails.
     """
     callback = WeightsAndBiases(project="pokemon-tcg-ai")
     callback.on_rollout_start(1)
@@ -495,13 +445,59 @@ def test_wandb_callback_rejects_an_invalid_mode() -> None:
         WeightsAndBiases(project="pokemon-tcg-ai", mode="onlien")
 
 
-def test_wandb_init_failure_does_not_break_training(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wandb_init_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
     """
-    A W&B outage costs the metrics, not the run.
+    A requested W&B backend is required, so an initialization outage fails.
     """
     monkeypatch.setitem(sys.modules, "wandb", BrokenWandbModule())
 
     callbacks = CallbackList([WeightsAndBiases(project="pokemon-tcg-ai")])
-    callbacks.on_train_start({"seed": 0})
-    callbacks.on_rollout_end(64, {"win_rate": 0.5})
-    callbacks.on_train_end({"frames": 64})
+    with pytest.raises(RuntimeError, match="wandb is down"):
+        callbacks.on_train_start({"seed": 0})
+
+
+def test_wandb_logging_failure_propagates(
+    fake_wandb: tuple[FakeWandbModule, FakeRun],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    A W&B failure after startup also fails the selected callback contract.
+    """
+    _, run = fake_wandb
+    callback = WeightsAndBiases(project="pokemon-tcg-ai", mode="offline")
+    callback.on_train_start({})
+
+    def fail_log(_data: dict[str, float], step: int | None = None) -> None:
+        raise RuntimeError(f"wandb logging failed at step {step}")
+
+    monkeypatch.setattr(run, "log", fail_log)
+    with pytest.raises(RuntimeError, match="wandb logging failed at step 64"):
+        callback.on_rollout_end(64, {"win_rate": 0.5})
+
+
+def test_wandb_start_failure_shuts_down_collector(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Strict callback startup still releases the already-created TorchRL collector.
+    """
+    created: list[Any] = []
+
+    class FakeCollector:
+        def __init__(self, **_kwargs: Any) -> None:
+            self.shutdown_called = False
+            created.append(self)
+
+        def __iter__(self) -> Any:
+            return iter(())
+
+        def shutdown(self) -> None:
+            self.shutdown_called = True
+
+    monkeypatch.setattr("src.training.trainer.Collector", FakeCollector)
+    monkeypatch.setitem(sys.modules, "wandb", BrokenWandbModule())
+
+    trainer = make_trainer([WeightsAndBiases(project="pokemon-tcg-ai")])
+    with pytest.raises(RuntimeError, match="wandb is down"):
+        trainer.train()
+
+    assert len(created) == 1
+    assert created[0].shutdown_called

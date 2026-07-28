@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal, cast, get_args
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
-from wandb.sdk.wandb_run import Run
+if TYPE_CHECKING:
+    from wandb.sdk.wandb_run import Run
 
 from src.training.callbacks.base import TrainingCallback
 
 logger = logging.getLogger(__name__)
 
-WandbMode = Literal["online", "offline", "disabled", "shared"]
+WandbMode = Literal["online", "offline", "disabled"]
 _VALID_MODES: tuple[str, ...] = get_args(WandbMode)
 
 
@@ -24,8 +25,8 @@ class WeightsAndBiases(TrainingCallback):
     summary rather than the step series.
 
     Credentials come from ``WANDB_API_KEY`` (which :mod:`src.train` loads from an
-    untracked ``.env``) or ``wandb login``. See :meth:`_resolve_mode` for what
-    happens without them.
+    untracked ``.env``) or ``wandb login``. Online mode is strict: missing or
+    invalid credentials and connection failures stop training.
     """
 
     def __init__(
@@ -38,6 +39,7 @@ class WeightsAndBiases(TrainingCallback):
             tags: Sequence[str] | None = None,
             mode: str = "online",
             notes: str | None = None,
+            dir: str | None = None,
     ) -> None:
         """
         :param project: W&B project to log the run under.
@@ -46,9 +48,10 @@ class WeightsAndBiases(TrainingCallback):
         :param group: Group label, keeping related runs together in the UI.
         :param job_type: Job-type label within the group (e.g. ``train``).
         :param tags: Free-form tags attached to the run.
-        :param mode: ``online``, ``offline`` (record for a later ``wandb sync``),
-            ``disabled`` (drop everything) or ``shared``.
+        :param mode: ``online``, ``offline`` (record for a later ``wandb sync``)
+            or ``disabled`` (drop everything).
         :param notes: Free-text note attached to the run.
+        :param dir: Parent directory for W&B's local run files.
         :raises ValueError: If ``mode`` is not a mode W&B accepts. Checked here so
             a config typo fails before the environments are built.
         """
@@ -64,48 +67,8 @@ class WeightsAndBiases(TrainingCallback):
         self._tags = list(tags) if tags is not None else None
         self._mode: WandbMode = cast(WandbMode, mode)
         self._notes = notes
+        self._dir = dir
         self._run: Run | None = None
-
-    @staticmethod
-    def _has_credentials() -> bool:
-        """
-        Report whether W&B can authenticate on this machine.
-
-        Uses ``wandb.api.api_key``, which resolves ``WANDB_API_KEY`` *and*
-        ``~/.netrc``. Do not swap this for the environment variable alone: it
-        would downgrade anyone who authenticated with ``wandb login``.
-
-        :return: True if a key is resolvable, or if the probe itself fails —
-            ``wandb.api`` is semi-internal, so defer to wandb rather than guess.
-        """
-        import wandb
-
-        try:
-            return bool(wandb.api.api_key)
-        except Exception:
-            logger.debug("Could not probe W&B credentials; assuming present.", exc_info=True)
-            return True
-
-    def _resolve_mode(self) -> WandbMode:
-        """
-        Adapt the configured mode to the credentials actually available.
-
-        An ``online`` run without credentials blocks on a login prompt in a
-        terminal and fails in CI, so record offline instead — the metrics survive
-        and stay syncable. Other modes need no credentials and are left alone.
-
-        :return: The mode to open the run with.
-        """
-        if self._mode != "online" or self._has_credentials():
-            return self._mode
-        logger.warning(
-            "W&B mode is 'online' but no credentials were found (no WANDB_API_KEY "
-            "and no `wandb login` entry in ~/.netrc): recording this run OFFLINE "
-            "instead. The metrics are kept — push them with `wandb sync` on the "
-            "run directory below. To log online, put WANDB_API_KEY in .env (see "
-            ".env.example) or run `wandb login`."
-        )
-        return "offline"
 
     def on_train_start(self, run_config: Mapping[str, Any]) -> None:
         """
@@ -118,7 +81,6 @@ class WeightsAndBiases(TrainingCallback):
         """
         import wandb
 
-        mode = self._resolve_mode()
         self._run = wandb.init(
             project=self._project,
             entity=self._entity,
@@ -126,15 +88,17 @@ class WeightsAndBiases(TrainingCallback):
             group=self._group,
             job_type=self._job_type,
             tags=self._tags,
-            mode=mode,
+            mode=self._mode,
             notes=self._notes,
+            dir=self._dir,
             config=dict(run_config),
+            force=self._mode == "online",
         )
         logger.info(
             "W&B run started: %s (%s, mode=%s)",
             self._run.name,
             self._run.url or self._run.id,
-            mode,
+            self._mode,
         )
 
     def on_rollout_start(self, step: int) -> None:
@@ -167,8 +131,8 @@ class WeightsAndBiases(TrainingCallback):
         """
         Send namespaced metrics to the active run, if there is one.
 
-        No-ops without a run: a failed :meth:`on_train_start` is logged and
-        training continues, so the later hooks must not raise on every batch.
+        No-ops without a run so teardown remains safe if startup failed before
+        W&B returned a run object.
 
         :param prefix: Namespace for the metric keys (``train`` or ``eval``).
         :param step: Value for the ``frames`` x-axis.

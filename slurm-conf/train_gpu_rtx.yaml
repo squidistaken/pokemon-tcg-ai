@@ -1,0 +1,13 @@
+# Scheduler resources for a RTX Pro 6000 GPU.
+slurm:
+  job_name: pokemon-tcg-train-rtx
+  time: "12:00:00"
+  nodes: 1 # Multi-node training is not supported.
+  ntasks: 1 # One training process.
+  cpus_per_task: 16 # Matches the default 16 collector workers.
+  mem: 64G # Memory requested for the node.
+  partition: gpu
+  gpu_type: rtx_pro_6000
+  gpus_per_node: 1 # Multi-GPU training is not supported.
+  output: slurm-conf/logs/%x_%j.out
+  error: slurm-conf/logs/%x_%j.err
