@@ -77,12 +77,13 @@ src/
     self_play.py                 build_opponent_factory: the picklable self-play league factory handed to each env worker
     evaluator.py                 Evaluator: scores the policy against a fixed opponent (readable curve under self-play)
     callbacks/                  Metric sinks; the trainer emits, these decide where it goes
-      base.py                     TrainingCallback hooks + CallbackList (fan-out, isolates failures)
+      base.py                     TrainingCallback hooks + CallbackList (fan-out, propagates failures)
       snapshot_callback.py        SnapshotCallback: freezes the learner into the self-play league at a frame interval
       wandb_callback.py           WeightsAndBiases: the only module that imports wandb
   train.py                    Hydra entry point (python -m src.train)
 
 conf/                        Hydra configs (config.yaml + env/, agent/, model/, train/, collector/, callbacks/, experiment/ groups)
+  paths/default.yaml          Scheduler-independent input and output locations
   model/
     default.yaml                Composes one backbone + one head, holds shared dims (embed_dim, value_head)
     backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
@@ -105,6 +106,7 @@ docs/                        Design docs (torchrl_environment.md, game.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
 checkpoint/                  Committed Kaggle submission checkpoint (model.pt + model_config.yaml)
 main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
+slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts
 ```
 
 The **backbone** and **head** are independent Hydra config groups, so any backbone can be paired
@@ -161,6 +163,16 @@ Evaluation is serial and costs collection throughput, so it is a trade between
 curve resolution and speed. `train.eval_deterministic` (default `true`) scores
 the policy's argmax; set it to `false` to score the sampling behaviour used
 during collection.
+
+Online W&B logging is required when selected: configure `WANDB_API_KEY` in an
+untracked `.env` or run `wandb login --verify`. Authentication, connection, or
+logging failures stop training. Use `wandb.mode=offline` only when local
+recording for a later `wandb sync` is intentional.
+
+Slurm support is kept separately in [`slurm-conf/`](slurm-conf/README.md). The
+profiles select a normal Hydra config and add scheduler-specific overrides;
+they do not participate in local Hydra composition. Complete launch configs are
+available as `baseline`, `ppo`, and `ppo_selfplay`.
 
 ## Kaggle submission
 
