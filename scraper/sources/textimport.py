@@ -98,10 +98,16 @@ class TextSource(DeckSource):
             if archetype is None:
                 archetype = os.path.splitext(os.path.basename(input))[0]
         cards = parse_decklist_text(text)
+        # A text import has no event, URL or date, so the file it came from is the
+        # only stable identifier. Re-importing the same file is the same occurrence;
+        # a raw blob passed as ``text=`` has no identity at all, so two blobs with
+        # the same card multiset count as one occurrence.
+        external_ids = {"input": os.path.abspath(input)} if input else {}
         yield RawDeck(
             source=self.name,
             archetype=archetype or "imported-deck",
             cards=cards,
             url=None,
             fmt=fmt,
+            external_ids=external_ids,
         )

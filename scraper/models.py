@@ -31,6 +31,12 @@ class RawDeck:
     record: str | None = None  # e.g. "9-0-1", if available
     event: str | None = None  # tournament / page name, if available
     placing: int | None = None  # finishing position, if available
+    event_date: str | None = None  # YYYY-MM-DD the event was held, if available
+    # Source-native IDs pinning this occurrence down across re-scrapes, e.g.
+    # {"tournament_id": "...", "placing": "3"}. Sources should populate something
+    # stable here; without it, repeat occurrences are identified by their
+    # descriptive fields alone (see scraper.manifest.Observation.key).
+    external_ids: dict[str, str] = field(default_factory=dict)
 
     def total_cards(self) -> int:
         """
@@ -43,15 +49,15 @@ class RawDeck:
 class ResolvedDeck:
     """The result of resolving a RawDeck against the card index."""
 
-    raw: RawDeck
+    source_deck: RawDeck
     ids: list[int]  # expanded list of Card IDs (one entry per copy)
-    unresolved: list[RawCard] = field(default_factory=list)
+    unresolved_cards: list[RawCard] = field(default_factory=list)
     # Fuzzy substitutions applied, for auditing: (scraped name -> matched name, score).
-    fuzzy: list[tuple[str, str, float]] = field(default_factory=list)
+    fuzzy_matches: list[tuple[str, str, float]] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         """
         :return: True if every scraped card resolved to a Card ID.
         """
-        return not self.unresolved
+        return not self.unresolved_cards

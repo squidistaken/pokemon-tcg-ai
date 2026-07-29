@@ -44,7 +44,7 @@ class HttpClient:
             time.sleep(self.min_interval - elapsed)
         self._last_request = time.monotonic()
 
-    def get(self, url: str, **kwargs) -> requests.Response:
+    def _get(self, url: str, **kwargs) -> requests.Response:
         """
         Rate-limited GET that raises on non-2xx responses.
 
@@ -67,14 +67,4 @@ class HttpClient:
         :param kwargs: Extra arguments forwarded to :meth:`get`.
         :return: The decoded JSON payload.
         """
-        return self.get(url, **kwargs).json()
-
-    def get_text(self, url: str, **kwargs) -> str:
-        """
-        GET a URL and return the response body as text.
-
-        :param url: URL to fetch.
-        :param kwargs: Extra arguments forwarded to :meth:`get`.
-        :return: The response body decoded as text.
-        """
-        return self.get(url, **kwargs).text
+        return self._get(url, **kwargs).json()

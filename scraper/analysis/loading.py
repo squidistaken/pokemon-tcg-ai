@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .. import manifest as manifest_mod
+from ..manifest import Manifest
 from .console import console
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -56,17 +57,16 @@ def ordered_deck_paths(deck_dir: Path) -> list[Path]:
     return nested or all_csvs
 
 
-def load_manifest(deck_dir: Path) -> dict:
+def load_manifest(deck_dir: Path) -> Manifest:
     """
-    Load the full corpus manifest keyed by deck stem.
+    Load the corpus manifest, keyed by deck stem.
 
     :param deck_dir: Directory that may contain ``manifest.json``.
-    :return: Mapping ``stem -> metadata dict``; empty dict if no manifest.
+    :return: The :class:`~scraper.manifest.Manifest`; empty if there is no manifest
+        file. A v1 (pre-observations) file is upgraded in memory on read.
+    :raises ManifestError: If a manifest exists but cannot be parsed.
     """
-    manifest_path = deck_dir / "manifest.json"
-    if not manifest_path.exists():
-        return {}
-    return json.loads(manifest_path.read_text())
+    return manifest_mod.load(deck_dir)
 
 
 def load_archetypes(deck_dir: Path, names: list[str]) -> list[str] | None:
@@ -78,19 +78,28 @@ def load_archetypes(deck_dir: Path, names: list[str]) -> list[str] | None:
     :return: Archetype label per deck, or None if no manifest is available.
     """
     manifest = load_manifest(deck_dir)
-    if not manifest:
+    if not manifest.decks:
         return None
-    return [manifest.get(name, {}).get("archetype", "Unknown") for name in names]
+    return [
+        entry.archetype if (entry := manifest.decks.get(name)) else "Unknown"
+        for name in names
+    ]
 
 
 def count_unique_decks(decks: list[list[int]]) -> int:
     """
-    Count decks with a distinct set of card IDs.
+    Count decks with a distinct card multiset.
+
+    Uses the same notion of identity as the corpus's dedup key
+    (:func:`scraper.writer.deck_hash`): order-agnostic but copy-count sensitive. A
+    ``frozenset`` would be copy-count *blind*, so two decks differing only in how
+    many copies they run — genuinely different decks, and separate manifest
+    entries — would be reported as one.
 
     :param decks: List of decks, each a list of card IDs.
-    :return: Number of distinct card-ID sets in the corpus.
+    :return: Number of distinct card multisets in the corpus.
     """
-    return len({frozenset(deck) for deck in decks})
+    return len({tuple(sorted(deck)) for deck in decks})
 
 
 def load_card_database() -> CardDatabase | None:

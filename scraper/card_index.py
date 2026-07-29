@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import NamedTuple
 
-FUZZY_THRESHOLD = 0.90
+FUZZY_THRESHOLD = 0.90 # Minimum string-similarity score required for a misspelled card name to be accepted.
 
 _POWER_MARKERS = {
     "mega",
@@ -32,6 +32,7 @@ COL_SET = "Expansion"
 COL_NUMBER = "Collection No."
 COL_STAGE = "Stage (Pokémon)/Type (Energy and Trainer)"
 COL_RULE = "Rule"
+COL_PREV = "Previous stage"
 
 _ENERGY_WORDS = {
     "G": ["grass"],
@@ -104,6 +105,7 @@ class CardInfo:
     is_basic_energy: bool
     is_basic_pokemon: bool
     is_ace_spec: bool
+    previous_stage: str | None  # immediate evolution base (Card Name), or None for Basics
 
 
 class MatchResult(NamedTuple):
@@ -155,6 +157,7 @@ class CardIndex:
                 name = (row.get(COL_NAME) or "").strip()
                 set_code = (row.get(COL_SET) or "").strip()
                 number = normalize_number(row.get(COL_NUMBER))
+                prev = (row.get(COL_PREV) or "").strip()
 
                 info = CardInfo(
                     card_id=cid,
@@ -164,6 +167,7 @@ class CardIndex:
                     is_basic_energy=(stage == "Basic Energy"),
                     is_basic_pokemon=(stage == "Basic Pokémon"),
                     is_ace_spec=(rule == "ACE SPEC"),
+                    previous_stage=prev if prev and prev.lower() != "n/a" else None,
                 )
                 self.by_id[cid] = info
                 self._index_card(info)

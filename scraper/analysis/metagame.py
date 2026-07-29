@@ -10,6 +10,8 @@ import numpy as np
 if TYPE_CHECKING:
     from src.env.card_database import CardDatabase
 
+    from ..manifest import Manifest
+
 
 def archetype_core_cards(
     decks: list[list[int]],
@@ -133,37 +135,61 @@ def parse_winrate(record: str | None) -> float | None:
     return w / (w + l)
 
 
+def deck_winrates(manifest: Manifest, name: str) -> list[float]:
+    """
+    Every recorded win-rate for one deck — one per occurrence, not one per file.
+
+    A list fourteen players piloted has fourteen records, and each is a real
+    result; collapsing them to one would throw away thirteen samples and flatten
+    the popularity weighting that ``observation_count`` exists to capture.
+
+    :param manifest: The corpus manifest.
+    :param name: Deck file stem.
+    :return: Win-rate per observation that reports a usable record (possibly empty).
+    """
+    entry = manifest.decks.get(name)
+    if entry is None:
+        return []
+    return [wr for o in entry.observations if (wr := parse_winrate(o.record)) is not None]
+
+
 def archetype_winrates(
     names: list[str],
     archetypes: list[str],
-    manifest: dict,
+    manifest: Manifest,
     min_decks: int = 3,
 ) -> dict:
     """
     Aggregate deck win-rates by archetype to compare archetype quality.
 
+    Each *occurrence* contributes a sample, so a widely-played list weighs more
+    than a one-off brew with the same record.
+
     :param names: Deck file stems, aligned with ``archetypes``.
     :param archetypes: Archetype label per deck.
-    :param manifest: Full manifest dict keyed by deck stem (see load_manifest).
-    :param min_decks: Minimum decks with a valid record for an archetype to be
-                      ranked; archetypes below this are dropped (and counted).
-    :return: Dict with ``rows`` (list of ``(archetype, n_decks, pooled_winrate,
-             mean_winrate, std_winrate)`` sorted by pooled win-rate desc),
-             ``n_filtered`` (archetypes dropped by ``min_decks``) and
+    :param manifest: The corpus manifest (see load_manifest).
+    :param min_decks: Minimum observations with a valid record for an archetype to
+                      be ranked; archetypes below this are dropped (and counted).
+    :return: Dict with ``rows`` (list of ``(archetype, n_observations,
+             pooled_winrate, mean_winrate, std_winrate)`` sorted by pooled win-rate
+             desc), ``n_filtered`` (archetypes dropped by ``min_decks``) and
              ``min_decks``.
     """
     wins: dict[str, int] = defaultdict(int)
     losses: dict[str, int] = defaultdict(int)
     per_deck: dict[str, list[float]] = defaultdict(list)
     for name, arch in zip(names, archetypes, strict=False):
-        rec = manifest.get(name, {}).get("record")
-        wr = parse_winrate(rec)
-        if wr is None:
+        entry = manifest.decks.get(name)
+        if entry is None:
             continue
-        w, l = (int(p) for p in rec.split("-")[:2])  # validated by parse_winrate
-        wins[arch] += w
-        losses[arch] += l
-        per_deck[arch].append(wr)
+        for obs in entry.observations:
+            wr = parse_winrate(obs.record)
+            if wr is None:
+                continue
+            w, l = (int(p) for p in obs.record.split("-")[:2])  # parse_winrate validated it
+            wins[arch] += w
+            losses[arch] += l
+            per_deck[arch].append(wr)
 
     rows = []
     n_filtered = 0
@@ -177,6 +203,51 @@ def archetype_winrates(
         rows.append((arch, len(wrs), pooled, float(arr.mean()), float(arr.std())))
     rows.sort(key=lambda t: t[2], reverse=True)
     return {"rows": rows, "n_filtered": n_filtered, "min_decks": min_decks}
+
+
+def deck_popularity_ranking(
+    names: list[str],
+    archetypes: list[str] | None,
+    manifest: Manifest,
+    top: int = 20,
+) -> list:
+    """
+    Rank individual deck files by how often they were independently observed.
+
+    ``observation_count`` is the corpus's popularity signal (see
+    :mod:`scraper.manifest`): a list fourteen players brought to fourteen events
+    outranks a one-off brew with the same 60 cards. This surfaces that ranking
+    directly, at deck-file granularity rather than pooled by archetype.
+
+    :param names: Deck file stems, in matrix order.
+    :param archetypes: Archetype label per deck (matrix order), or None if no
+                        manifest-derived labels are available.
+    :param manifest: The corpus manifest (see load_manifest).
+    :param top: Number of most-observed decks to return.
+    :return: List of ``(name, archetype, observation_count, pooled_winrate)``
+             sorted by ``observation_count`` desc, length <= ``top``.
+             ``pooled_winrate`` is None if no observation reports a usable record.
+             ``archetype`` is None if ``archetypes`` is None.
+    """
+    rows = []
+    for i, name in enumerate(names):
+        entry = manifest.decks.get(name)
+        if entry is None:
+            continue
+        wins = losses = 0
+        for obs in entry.observations:
+            wr = parse_winrate(obs.record)
+            if wr is None:
+                continue
+            w, l = (int(p) for p in obs.record.split("-")[:2])  # parse_winrate validated it
+            wins += w
+            losses += l
+        total_games = wins + losses
+        pooled = wins / total_games if total_games else None
+        arch = archetypes[i] if archetypes is not None else None
+        rows.append((name, arch, entry.observation_count, pooled))
+    rows.sort(key=lambda r: r[2], reverse=True)
+    return rows[:top]
 
 
 def card_usage_rates(
@@ -218,7 +289,7 @@ def card_usage_rates(
 def card_placement_correlation(
     decks: list[list[int]],
     names: list[str],
-    manifest: dict,
+    manifest: Manifest,
     db: CardDatabase | None = None,
     min_decks: int = 10,
     top: int = 15,
@@ -226,12 +297,16 @@ def card_placement_correlation(
     """
     Point-biserial correlation between running a card and deck win-rate.
 
+    Each occurrence of a deck is one observation of that card set's win-rate, so a
+    deck seen five times contributes five rows — which is what weights the
+    correlation by how much the list was actually played.
+
     :param decks: List of decks, each a list of card IDs.
     :param names: Deck file stems, aligned with ``decks``; used to look up the
-                  record in ``manifest``.
-    :param manifest: Full manifest dict keyed by deck stem (see load_manifest).
+                  records in ``manifest``.
+    :param manifest: The corpus manifest (see load_manifest).
     :param db: Optional ``CardDatabase`` for readable card names.
-    :param min_decks: Minimum number of decks a card must appear in to qualify.
+    :param min_decks: Minimum number of observations a card must appear in to qualify.
     :param top: How many top positive and top negative cards to return.
     :return: Dict with ``n_decks_scored``, ``n_cards_tested`` and
              ``positive`` / ``negative`` lists of
@@ -240,13 +315,14 @@ def card_placement_correlation(
     winrates = []
     kept_decks = []
     for name, deck in zip(names, decks, strict=False):
-        wr = parse_winrate(manifest.get(name, {}).get("record"))
-        if wr is None:
-            continue
-        winrates.append(wr)
-        kept_decks.append(deck)
+        for wr in deck_winrates(manifest, name):
+            winrates.append(wr)
+            kept_decks.append(deck)
 
     n = len(kept_decks)
+    if not n:  # no source reported a record; averaging nothing yields NaNs
+        return {"n_decks_scored": 0, "n_cards_tested": 0, "positive": [], "negative": []}
+
     y = np.array(winrates, dtype=np.float64)
     y_centered = y - y.mean()
     y_ss = float(np.sum(y_centered**2))

@@ -22,12 +22,15 @@ from .metagame import (
     card_placement_correlation,
     card_pool_coverage,
     card_usage_rates,
+    deck_popularity_ranking,
     metagame_diversity,
 )
 
 if TYPE_CHECKING:
     from scraper.card_index import CardIndex
     from src.env.card_database import CardDatabase
+
+    from ..manifest import Manifest
 
 
 def report_clustering(sim: np.ndarray, labels: list[str], label: str) -> None:
@@ -70,7 +73,7 @@ def report_meta(
     decks: list[list[int]],
     names: list[str],
     archetypes: list[str],
-    manifest: dict,
+    manifest: Manifest,
     db: CardDatabase | None = None,
 ) -> None:
     """
@@ -79,7 +82,7 @@ def report_meta(
     :param decks: List of decks, each a list of card IDs.
     :param names: Deck file stems, aligned with ``decks``.
     :param archetypes: Archetype label per deck, aligned with ``decks``.
-    :param manifest: Full manifest dict keyed by deck stem (see load_manifest).
+    :param manifest: The corpus manifest (see load_manifest).
     :param db: Optional ``CardDatabase`` for readable card names.
     """
     console.print()
@@ -159,6 +162,36 @@ def report_meta(
         )
     console.print(ctable)
 
+    # most-observed decks
+    popularity = deck_popularity_ranking(names, archetypes, manifest, top=20)
+    ptable = Table(
+        box=ROUNDED,
+        title=f"Most-observed decks (top {len(popularity)} by observation count)",
+        title_style="bold",
+        title_justify="left",
+        header_style="bold magenta",
+    )
+    ptable.add_column("#", justify="right", style="dim")
+    ptable.add_column("deck")
+    ptable.add_column("archetype", style="cyan")
+    ptable.add_column("observations", justify="right", style="bold green")
+    ptable.add_column("pooled WR", justify="right", style="dim")
+    for rank, (name, arch, obs_count, pooled) in enumerate(popularity, 1):
+        ptable.add_row(
+            str(rank),
+            name,
+            arch or "-",
+            str(obs_count),
+            f"{pooled:.1%}" if pooled is not None else "-",
+        )
+    console.print(ptable)
+    caveat(
+        "[bold]Observation count[/] counts independent occurrences of the exact "
+        "60-card list (see [dim]scraper.manifest[/]), so it reflects how often "
+        "that precise build was brought to an event -- [bold]not[/] archetype "
+        "popularity, which the win-rate table below aggregates across builds."
+    )
+
     # win-rate by archetype
     wr = archetype_winrates(names, archetypes, manifest, min_decks=3)
     ranked = wr["rows"]
@@ -214,7 +247,7 @@ def report_meta(
         box=ROUNDED,
         title=(
             f"Card ↔ win-rate correlation  "
-            f"[dim](scored {corr['n_decks_scored']} decks, "
+            f"[dim](scored {corr['n_decks_scored']} deck observations, "
             f"tested {corr['n_cards_tested']} cards)[/]"
         ),
         title_style="bold",

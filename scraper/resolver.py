@@ -28,4 +28,4 @@ def resolve_deck(raw: RawDeck, index: CardIndex) -> ResolvedDeck:
             matched = index.by_id[result.card_id].name
             fuzzy.append((card.name, matched, result.score or 0.0))
         ids.extend([result.card_id] * max(0, card.count))
-    return ResolvedDeck(raw=raw, ids=ids, unresolved=unresolved, fuzzy=fuzzy)
+    return ResolvedDeck(source_deck=raw, ids=ids, unresolved_cards=unresolved, fuzzy_matches=fuzzy)

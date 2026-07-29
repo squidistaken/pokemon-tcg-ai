@@ -134,4 +134,8 @@ class BulbapediaSource(DeckSource):
                     cards=cards,
                     url=f"https://bulbapedia.bulbagarden.net/wiki/{page.replace(' ', '_')}",
                     fmt=None,
+                    # The wiki gives no event, record, placing or date, so page +
+                    # table index is the only thing distinguishing two decklists on
+                    # one page — without it they'd look like the same occurrence.
+                    external_ids={"page": page, "table_index": str(i)},
                 )

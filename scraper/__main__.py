@@ -23,16 +23,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Source: limitless | bulbapedia | text | all (default: limitless)",
     )
     p.add_argument(
-        "--limit", type=int, default=20, help="Max tournaments/pages to scan"
+        "--limit", type=int, default=20, help="Tournaments per page / wiki pages to scan"
     )
     p.add_argument(
         "--format", dest="fmt", default="standard", help="Game format (limitless)"
     )
     p.add_argument(
-        "--per-tournament", type=int, default=8, help="Max decks per tournament"
+        "--per-tournament",
+        type=int,
+        default=8,
+        help="Max decks per tournament, best finish first; 0 = every published list",
     )
     p.add_argument(
-        "--page", type=int, default=1, help="Results page, walks older (limitless)"
+        "--page", type=int, default=1, help="Results page to start from (limitless)"
+    )
+    p.add_argument(
+        "--max-pages",
+        type=int,
+        default=1,
+        help="Pages to walk from --page, going back in time; 0 = until exhausted",
+    )
+    p.add_argument(
+        "--max-decks", type=int, help="Stop after scraping this many decks (limitless)"
     )
     p.add_argument("--since", help="Keep tournaments on/after YYYY-MM-DD (limitless)")
     p.add_argument("--until", help="Keep tournaments on/before YYYY-MM-DD (limitless)")
@@ -45,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="Resolve+validate only; don't write"
     )
     p.add_argument("--verbose", "-v", action="store_true", help="Per-deck logging")
+    p.add_argument(
+        "--warn-impossible-evolutions",
+        action="store_true",
+        help="Flag (non-fatally) Stage 1/2 Pokémon with no copy of their "
+        "previous stage in the deck, e.g. a Vaporeon with no Eevee",
+    )
     return p
 
 
@@ -60,12 +78,15 @@ def _source_kwargs(args) -> dict:
         "fmt": args.fmt,
         "per_tournament": args.per_tournament,
         "page": args.page,
+        "max_pages": args.max_pages,
+        "max_decks": args.max_decks,
         "since": args.since,
         "until": args.until,
         "pages": [s.strip() for s in args.pages.split(",")] if args.pages else None,
         "category": args.category,
         "input": args.input,
         "archetype": args.name,
+        "verbose": args.verbose,
     }
 
 
@@ -106,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
                     dry_run=args.dry_run,
                     verbose=args.verbose,
                     date=today,
+                    warn_impossible_evolutions=args.warn_impossible_evolutions,
                 )
         except Exception as e:  # noqa: BLE001 - report and continue with what we have
             print(f"  source {name!r} error: {e}", file=sys.stderr)
@@ -115,6 +137,10 @@ def main(argv: list[str] | None = None) -> int:
     if summary.drops and not args.verbose:
         print(
             f"  ({len(summary.drops)} decks dropped; re-run with --verbose for reasons)"
+        )
+    if summary.warnings and not args.verbose:
+        print(
+            f"  ({len(summary.warnings)} warnings; re-run with --verbose for details)"
         )
     return 0
 
