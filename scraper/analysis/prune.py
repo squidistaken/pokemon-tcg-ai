@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -17,20 +17,35 @@ from .matrices import build_count_matrix
 from .similarity import weighted_jaccard_matrix
 
 
+def near_duplicate_clusters(
+    sim: np.ndarray,
+    threshold: float,
+) -> list[list[int]]:
+    """Group decks only when every pair in a cluster meets ``threshold``."""
+    clusters: list[list[int]] = []
+    for idx in range(sim.shape[0]):
+        for cluster in clusters:
+            if all(sim[idx, member] >= threshold for member in cluster):
+                cluster.append(idx)
+                break
+        else:
+            clusters.append([idx])
+    return clusters
+
+
 def prune_near_duplicates(deck_dir: Path, threshold: float) -> None:
     """
     Collapse each near-duplicate deck cluster down to a single representative.
 
-    Decks whose pairwise weighted-Jaccard is ``>= threshold`` are unioned into
-    clusters (the same transitive clustering the near-duplicate report counts).
-    Each cluster is reduced to its medoid — the list most similar to the rest of
-    its cluster — and the other files are **deleted**: the redundant CSVs are
-    removed, their manifest entries dropped (their observations first folded into
-    the medoid, so no provenance is lost), and any archetype folder left empty is
-    removed. This strips the ±1-2 tech-card variants that otherwise oversample
-    popular archetypes under a uniform sampler and leak near-identical lists
-    across the train/holdout split (which quietly inflates the unseen-deck eval).
-    Archetypes and genuine variation are kept.
+    Decks are clustered only when every pair has weighted-Jaccard ``>= threshold``
+    (similarity is not treated as transitive). Each cluster is reduced to its
+    medoid — the list most similar to the rest of its cluster — and the other files
+    are **deleted**: the redundant CSVs are removed, their manifest entries dropped
+    (their observations first folded into the medoid, so no provenance is lost),
+    and any archetype folder left empty is removed. This strips the ±1-2 tech-card
+    variants that otherwise oversample popular archetypes under a uniform sampler
+    and leak near-identical lists across the train/holdout split (which quietly
+    inflates the unseen-deck eval). Archetypes and genuine variation are kept.
 
     :param deck_dir: Corpus directory (searched recursively).
     :param threshold: Weighted-Jaccard at/above which two decks are duplicates.
@@ -55,30 +70,13 @@ def prune_near_duplicates(deck_dir: Path, threshold: float) -> None:
     counts = build_count_matrix(decks)
     sim = weighted_jaccard_matrix(counts)
 
-    parent = list(range(n))
-
-    def _find(x: int) -> int:
-        """Union-find root of ``x`` with path halving."""
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    iu = np.triu_indices(n, k=1)
-    for k in np.where(sim[iu] >= threshold)[0]:
-        ra, rb = _find(int(iu[0][k])), _find(int(iu[1][k]))
-        if ra != rb:
-            parent[ra] = rb
-
-    clusters: dict[int, list[int]] = defaultdict(list)
-    for i in range(n):
-        clusters[_find(i)].append(i)
+    clusters = near_duplicate_clusters(sim, threshold)
 
     # keep index -> the indices collapsed into it, so each deleted deck's
     # observations can be folded into the survivor rather than thrown away.
     absorbed: dict[int, list[int]] = {}
     delete_idx: list[int] = []
-    for members in clusters.values():
+    for members in clusters:
         if len(members) < 2:
             continue
         sub = sim[np.ix_(members, members)]

@@ -245,15 +245,21 @@ class CardIndex:
         skey = set_code.lower().strip() if set_code else None
         num = normalize_number(number)
 
-        if skey and num is not None:
-            hit = self._by_name_set_no.get((nm, skey, num))
-            if hit is not None:
-                return MatchResult(hit, "exact", nm)
         if skey:
+            if skey not in self._names_by_set:
+                return MatchResult(None, "unresolved")
+            if num is not None:
+                hit = self._by_name_set_no.get((nm, skey, num))
+                if hit is not None:
+                    return MatchResult(hit, "exact", nm)
             hits = self._by_name_set.get((nm, skey))
             if hits:
                 return MatchResult(hits[0], "exact", nm)
-        # Reprint fallback: same name, any set (prefer a same-number printing).
+            # A source that supplied a set identified a specific printing. Do not
+            # silently replace it with a same-name card from another set.
+            return self._fuzzy_match(nm, skey)
+
+        # Set-less sources cannot identify a printing, so fall back by name.
         hits = self._by_name.get(nm)
         if hits:
             if num is not None:
@@ -278,13 +284,11 @@ class CardIndex:
         :return: A fuzzy :class:`MatchResult`, or an unresolved one if no
             candidate clears the guards.
         """
-        if skey is not None and skey not in {s.lower() for s in self.available_sets}:
+        if skey is not None and skey not in self._names_by_set:
             return MatchResult(None, "unresolved")
 
         # Restrict candidates to cards printed in the scraped set when known.
-        candidates = self._names_by_set.get(skey) if skey else self._by_name.keys()
-        if not candidates:
-            candidates = self._by_name.keys()
+        candidates = self._names_by_set[skey] if skey else self._by_name.keys()
 
         want_markers = _power_markers(nm)
         best_name: str | None = None
@@ -297,7 +301,14 @@ class CardIndex:
                 best_score, best_name = score, cand
 
         if best_name is not None and best_score >= FUZZY_THRESHOLD:
+            hits = (
+                self._by_name_set.get((best_name, skey))
+                if skey is not None
+                else self._by_name.get(best_name)
+            )
+            if not hits:
+                return MatchResult(None, "unresolved")
             return MatchResult(
-                self._by_name[best_name][0], "fuzzy", best_name, round(best_score, 3)
+                hits[0], "fuzzy", best_name, round(best_score, 3)
             )
         return MatchResult(None, "unresolved")
