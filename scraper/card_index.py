@@ -246,8 +246,6 @@ class CardIndex:
         num = normalize_number(number)
 
         if skey:
-            if skey not in self._names_by_set:
-                return MatchResult(None, "unresolved")
             if num is not None:
                 hit = self._by_name_set_no.get((nm, skey, num))
                 if hit is not None:
@@ -255,11 +253,11 @@ class CardIndex:
             hits = self._by_name_set.get((nm, skey))
             if hits:
                 return MatchResult(hits[0], "exact", nm)
-            # A source that supplied a set identified a specific printing. Do not
-            # silently replace it with a same-name card from another set.
-            return self._fuzzy_match(nm, skey)
 
-        # Set-less sources cannot identify a printing, so fall back by name.
+        # The card table carries one printing per card, so the set a source
+        # reports is usually a reprint that is not in it. Treating the set as a
+        # hard filter would reject staples that are plainly in the pool, so it
+        # only ever narrows the search — the name alone decides the card.
         hits = self._by_name.get(nm)
         if hits:
             if num is not None:
