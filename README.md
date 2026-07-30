@@ -50,8 +50,7 @@ multi-deck training:
 Publish a new corpus (auto-increments to the next `decks-vN`):
 
 ```bash
-./scripts/update_decks_release.sh                 # builds + creates the release
-./scripts/update_decks_release.sh --notes "…"     # with release notes
+./scripts/update_decks_release.sh <--notes> "…">  
 ```
 
 `fetch_decks.sh` picks up the highest-numbered release automatically. `build_decks_release.sh` is
