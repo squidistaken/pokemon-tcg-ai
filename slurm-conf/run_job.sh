@@ -2,15 +2,16 @@
 
 set -euo pipefail
 
-if [ "$#" -lt 3 ]; then
-  echo "Usage: run_job.sh PROFILE_PATH CONFIG_NAME UV_ENVIRONMENT [HYDRA_OVERRIDE ...]" >&2
+if [ "$#" -lt 4 ]; then
+  echo "Usage: run_job.sh PROFILE_PATH CONFIG_NAME UV_ENVIRONMENT DEVICE [HYDRA_OVERRIDE ...]" >&2
   exit 2
 fi
 
 PROFILE_PATH="$1"
 CONFIG_NAME="$2"
 UV_ENVIRONMENT="$3"
-shift 3
+DEVICE="$4"
+shift 4
 
 # Slurm executes a copied script from its spool directory. submit.py sets
 # --chdir to the project root, so use the job's working directory instead of
@@ -39,6 +40,8 @@ mkdir -p "$TMPDIR"
 # each process from creating another full pool of math-library threads.
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 
 echo "Profile: $PROFILE_PATH"
 echo "Hydra config: conf/$CONFIG_NAME.yaml"
@@ -49,7 +52,8 @@ echo "CPUs: ${SLURM_CPUS_PER_TASK:-unknown}"
 echo "GPUs: ${CUDA_VISIBLE_DEVICES:-none}"
 echo "Start: $(date --iso-8601=seconds)"
 
-uv run --frozen --no-sync python - <<'PY'
+if [ "$DEVICE" = cuda ]; then
+  uv run --frozen --no-sync python - <<'PY'
 import torch
 from cg import sim
 
@@ -67,6 +71,17 @@ print(f"Compute capability: {torch.cuda.get_device_capability(0)}")
 print(f"CUDA calculation result: {result.item():.0f}")
 print(f"Engine: {sim.lib._name}")
 PY
+else
+  uv run --frozen --no-sync python - <<'PY'
+import torch
+from cg import sim
+
+print(f"PyTorch: {torch.__version__}")
+print("Device: cpu")
+print(f"Threads: {torch.get_num_threads()}")
+print(f"Engine: {sim.lib._name}")
+PY
+fi
 
 srun uv run --frozen --no-sync python -m src.train --config-name "$CONFIG_NAME" "$@"
 

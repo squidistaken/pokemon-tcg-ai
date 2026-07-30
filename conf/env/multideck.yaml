@@ -1,0 +1,23 @@
+# Multi-deck training curriculum over the tournament deck corpus.
+#
+# Usage:
+#   python -m src.train agent=ppo env=multideck
+#   python -m src.train agent=ppo train=ppo_selfplay env=multideck
+#
+# Inherits every key from env/default.yaml and only turns the deck pool on, so
+# each episode samples a matchup from the per-archetype corpus under decks/
+# instead of the fixed decks/example.csv pair (the loose example deck is
+# excluded from the pool). 20% of the corpus is held out so the periodic
+# evaluator (train.eval_interval > 0) scores the policy on unseen decks.
+defaults:
+  - default
+  - _self_
+
+deck_pool: decks
+deck_matchup: independent
+# Evaluate on mirror matchups so the eval curve tracks piloting skill on the
+# held-out decks, uncoupled from the deck-vs-deck luck that independent (the
+# training matchup above) mixes in.
+eval_deck_matchup: mirror
+deck_sampling: uniform
+deck_holdout_frac: 0.2

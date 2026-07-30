@@ -1,0 +1,12 @@
+# Multi-deck self-play PPO: the self-play league trained across the
+defaults:
+  - config
+  - override /agent: ppo
+  - override /train: ppo_selfplay
+  - override /env: multideck
+  - _self_
+
+train:
+  # Each eval episode samples a different held-out deck, so the generalization
+  # curve is noisier; average over more episodes to smooth it.
+  eval_episodes: 150

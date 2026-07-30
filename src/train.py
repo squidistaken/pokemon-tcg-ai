@@ -90,9 +90,9 @@ def _run_config(cfg: DictConfig) -> dict[str, Any]:
 
 
 def _build_ppo_trainer(
-        cfg: DictConfig,
-        callbacks: list[TrainingCallback],
-        run_config: dict[str, Any],
+    cfg: DictConfig,
+    callbacks: list[TrainingCallback],
+    run_config: dict[str, Any],
 ) -> PPOTrainer:
     """
     Assemble the PPO trainer, actor-critic and environment from the config.
@@ -118,7 +118,9 @@ def _build_ppo_trainer(
     actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
 
     checkpoint_dir = _resolve_checkpoint_dir(cfg)
-    opponent_factory = build_opponent_factory(cfg, obs_spec, action_spec, checkpoint_dir)
+    opponent_factory = build_opponent_factory(
+        cfg, obs_spec, action_spec, checkpoint_dir
+    )
     if opponent_factory is not None:
         callbacks = [
             *callbacks,
@@ -129,7 +131,9 @@ def _build_ppo_trainer(
             ),
         ]
 
-    frames_per_batch = int(cfg.agent.get("frames_per_batch", cfg.collector.frames_per_batch))
+    frames_per_batch = int(
+        cfg.agent.get("frames_per_batch", cfg.collector.frames_per_batch)
+    )
     return PPOTrainer(
         env_factories=make_env_factories(cfg, opponent_factory=opponent_factory),
         actor_critic=actor_critic,
@@ -203,7 +207,7 @@ def _build_evaluator(cfg: DictConfig) -> Evaluator | None:
         return None
     return Evaluator(
         env_factory=make_env_factories(
-            cfg, opponent_factory=build_eval_opponent_factory(cfg)
+            cfg, opponent_factory=build_eval_opponent_factory(cfg), deck_split="eval"
         )[0],
         n_episodes=int(cfg.train.get("eval_episodes", 100)),
         device=cfg.agent.get("device", "cpu"),

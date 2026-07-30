@@ -36,6 +36,26 @@ To add more libraries:
 uv add <package_name>
 ```
 
+### Deck corpus
+
+Decks are versioned as GitHub Releases tagged `decks-*`. No version is committed to the repo, so
+publishing a new corpus never touches a tracked file. Pull it once per checkout before
+multi-deck training:
+
+```bash
+./scripts/fetch_decks.sh           # newest decks-* release: verify + unpack into decks/
+./scripts/fetch_decks.sh decks-v3  # or pin a specific version for reproducibility
+```
+
+Publish a new corpus (auto-increments to the next `decks-vN`):
+
+```bash
+./scripts/update_decks_release.sh <--notes> "…"
+```
+
+`fetch_decks.sh` picks up the highest-numbered release automatically. `build_decks_release.sh` is
+the low-level builder it wraps if you only want the local tarball.
+
 ## Code structure
 
 ```
