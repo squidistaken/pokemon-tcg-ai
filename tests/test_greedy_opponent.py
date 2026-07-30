@@ -65,6 +65,52 @@ def test_greedy_select_respects_min_and_max_counts() -> None:
     assert capped == [0, 1]
 
 
+def test_sample_select_picks_only_extreme_logit() -> None:
+    """
+    With one logit overwhelming the rest, sampling converges to the argmax
+    (a sanity check that probability mass concentrates as expected).
+    """
+    generator = torch.Generator().manual_seed(0)
+    picks = GreedyPolicyOpponent.sample_select(
+        _logits([0.0, 0.0, 50.0, 0.0], stop=-50.0),
+        n_options=4,
+        min_count=1,
+        max_count=1,
+        generator=generator,
+    )
+    assert picks == [2]
+
+
+def test_sample_select_respects_min_and_max_counts() -> None:
+    """
+    Sampling never returns fewer than minCount or more than maxCount picks,
+    and never repeats or picks an out-of-range option, across many draws.
+    """
+    generator = torch.Generator().manual_seed(1)
+    logits = _logits([1.0, 0.9, 0.8, 0.7], stop=0.5)
+    for _ in range(50):
+        picks = GreedyPolicyOpponent.sample_select(
+            logits, n_options=4, min_count=1, max_count=3, generator=generator
+        )
+        assert 1 <= len(picks) <= 3
+        assert len(set(picks)) == len(picks)
+        assert all(0 <= pick < 4 for pick in picks)
+
+
+def test_sample_select_is_stochastic() -> None:
+    """
+    Repeated draws from a close-scoring distribution don't all return the
+    same single pick.
+    """
+    generator = torch.Generator().manual_seed(2)
+    logits = _logits([1.0, 0.9], stop=-50.0)
+    picks = {
+        tuple(GreedyPolicyOpponent.sample_select(logits, n_options=2, min_count=1, max_count=1, generator=generator))
+        for _ in range(30)
+    }
+    assert len(picks) > 1
+
+
 def _run_episode(opponent) -> torch.Tensor:
     """
     Play one episode with a random agent against the given opponent.
@@ -96,6 +142,22 @@ def test_greedy_opponent_plays_legal_episode(structured_model_cfg, structured_ob
     """
     actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
     opponent = GreedyPolicyOpponent(actor_critic, StructuredObservationEncoder(max_options=MAX_OPTIONS))
+    done = _run_episode(opponent)
+    assert bool(done.any())
+
+
+def test_sampling_opponent_plays_legal_episode(structured_model_cfg, structured_obs_spec, action_spec) -> None:
+    """
+    A sampling (non-deterministic) opponent also plays a full episode without
+    the engine rejecting a selection.
+    """
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    opponent = GreedyPolicyOpponent(
+        actor_critic,
+        StructuredObservationEncoder(max_options=MAX_OPTIONS),
+        deterministic=False,
+        generator=torch.Generator().manual_seed(5),
+    )
     done = _run_episode(opponent)
     assert bool(done.any())
 

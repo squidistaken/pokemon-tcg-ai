@@ -32,7 +32,7 @@ def save_actor_critic(actor_critic: ActorCritic, path: str | Path) -> Path:
 
 class GreedyPolicyOpponent:
     """
-    Deterministic policy opponent wrapping a trained actor-critic.
+    Policy opponent wrapping a trained actor-critic.
 
     This is the self-play snapshot: a frozen network dropped into the opponent
     seat via the environment's ``opponent`` callable / an
@@ -41,9 +41,25 @@ class GreedyPolicyOpponent:
     selection in one call (the environment does not decompose the opponent's
     multi-select), so it mirrors the Kaggle ``main.py`` inference path: encode
     the observation from the acting seat, score the option slots with the
-    policy head, and greedily take the highest-scoring legal options, using the
-    learned **stop** logit to decide how many to take within
-    ``[minCount, maxCount]``.
+    policy head, and turn those scores into picks within
+    ``[minCount, maxCount]``, using the learned **stop** logit to decide how
+    many to take.
+
+    Two selection strategies are supported (``deterministic``):
+
+    - ``True`` (the default): :meth:`greedy_select` always takes the
+      highest-scoring legal options. Deterministic and reproducible, which is
+      what self-play snapshot opponents want (a stable target the learner
+      trains against).
+    - ``False``: :meth:`sample_select` instead samples from the softmax
+      distribution over the legal options (the same masked-categorical
+      distribution the actor samples from during training rollouts), so the
+      policy doesn't always play identically in identical situations. A
+      deterministic policy is a fixed function of the observed state, which
+      an opponent (human or algorithmic) can learn and counter with certainty
+      in an imperfect-information game; sampling only ever exposes the
+      opponent to *probabilities*, not a guaranteed response. This is what
+      ``main.py`` uses for the Kaggle submission.
 
     The wrapped :class:`~src.models.actor_critic.ActorCritic` and the encoder
     are used exactly as in training, keeping train/serve behavior aligned.
@@ -54,22 +70,32 @@ class GreedyPolicyOpponent:
             actor_critic: ActorCritic,
             encoder: ObservationEncoder,
             device: torch.device | str = "cpu",
+            deterministic: bool = True,
+            generator: torch.Generator | None = None,
     ) -> None:
         """
-        :param actor_critic: Trained actor-critic to act greedily with; put
-            into eval mode and never updated here.
+        :param actor_critic: Trained actor-critic to act with; put into eval
+            mode and never updated here.
         :param encoder: Observation encoder matching the one used in training
             (the flat encoder for the Phase-1 baseline).
         :param device: Device for inference.
+        :param deterministic: If True, always take the highest-scoring legal
+            options (:meth:`greedy_select`). If False, sample from the
+            learned distribution instead (:meth:`sample_select`).
+        :param generator: Optional RNG for :meth:`sample_select`, for
+            reproducible sampling (e.g. in tests); ignored when
+            ``deterministic`` is True.
         """
         self._device = torch.device(device)
         self._actor_critic = actor_critic.to(self._device).eval()
         self._encoder = encoder
+        self._deterministic = deterministic
+        self._generator = generator
 
     @torch.inference_mode()
     def __call__(self, observation: Observation) -> list[int]:
         """
-        Choose a greedy legal selection for the acting seat.
+        Choose a legal selection for the acting seat.
 
         :param observation: Current engine observation with a non-None select;
             ``current.yourIndex`` gives the acting seat used for encoding.
@@ -91,11 +117,19 @@ class GreedyPolicyOpponent:
         if self._device.type != "cpu":
             encoded = encoded.to(self._device)
         logits = self._actor_critic.policy_logits(encoded)
-        return self.greedy_select(
+        if self._deterministic:
+            return self.greedy_select(
+                logits,
+                n_options=len(select.option),
+                min_count=select.minCount,
+                max_count=select.maxCount,
+            )
+        return self.sample_select(
             logits,
             n_options=len(select.option),
             min_count=select.minCount,
             max_count=select.maxCount,
+            generator=self._generator,
         )
 
     @staticmethod
@@ -134,6 +168,49 @@ class GreedyPolicyOpponent:
             picks.append(int(index))
         return picks
 
+    @staticmethod
+    def sample_select(
+            logits: torch.Tensor,
+            n_options: int,
+            min_count: int,
+            max_count: int,
+            generator: torch.Generator | None = None,
+    ) -> list[int]:
+        """
+        Sample option indices from action logits, one pick at a time.
+
+        Mirrors the sequential decomposition :class:`~src.env.tcg_env.TCGEnv`
+        applies to multi-selects during collection (already-picked options
+        masked out, stop legal once ``minCount`` is met), but sampling from
+        the softmax distribution at each step instead of taking the argmax --
+        the same :class:`~torchrl.modules.distributions.MaskedCategorical`
+        behavior the actor is trained under, run here without an env.
+
+        :param logits: Action logits of shape ``(n_actions,)`` where
+            ``n_actions = max_options + 1``.
+        :param n_options: Number of real options offered by the selection.
+        :param min_count: Minimum number of options to pick.
+        :param max_count: Maximum number of options to pick.
+        :param generator: Optional RNG for reproducible sampling.
+        :return: Chosen option indices (a subset of ``range(n_options)``).
+        """
+        capacity = logits.shape[-1] - 1
+        n_options = min(n_options, capacity)
+        max_count = min(max_count, n_options)
+        stop_index = capacity
+        remaining = list(range(n_options))
+        picks: list[int] = []
+        while len(picks) < max_count:
+            candidates = remaining + ([stop_index] if len(picks) >= min_count else [])
+            probs = torch.softmax(logits[candidates], dim=-1)
+            choice = int(torch.multinomial(probs, 1, generator=generator).item())
+            chosen = candidates[choice]
+            if chosen == stop_index:
+                break
+            picks.append(chosen)
+            remaining.remove(chosen)
+        return picks
+
 
 def load_greedy_opponent(
         checkpoint_path: str | Path,
@@ -142,6 +219,8 @@ def load_greedy_opponent(
         action_spec: TensorSpec,
         encoder: ObservationEncoder,
         device: torch.device | str = "cpu",
+        deterministic: bool = True,
+        generator: torch.Generator | None = None,
 ) -> GreedyPolicyOpponent:
     """
     Rebuild an actor-critic from config and load a snapshot as an opponent.
@@ -159,9 +238,14 @@ def load_greedy_opponent(
     :param action_spec: Environment action spec.
     :param encoder: Observation encoder matching training.
     :param device: Device for inference.
-    :return: A greedy opponent playing the snapshot.
+    :param deterministic: Forwarded to :class:`GreedyPolicyOpponent`; True
+        (the default) keeps self-play snapshot opponents a stable, reproducible
+        target for the learner.
+    :param generator: Forwarded to :class:`GreedyPolicyOpponent`; ignored when
+        ``deterministic`` is True.
+    :return: An opponent playing the snapshot.
     """
     actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
     state_dict = torch.load(Path(checkpoint_path), map_location=device, weights_only=True)
     actor_critic.load_state_dict(state_dict)
-    return GreedyPolicyOpponent(actor_critic, encoder, device=device)
+    return GreedyPolicyOpponent(actor_critic, encoder, device=device, deterministic=deterministic, generator=generator)

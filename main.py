@@ -7,6 +7,13 @@ from src.policies.inference import load_inference_opponent
 KAGGLE_AGENT_DIR = "/kaggle_simulations/agent/"
 CHECKPOINT_PATH = "checkpoint/model.pt"
 MODEL_CONFIG_PATH = "checkpoint/model_config.yaml"
+# Sample from the learned distribution rather than always taking the
+# highest-scoring options: a deterministic policy is a fixed function of the
+# observed state, which an opponent can learn and reliably counter, whereas
+# sampling only ever exposes it to probabilities. Flip to True to switch back
+# to greedy (deterministic) action selection. This only affects the Kaggle
+# inference path here, not training/self-play, which has its own default.
+DETERMINISTIC_INFERENCE = False
 
 _opponent: GreedyPolicyOpponent | None = None
 
@@ -49,7 +56,8 @@ def _load_opponent() -> GreedyPolicyOpponent:
     network and reloading weights on every call would be pure overhead.
 
     Returns:
-        GreedyPolicyOpponent: Greedy policy wrapping the loaded checkpoint.
+        GreedyPolicyOpponent: Policy wrapping the loaded checkpoint, sampling
+            from its learned distribution.
 
     Raises:
         FileNotFoundError: If the checkpoint or its config is missing. A
@@ -66,7 +74,9 @@ def _load_opponent() -> GreedyPolicyOpponent:
                 f"Missing checkpoint ({checkpoint_path!r}) or model config ({model_config_path!r}). "
                 "Run scripts/export_submission_checkpoint.py before submitting."
             )
-        _opponent = load_inference_opponent(checkpoint_path, model_config_path)
+        _opponent = load_inference_opponent(
+            checkpoint_path, model_config_path, deterministic=DETERMINISTIC_INFERENCE
+        )
     return _opponent
 
 

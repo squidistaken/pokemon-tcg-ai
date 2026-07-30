@@ -40,9 +40,11 @@ def load_inference_opponent(
         checkpoint_path: str | Path,
         model_config_path: str | Path,
         device: torch.device | str = "cpu",
+        deterministic: bool = False,
+        generator: torch.Generator | None = None,
 ) -> GreedyPolicyOpponent:
     """
-    Rebuild a greedy opponent from a self-contained checkpoint + config pair.
+    Rebuild an opponent from a self-contained checkpoint + config pair.
 
     Unlike :func:`~src.policies.greedy_policy_opponent.load_greedy_opponent`
     (which takes specs from a live training environment), this reads
@@ -57,7 +59,17 @@ def load_inference_opponent(
         checkpoint, holding the resolved ``model`` config plus
         ``max_options``/``encoder``.
     :param device: Device for inference.
-    :return: A greedy opponent playing the checkpoint's policy.
+    :param deterministic: If True, always take the highest-scoring legal
+        options. Defaults to False (sample from the learned distribution
+        instead): a deterministic policy is a fixed function of the observed
+        state, which an opponent can learn and reliably counter in a
+        competitive match, whereas sampling only exposes it to probabilities.
+        This default is specific to this Kaggle-inference loader; training's
+        :func:`~src.policies.greedy_policy_opponent.load_greedy_opponent`
+        keeps its own, separate default of True.
+    :param generator: Optional RNG for reproducible sampling; ignored when
+        ``deterministic`` is True.
+    :return: An opponent playing the checkpoint's policy.
     """
     model_config = OmegaConf.load(model_config_path)
     obs_spec, encoder, action_spec = build_inference_specs(
@@ -67,4 +79,4 @@ def load_inference_opponent(
     actor_critic = build_actor_critic(model_config, obs_spec, action_spec)
     state_dict = torch.load(Path(checkpoint_path), map_location=device, weights_only=True)
     actor_critic.load_state_dict(state_dict)
-    return GreedyPolicyOpponent(actor_critic, encoder, device=device)
+    return GreedyPolicyOpponent(actor_critic, encoder, device=device, deterministic=deterministic, generator=generator)
