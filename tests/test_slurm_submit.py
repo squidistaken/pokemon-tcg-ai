@@ -57,6 +57,52 @@ def test_gpu_profiles(
     assert "++agent.device=cuda" in command
 
 
+def test_cpu_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    selected: list[str] = []
+    monkeypatch.setattr(
+        submit,
+        "_uv_environment",
+        lambda value: selected.append(value) or ".venv",
+    )
+    profile_path = submit._profile_path("train_cpu")
+
+    command = submit._build_command(
+        profile_path, submit._load_profile(profile_path), "baseline", []
+    )
+
+    assert selected == ["none"]
+    assert not any(arg.startswith("--gpus-per-node") for arg in command)
+    assert "++agent.device=cpu" in command
+    assert "++agent.device=cuda" not in command
+    assert ".venv" in command
+
+
+def test_cpu_profile_requires_zero_gpus(monkeypatch: pytest.MonkeyPatch) -> None:
+    profile_path = submit._profile_path("train_cpu")
+    profile: dict[str, Any] = submit._load_profile(profile_path)
+    profile["slurm"]["gpus_per_node"] = 1
+    monkeypatch.setattr(submit, "_uv_environment", lambda _gpu_type: ".venv")
+
+    with pytest.raises(ValueError, match="gpus_per_node must be 0"):
+        submit._build_command(profile_path, profile, "config", [])
+
+
+@pytest.mark.parametrize(
+    "override",
+    ["agent.device=cpu", "+agent.device=cuda", "++agent.device=cpu", "~agent.device"],
+)
+def test_rejects_user_device_override(
+    monkeypatch: pytest.MonkeyPatch, override: str
+) -> None:
+    profile_path = submit._profile_path("train_gpu")
+    monkeypatch.setattr(submit, "_uv_environment", lambda _gpu_type: ".venv")
+
+    with pytest.raises(ValueError, match="agent.device is set by the Slurm profile"):
+        submit._build_command(
+            profile_path, submit._load_profile(profile_path), "config", [override]
+        )
+
+
 @pytest.mark.parametrize("key", ["nodes", "ntasks", "gpus_per_node"])
 def test_rejects_distributed_resources(
     monkeypatch: pytest.MonkeyPatch, key: str

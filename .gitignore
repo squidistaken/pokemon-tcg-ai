@@ -6,6 +6,10 @@ wandb
 slurm-conf/logs/
 .vscode
 
+# Decks
+/decks/*
+!/decks/example.csv
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
