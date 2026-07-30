@@ -168,6 +168,27 @@ def _record_winrate(record: str | None) -> float | None:
     return wins / decided if decided > 0 else None
 
 
+def _deck_labels(kept_paths: list[str]) -> list[str]:
+    """
+    Resolve each deck to its archetype label for per-archetype evaluation.
+
+    Prefers the manifest's ``archetype`` field and falls back to the deck's 
+    parent folder name, which the scraper keeps per-archetype. The fallback
+    keeps unmanifested decks attributable rather than dropping them from the
+    breakdown.
+
+    :param kept_paths: Deck CSV paths, aligned with the decks being labelled.
+    :return: One archetype label per path.
+    """
+    manifest = _load_manifest_for(kept_paths)
+    labels: list[str] = []
+    for path in kept_paths:
+        entry = manifest.get(Path(path).stem, {})
+        archetype = entry.get("archetype")
+        labels.append(str(archetype) if archetype else Path(path).parent.name)
+    return labels
+
+
 def _deck_weights(kept_paths: list[str], scheme: str) -> list[float]:
     """
     Compute per-deck sampling weights from manifest metadata.
@@ -244,9 +265,17 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
         # Evaluation can/should use a different matchup than training.
         # ex. Training on `independent` (asymmetric) matchups is good for
         # robustness, but it makes the eval win-rate conflate piloting skill with deck luck.
-        # Eval also stays uniform over the held-out pool (no mix/weighting), so
+        # Eval also stays unweighted over the held-out pool (no mix/weighting), so
         # the generalization curve is an unbiased read across unseen decks.
         spec["matchup"] = cfg.env.get("eval_deck_matchup") or matchup
+        # Draw strategy for eval, independent of training's. round_robin gives
+        # deterministic even coverage of the held-out pool, so the per-archetype
+        # breakdown is not at the mercy of which decks a uniform draw happened to
+        # hit that round; null inherits deck_sampling.
+        spec["mode"] = cfg.env.get("eval_deck_sampling") or spec["mode"]
+        # Carry archetype labels so the evaluator can break the held-out win-rate
+        # down per archetype and report generalization variance across them.
+        spec["labels"] = _deck_labels([kept_paths[i] for i in idx])
         return spec
 
     mirror_prob = cfg.env.get("deck_mirror_prob")

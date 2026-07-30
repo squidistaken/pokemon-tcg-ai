@@ -9,7 +9,12 @@ from src.env.deck_sampler import (
     PoolDeckSampler,
     build_deck_sampler,
 )
-from src.training.env_factory import _build_sampler_spec, _deck_weights, _record_winrate
+from src.training.env_factory import (
+    _build_sampler_spec,
+    _deck_labels,
+    _deck_weights,
+    _record_winrate,
+)
 
 REPO_ROOT = Path(__file__).parents[1]
 EXAMPLE_DECK = str(REPO_ROOT / "decks" / "example.csv")
@@ -188,6 +193,67 @@ def test_build_deck_sampler_passes_mix_and_weights() -> None:
     assert counts[3] == max(counts)  # the heavily-weighted deck wins
 
 
+def test_labels_default_to_none() -> None:
+    """
+    Without ``labels``, the sampler records no per-episode archetype labels.
+    """
+    sampler = PoolDeckSampler(_fake_pool(4), matchup="mirror", seed=0)
+    assert sampler.last_labels is None
+    sampler.sample()
+    assert sampler.last_labels is None  # still None after a draw
+
+
+def test_labels_track_the_sampled_pair() -> None:
+    """
+    ``last_labels`` reports the archetype of each seat's just-sampled deck.
+    """
+    labels = [f"arch{k}" for k in range(4)]
+    sampler = PoolDeckSampler(
+        _fake_pool(4), mode="round_robin", matchup="mirror", labels=labels, seed=0
+    )
+    for _ in range(8):
+        (deck0, _), pair = sampler.sample(), sampler.last_labels
+        assert pair is not None
+        # Deck k is 60 copies of k, so the label index must match the deck id.
+        assert pair == (labels[deck0[0]], labels[deck0[0]])  # mirror: both equal
+
+
+def test_labels_can_differ_under_independent_matchup() -> None:
+    """
+    Independent draws label the two seats separately, so labels can differ.
+    """
+    labels = [f"arch{k}" for k in range(10)]
+    sampler = PoolDeckSampler(
+        _fake_pool(10), matchup="independent", labels=labels, seed=3
+    )
+    pairs = []
+    for _ in range(50):
+        sampler.sample()
+        pairs.append(sampler.last_labels)
+    assert any(p is not None and p[0] != p[1] for p in pairs)
+
+
+def test_labels_length_is_validated() -> None:
+    """
+    Labels that do not line up one-per-deck are rejected at construction.
+    """
+    with pytest.raises(ValueError):
+        PoolDeckSampler(_fake_pool(3), labels=["a", "b"])  # wrong length
+
+
+def test_build_deck_sampler_forwards_labels() -> None:
+    """
+    ``build_deck_sampler`` forwards ``labels`` from the spec to the pool sampler.
+    """
+    s = build_deck_sampler(
+        {"kind": "pool", "decks": _fake_pool(3), "labels": ["x", "y", "z"]}, seed=0
+    )
+    assert isinstance(s, PoolDeckSampler)
+    s.sample()
+    assert s.last_labels is not None
+    assert s.last_labels[0] in {"x", "y", "z"}
+
+
 def test_pool_sampler_independent_can_differ() -> None:
     """
     ``independent`` matchup draws each seat separately, so the decks can differ.
@@ -346,6 +412,32 @@ def test_eval_matchup_overrides_only_eval_split() -> None:
 
 
 @requires_corpus
+def test_eval_sampling_overrides_only_eval_split() -> None:
+    """
+    ``eval_deck_sampling`` changes the eval draw mode without touching training.
+    """
+    cfg = _env_cfg(
+        deck_pool=str(CORPUS_DIR),
+        deck_sampling="uniform",
+        eval_deck_sampling="round_robin",
+        deck_holdout_frac=0.2,
+    )
+    assert _build_sampler_spec(cfg, deck_split="train")["mode"] == "uniform"
+    assert _build_sampler_spec(cfg, deck_split="eval")["mode"] == "round_robin"
+
+
+@requires_corpus
+def test_eval_sampling_falls_back_to_deck_sampling_when_unset() -> None:
+    """
+    Without an ``eval_deck_sampling`` key, eval inherits the training draw mode.
+    """
+    cfg = _env_cfg(
+        deck_pool=str(CORPUS_DIR), deck_sampling="round_robin", deck_holdout_frac=0.2
+    )
+    assert _build_sampler_spec(cfg, deck_split="eval")["mode"] == "round_robin"
+
+
+@requires_corpus
 def test_eval_matchup_falls_back_to_deck_matchup_when_unset() -> None:
     """
     Without an ``eval_deck_matchup`` key, eval inherits the training matchup.
@@ -377,6 +469,42 @@ def test_mix_and_weighting_apply_to_train_not_eval() -> None:
     # Eval stays an unbiased uniform draw over the held-out pool.
     assert "mirror_prob" not in eval_
     assert "weights" not in eval_
+
+
+@requires_corpus
+def test_eval_spec_carries_archetype_labels() -> None:
+    """
+    The eval split attaches one archetype label per held-out deck; train omits them.
+    """
+    cfg = _env_cfg(deck_pool=str(CORPUS_DIR), deck_holdout_frac=0.2)
+    eval_ = _build_sampler_spec(cfg, deck_split="eval")
+    train = _build_sampler_spec(cfg, deck_split="train")
+    assert "labels" in eval_
+    assert len(eval_["labels"]) == len(eval_["decks"])
+    assert all(isinstance(label, str) and label for label in eval_["labels"])
+    assert "labels" not in train  # labels are an eval-only concern
+
+
+@requires_corpus
+def test_deck_labels_prefer_manifest_archetype() -> None:
+    """
+    ``_deck_labels`` reads the manifest archetype, falling back to the folder.
+    """
+    paths = resolve_deck_paths(str(CORPUS_DIR))[:20]
+    labels = _deck_labels(paths)
+    assert len(labels) == len(paths)
+    assert all(isinstance(label, str) and label for label in labels)
+
+
+def test_deck_labels_fall_back_to_folder_name(tmp_path: Path) -> None:
+    """
+    Without a manifest, a deck is labelled by its parent (archetype) folder.
+    """
+    archetype_dir = tmp_path / "some-archetype"
+    archetype_dir.mkdir()
+    deck_file = archetype_dir / "d.csv"
+    deck_file.write_text("\n".join("1" for _ in range(60)))
+    assert _deck_labels([str(deck_file)]) == ["some-archetype"]
 
 
 def test_record_winrate_parsing() -> None:

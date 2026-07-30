@@ -129,6 +129,20 @@ class TCGEnv(EnvBase):
         return self._agent_seat
 
     @property
+    def deck_labels(self) -> tuple[str, str] | None:
+        """
+        Archetype labels of the current episode's ``(deck0, deck1)``.
+
+        Populated only when the deck sampler carries labels, or None
+        otherwise. Combined with :attr:`agent_seat` this lets evaluation
+        attribute an episode's outcome to the archetype the agent piloted.
+
+        :return: The ``(deck0, deck1)`` archetype labels, or None when the
+            sampler is unlabelled.
+        """
+        return getattr(self._deck_sampler, "last_labels", None)
+
+    @property
     def pending_select(self) -> SelectData:
         """
         Selection data of the pending agent decision.

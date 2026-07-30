@@ -20,4 +20,8 @@ deck_matchup: independent
 # training matchup above) mixes in.
 eval_deck_matchup: mirror
 deck_sampling: uniform
+# Evaluate with deterministic even coverage of the held-out pool so the
+# per-archetype win-rate breakdown is stable across evaluations rather than
+# reflecting which held-out decks a uniform draw happened to sample.
+eval_deck_sampling: round_robin
 deck_holdout_frac: 0.2

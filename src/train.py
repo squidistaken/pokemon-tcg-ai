@@ -212,6 +212,7 @@ def _build_evaluator(cfg: DictConfig) -> Evaluator | None:
         n_episodes=int(cfg.train.get("eval_episodes", 100)),
         device=cfg.agent.get("device", "cpu"),
         deterministic=bool(cfg.train.get("eval_deterministic", True)),
+        per_archetype=bool(cfg.train.get("eval_per_archetype", True)),
     )
 
 
