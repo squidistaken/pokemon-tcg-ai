@@ -3,22 +3,30 @@
 from scraper.card_index import CardIndex
 
 
-def test_unknown_set_does_not_fall_back_to_same_name_in_another_set():
+def test_unknown_set_falls_back_to_the_same_name_in_another_set():
     index = CardIndex()
 
     result = index.match("Eevee", "NOT_A_REAL_SET", "999")
 
-    assert result.card_id is None
-    assert result.method == "unresolved"
+    assert index.by_id[result.card_id].name == "Eevee"
+    assert result.method == "exact"
 
 
-def test_known_set_does_not_fall_back_to_a_printing_from_another_set():
+def test_known_set_falls_back_to_a_printing_from_another_set():
     index = CardIndex()
 
     result = index.match("Eevee", "DRI", "999")
 
-    assert result.card_id is None
-    assert result.method == "unresolved"
+    assert index.by_id[result.card_id].name == "Eevee"
+    assert result.method == "exact"
+
+
+def test_number_picks_the_printing_when_the_set_is_a_reprint():
+    index = CardIndex()
+
+    result = index.match("Eevee", "DRI", "50")
+
+    assert result.card_id == 145
 
 
 def test_exact_name_respects_the_supplied_set():
