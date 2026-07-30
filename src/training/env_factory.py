@@ -40,6 +40,7 @@ def make_env(
     seed: int,
     opponent_factory: OpponentFactory | None = None,
     encoder: str = "structured",
+    deck_switch_steps: int = 0,
 ) -> EnvBase:
     """
     Build a single masked TCG environment instance.
@@ -54,13 +55,14 @@ def make_env(
     :return: TransformedEnv with the ActionMask transform applied.
     """
     opponent = opponent_factory() if opponent_factory is not None else None
-    deck_sampler = build_deck_sampler(sampler_spec, seed=seed + 2)
+    deck_sampler = build_deck_sampler(sampler_spec, seed=seed)
     base_env = TCGEnv(
         max_options=max_options,
         seed=seed,
         opponent=opponent,
         encoder=make_encoder(encoder, max_options),
         deck_sampler=deck_sampler,
+        deck_switch_steps=deck_switch_steps,
     )
     env = TransformedEnv(base_env, ActionMask())
     # TransformedEnv is created unlocked, and torchrl only caches its key lists
@@ -273,6 +275,7 @@ def make_env_factories(
     """
     sampler_spec = _build_sampler_spec(cfg, deck_split)
     encoder = cfg.env.get("encoder", "structured")
+    deck_switch_steps = int(cfg.env.get("deck_switch_steps", 0))
     return [
         partial(
             make_env,
@@ -281,6 +284,7 @@ def make_env_factories(
             cfg.seed + worker,
             opponent_factory,
             encoder,
+            deck_switch_steps,
         )
         for worker in range(cfg.env.num_workers)
     ]

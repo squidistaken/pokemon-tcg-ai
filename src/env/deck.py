@@ -77,6 +77,9 @@ def load_decks(paths: Iterable[str], *, skip_invalid: bool = True) -> list[list[
     """
     Load every deck CSV in ``paths`` into a list of card-ID lists.
 
+    NOTE: Loading all decks into memory may cause OOM issues as the corpus grows, 
+    especially if splitting across many workers.
+
     :param paths: Deck CSV paths (e.g. from :func:`resolve_deck_paths`).
     :param skip_invalid: Skip files that do not resolve to a valid 60-card deck
         instead of raising; matches the corpus-analysis loader's behaviour.

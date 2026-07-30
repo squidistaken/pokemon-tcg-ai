@@ -53,6 +53,16 @@ gh release download "$TAG" --pattern 'decks.tar.gz' --dir "$TMP"
 echo "Verifying checksum…"
 echo "${WANT_SHA}  ${TMP}/decks.tar.gz" | sha256sum -c -
 
+if [ -d "$ROOT/decks" ] && [ "$(ls -A "$ROOT/decks")" ]; then
+  read -p "Overwrite existing decks? (This will wipe all existing files in ./decks except example.csv) [y/N] " response
+  if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 1
+  fi
+  echo "Cleaning up old decks…"
+  find "$ROOT/decks" -mindepth 1 -not -name 'example.csv' -delete
+fi
+
 echo "Unpacking into ./decks…"
 tar -xzf "${TMP}/decks.tar.gz" -C "$ROOT"
 echo "$WANT_SHA" >"$MARKER"

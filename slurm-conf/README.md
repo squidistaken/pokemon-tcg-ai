@@ -33,11 +33,7 @@ tail -n 50 -f "slurm-conf/logs/pokemon-tcg-train_${JOB_ID}.err"
 ## Training
 
 ```bash
-./slurm-conf/train.sh --config baseline --slurm-config train_gpu
-./slurm-conf/train.sh --config ppo --slurm-config train_gpu
-./slurm-conf/train.sh --config ppo_selfplay --slurm-config train_gpu_rtx
-./slurm-conf/train.sh --config ppo_selfplay_multideck --slurm-config train_gpu
-./slurm-conf/train.sh --config ppo_selfplay_multideck --slurm-config train_cpu
+./slurm-conf/train.sh --config <CONFIG_NAME> --slurm-config <PROFILE_NAME>
 ```
 
 Both options are required and may appear in either order. Additional arguments

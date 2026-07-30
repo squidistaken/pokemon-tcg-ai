@@ -29,6 +29,11 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ -z "$NOTES" ]; then
+  echo "ERROR: --notes is required to describe the changes in this deck corpus release." >&2
+  exit 1
+fi
+
 # No version given: auto-increment past the highest existing decks-vN.
 if [ -z "$VERSION" ]; then
   last="$(gh release list --limit 100 --json tagName \
@@ -48,10 +53,10 @@ echo "Building corpus artifact…"
 bash scripts/build_decks_release.sh >/dev/null
 SHA="$(cut -d' ' -f1 <dist/decks.sha256)"
 
-if [ -z "$NOTES" ]; then
-  count="$(find decks -name '*.csv' ! -name 'example.csv' | wc -l | tr -d ' ')"
-  NOTES="Standard training deck corpus (${count} decks, sha256 ${SHA})."
-fi
+count="$(find decks -name '*.csv' ! -name 'example.csv' | wc -l | tr -d ' ')"
+NOTES="${NOTES}
+
+*(Standard training deck corpus: ${count} decks, sha256 ${SHA})*"
 
 echo "Creating release ${TAG}…"
 # Pin the tag to the remote default branch so a stray/unpushed local tag of the

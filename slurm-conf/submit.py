@@ -185,10 +185,10 @@ def _build_command(
         raise ValueError("slurm.gpu_type must be a non-empty string")
 
     # GPU is the default; gpu_type "none" requests a CPU-only run instead.
-    cpu_only = gpu_type == "none"
+    device = "cpu" if gpu_type == "none" else "cuda"
     for key in ("nodes", "ntasks"):
         _require_single_resource(slurm, key)
-    if cpu_only:
+    if device == "cpu":
         if slurm.get("gpus_per_node") != 0:
             raise ValueError("slurm.gpus_per_node must be 0 when gpu_type is 'none'")
     else:
@@ -203,7 +203,7 @@ def _build_command(
         if key in {"output", "error"}:
             value = _absolute_log_path(str(value))
         command.append(f"{option}={value}")
-    if not cpu_only:
+    if device != "cpu":
         command.append(f"--gpus-per-node={gpu_type}:1")
 
     command.extend(
@@ -212,7 +212,8 @@ def _build_command(
             str(profile_path),
             config_name,
             uv_environment,
-            "++agent.device=cpu" if cpu_only else "++agent.device=cuda",
+            device,
+            f"++agent.device={device}",
             *extra_overrides,
         ]
     )

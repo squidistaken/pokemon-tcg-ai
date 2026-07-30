@@ -5,6 +5,7 @@ deck1: ${paths.deck1}
 # Multi-deck training curriculum. When deck_pool is null the env uses the fixed deck0/deck1 pair
 # above. When set to a directory, glob, or list of deck CSVs, each episode instead samples a matchup
 # from the pool, so the policy trains across archetypes instead of overfitting one card pool.
+# NOTE: The multi-deck training curriculum weighting and probabilities may need tweaks over time.
 deck_pool: null
 # How the two seats relate when sampling from a pool:
 #   mirror      -> both seats get the same deck (isolates skill from matchup).
@@ -14,6 +15,8 @@ deck_matchup: mirror
 # back to deck_matchup. Set this to "mirror" while training on "independent" so
 # the eval win-rate reflects piloting skill rather than deck-vs-deck luck.
 eval_deck_matchup: null
+# Timesteps between sampling new decks from the pool. 0 samples on every reset.
+deck_switch_steps: 0
 # Draw strategy over the pool:
 #   uniform     -> each deck equally likely, i.i.d. per episode.
 #   round_robin -> deterministic rotation covering every deck evenly.

@@ -2,15 +2,16 @@
 
 set -euo pipefail
 
-if [ "$#" -lt 3 ]; then
-  echo "Usage: run_job.sh PROFILE_PATH CONFIG_NAME UV_ENVIRONMENT [HYDRA_OVERRIDE ...]" >&2
+if [ "$#" -lt 4 ]; then
+  echo "Usage: run_job.sh PROFILE_PATH CONFIG_NAME UV_ENVIRONMENT DEVICE [HYDRA_OVERRIDE ...]" >&2
   exit 2
 fi
 
 PROFILE_PATH="$1"
 CONFIG_NAME="$2"
 UV_ENVIRONMENT="$3"
-shift 3
+DEVICE="$4"
+shift 4
 
 # Slurm executes a copied script from its spool directory. submit.py sets
 # --chdir to the project root, so use the job's working directory instead of
@@ -41,14 +42,6 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
-
-DEVICE=cuda
-for arg in "$@"; do
-  case "$arg" in
-    *agent.device=cpu) DEVICE=cpu ;;
-    *agent.device=cuda) DEVICE=cuda ;;
-  esac
-done
 
 echo "Profile: $PROFILE_PATH"
 echo "Hydra config: conf/$CONFIG_NAME.yaml"

@@ -49,6 +49,7 @@ class TCGEnv(EnvBase):
         device: torch.device | str | None = None,
         encoder: ObservationEncoder | None = None,
         deck_sampler: DeckSampler | None = None,
+        deck_switch_steps: int = 0,
     ) -> None:
         """
         :param deck0: 60 card IDs for player 0. Ignored if ``deck_sampler`` is
@@ -70,6 +71,8 @@ class TCGEnv(EnvBase):
         :param deck_sampler: Produces the ``(deck0, deck1)`` matchup at each
             reset. When None, a :class:`FixedDeckSampler` is built from
             ``deck0``/``deck1`` (which are then required).
+        :param deck_switch_steps: Timesteps between resampling the decks.
+            When 0, resampling happens on every reset.
         :raises ValueError: If neither a sampler nor both decks are given.
         """
         super().__init__(device=device, batch_size=torch.Size(()))
@@ -80,6 +83,8 @@ class TCGEnv(EnvBase):
                 )
             deck_sampler = FixedDeckSampler(deck0, deck1)
         self._deck_sampler = deck_sampler
+        self._deck_switch_steps = deck_switch_steps
+        self._steps_since_switch = 0
 
         # The active episode's decks, (re)sampled on every reset.
         self._deck0, self._deck1 = deck_sampler.sample()
@@ -184,7 +189,9 @@ class TCGEnv(EnvBase):
             self._selection_count = 0
             self._truncate_flag = False
             self._chosen = []
-            self._deck0, self._deck1 = self._deck_sampler.sample()
+            if self._steps_since_switch >= self._deck_switch_steps:
+                self._deck0, self._deck1 = self._deck_sampler.sample()
+                self._steps_since_switch = 0
             observation = self._handle.start(self._deck0, self._deck1)
             observation = self._advance_to_agent(observation)
             if not self._game_over(observation) and not self._truncate_flag:
@@ -203,6 +210,7 @@ class TCGEnv(EnvBase):
         :param tensordict: Input tensordict containing the "action" key.
         :return: Tensordict with next observation, mask, reward and done flags.
         """
+        self._steps_since_switch += 1
         action = int(tensordict["action"].item())
         submit: list[int] | None = None
         if action == self._stop_index:
@@ -240,8 +248,8 @@ class TCGEnv(EnvBase):
             return
         self._rng.seed(seed)
         if hasattr(self._opponent, "seed"):
-            self._opponent.seed(seed + 1)
-        self._deck_sampler.seed(seed + 2)
+            self._opponent.seed(seed)
+        self._deck_sampler.seed(seed)
 
     def close(self, *, raise_if_closed: bool = True) -> None:
         """
@@ -364,13 +372,7 @@ class TCGEnv(EnvBase):
             mask[self._stop_index] = True
         return mask
 
-    def _set_step_keys(
-        self,
-        tensordict: TensorDict,
-        reward: float,
-        terminated: bool,
-        truncated: bool,
-    ) -> None:
+    def _set_step_keys(self, tensordict: TensorDict, reward: float, terminated: bool, truncated: bool) -> None:
         """
         Encode reward and done flags into a step output tensordict.
 
