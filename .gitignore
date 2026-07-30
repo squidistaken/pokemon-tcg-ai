@@ -3,6 +3,7 @@ outputs
 multirun
 checkpoints
 wandb
+slurm-conf/logs/
 .vscode
 
 # Byte-compiled / optimized / DLL files
@@ -130,6 +131,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv-rtx
 # env/
 venv/
 ENV/

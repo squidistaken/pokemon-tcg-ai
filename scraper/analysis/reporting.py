@@ -25,6 +25,7 @@ from .metagame import (
     deck_popularity_ranking,
     metagame_diversity,
 )
+from .prune import near_duplicate_clusters
 
 if TYPE_CHECKING:
     from scraper.card_index import CardIndex
@@ -375,10 +376,13 @@ def report(
     )
     dist.add_column("stat", style="dim")
     dist.add_column("value", justify="right", style="bold")
-    dist.add_row("mean", f"{off.mean():.3f}")
-    dist.add_row("median", f"{np.median(off):.3f}")
-    dist.add_row("min", f"{off.min():.3f}")
-    dist.add_row("max", f"{off.max():.3f}")
+    if off.size:
+        dist.add_row("mean", f"{off.mean():.3f}")
+        dist.add_row("median", f"{np.median(off):.3f}")
+        dist.add_row("min", f"{off.min():.3f}")
+        dist.add_row("max", f"{off.max():.3f}")
+    else:
+        dist.add_row("pairs", "n/a (need at least 2 decks)")
     console.print(dist)
 
     # top-similar pairs
@@ -509,7 +513,8 @@ def report_diversity(
     """
     n = presence.shape[0]
     iu = np.triu_indices(n, k=1)
-    mean_dist = float(1.0 - count_sim[iu].mean())
+    pair_similarities = count_sim[iu]
+    mean_dist = float(1.0 - pair_similarities.mean()) if pair_similarities.size else None
     incl = presence.astype(np.float64).mean(axis=0)
     active = incl > 0
     incl_var = float((incl[active] * (1.0 - incl[active])).mean()) if active.any() else 0.0
@@ -527,7 +532,10 @@ def report_diversity(
     )
     t.add_column("metric", style="dim")
     t.add_column("value", justify="right", style="bold")
-    t.add_row("mean pairwise distance (1 - weighted Jaccard)", f"{mean_dist:.3f}")
+    t.add_row(
+        "mean pairwise distance (1 - weighted Jaccard)",
+        f"{mean_dist:.3f}" if mean_dist is not None else "n/a",
+    )
     t.add_row("mean card-inclusion variance (Bernoulli)", f"{incl_var:.4f}")
     t.add_row("mean card-count variance", f"{count_var:.3f}")
     console.print(t)
@@ -617,20 +625,8 @@ def report_near_duplicates(
     console.rule("[bold red]Near-duplicates[/]", style="red")
     console.print(f"[bold]{idxs.size}[/] deck pair(s) with weighted-Jaccard >= {threshold:.2f}")
 
-    parent = list(range(n))
-
-    def _find(x: int) -> int:
-        """Union-find root of ``x`` with path halving."""
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    for k in idxs:
-        ra, rb = _find(int(iu[0][k])), _find(int(iu[1][k]))
-        if ra != rb:
-            parent[ra] = rb
-    effective = len({_find(i) for i in range(n)})
+    clusters = near_duplicate_clusters(count_sim, threshold)
+    effective = len(clusters)
     console.print(
         f"[bold]{effective}[/] effective distinct decks after collapsing near-duplicate "
         f"clusters [dim]({n - effective} redundant, {(n - effective) / n:.0%} of the corpus)[/]"

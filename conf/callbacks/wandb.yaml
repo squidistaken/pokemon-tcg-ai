@@ -12,3 +12,4 @@ callbacks:
     tags: ${wandb.tags}
     mode: ${wandb.mode}
     notes: ${wandb.notes}
+    dir: ${wandb.dir}

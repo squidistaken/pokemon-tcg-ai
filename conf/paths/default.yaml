@@ -1,0 +1,8 @@
+# Scheduler-independent input/output locations. Override these from the CLI or
+# from a Slurm profile when data and results should live on scratch storage.
+data_dir: decks
+output_dir: outputs
+
+# Input decks consumed by the environment.
+deck0: ${paths.data_dir}/example.csv
+deck1: ${paths.data_dir}/example.csv
