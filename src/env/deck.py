@@ -54,7 +54,10 @@ def resolve_deck_paths(spec: str | Iterable[str]) -> list[str]:
             paths.extend(matched if matched else [entry])
     unique = sorted({p for p in paths if p.endswith(".csv")})
     if not unique:
-        raise ValueError(f"deck pool spec {spec!r} matched no CSV files")
+        raise ValueError(
+            f"deck pool spec {spec!r} matched no CSV files; the scraped corpus is a "
+            f"pulled artifact -- run ./scripts/fetch_decks.sh to install it."
+        )
     return unique
 
 

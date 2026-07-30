@@ -37,7 +37,7 @@ deck_holdout_frac: 0.0
 deck_split_seed: 0
 # Padded size of the option space (stop action excluded); must exceed the
 # largest option list the engine can offer, or options get truncated.
-max_options: 96
+max_options: 128
 # Observation encoder: "structured" (card-ID/option/board tensors, consumed
 # model-side via StructuredObsAdapter) is the only supported encoder.
 encoder: structured

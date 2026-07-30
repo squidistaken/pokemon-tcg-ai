@@ -1,4 +1,4 @@
-# Multi-deck training curriculum over the tournament deck corpus (Issue #10).
+# Multi-deck training curriculum over the tournament deck corpus.
 #
 # Usage:
 #   python -m src.train agent=ppo env=multideck

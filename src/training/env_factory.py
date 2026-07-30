@@ -219,6 +219,11 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
 
     entries = [pool_spec] if isinstance(pool_spec, str) else list(pool_spec)
     paths = resolve_deck_paths([to_absolute_path(entry) for entry in entries])
+    if len(paths) < 2:
+        raise ValueError(
+            f"deck_pool {pool_spec!r} resolved to {len(paths)} deck(s); expected a "
+            f"multi-deck corpus. Run ./scripts/fetch_decks.sh to install it."
+        )
     decks, kept_paths = _load_pool_with_paths(paths)
     train_idx, holdout_idx = _split_indices(
         len(decks),

@@ -39,6 +39,16 @@ mkdir -p "$TMPDIR"
 # each process from creating another full pool of math-library threads.
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+DEVICE=cuda
+for arg in "$@"; do
+  case "$arg" in
+    *agent.device=cpu) DEVICE=cpu ;;
+    *agent.device=cuda) DEVICE=cuda ;;
+  esac
+done
 
 echo "Profile: $PROFILE_PATH"
 echo "Hydra config: conf/$CONFIG_NAME.yaml"
@@ -49,7 +59,8 @@ echo "CPUs: ${SLURM_CPUS_PER_TASK:-unknown}"
 echo "GPUs: ${CUDA_VISIBLE_DEVICES:-none}"
 echo "Start: $(date --iso-8601=seconds)"
 
-uv run --frozen --no-sync python - <<'PY'
+if [ "$DEVICE" = cuda ]; then
+  uv run --frozen --no-sync python - <<'PY'
 import torch
 from cg import sim
 
@@ -67,6 +78,17 @@ print(f"Compute capability: {torch.cuda.get_device_capability(0)}")
 print(f"CUDA calculation result: {result.item():.0f}")
 print(f"Engine: {sim.lib._name}")
 PY
+else
+  uv run --frozen --no-sync python - <<'PY'
+import torch
+from cg import sim
+
+print(f"PyTorch: {torch.__version__}")
+print("Device: cpu")
+print(f"Threads: {torch.get_num_threads()}")
+print(f"Engine: {sim.lib._name}")
+PY
+fi
 
 srun uv run --frozen --no-sync python -m src.train --config-name "$CONFIG_NAME" "$@"
 

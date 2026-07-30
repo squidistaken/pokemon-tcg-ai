@@ -139,6 +139,17 @@ def _uv_environment(gpu_type: str) -> str:
     return name
 
 
+def _reject_device_override(extra_overrides: list[str]) -> None:
+    """Forbid a user agent.device override; the profile's hardware sets it."""
+    for override in extra_overrides:
+        key = override.lstrip("+~").split("=", 1)[0].strip()
+        if key == "agent.device":
+            raise ValueError(
+                "agent.device is set by the Slurm profile and cannot be "
+                f"overridden; drop {override!r} and select a profile instead"
+            )
+
+
 def _require_single_resource(slurm: dict[str, Any], key: str) -> None:
     """Reject resource counts that the single-process trainer cannot use."""
     value = slurm[key]
@@ -160,6 +171,8 @@ def _build_command(
         raise TypeError("Slurm config requires a top-level 'slurm' mapping")
     config_name = _config_name(config_name)
 
+    _reject_device_override(extra_overrides)
+
     unknown = set(slurm) - set(SBATCH_OPTIONS) - SPECIAL_SLURM_OPTIONS
     missing = REQUIRED_SLURM_OPTIONS - set(slurm)
     if unknown:
@@ -170,8 +183,16 @@ def _build_command(
     gpu_type = slurm["gpu_type"]
     if not isinstance(gpu_type, str) or not gpu_type:
         raise ValueError("slurm.gpu_type must be a non-empty string")
-    for key in ("nodes", "ntasks", "gpus_per_node"):
+
+    # GPU is the default; gpu_type "none" requests a CPU-only run instead.
+    cpu_only = gpu_type == "none"
+    for key in ("nodes", "ntasks"):
         _require_single_resource(slurm, key)
+    if cpu_only:
+        if slurm.get("gpus_per_node") != 0:
+            raise ValueError("slurm.gpus_per_node must be 0 when gpu_type is 'none'")
+    else:
+        _require_single_resource(slurm, "gpus_per_node")
     uv_environment = _uv_environment(gpu_type)
 
     command = ["sbatch", f"--chdir={PROJECT_ROOT}"]
@@ -182,7 +203,8 @@ def _build_command(
         if key in {"output", "error"}:
             value = _absolute_log_path(str(value))
         command.append(f"{option}={value}")
-    command.append(f"--gpus-per-node={gpu_type}:1")
+    if not cpu_only:
+        command.append(f"--gpus-per-node={gpu_type}:1")
 
     command.extend(
         [
@@ -190,7 +212,7 @@ def _build_command(
             str(profile_path),
             config_name,
             uv_environment,
-            "++agent.device=cuda",
+            "++agent.device=cpu" if cpu_only else "++agent.device=cuda",
             *extra_overrides,
         ]
     )

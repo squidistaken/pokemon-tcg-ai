@@ -16,6 +16,16 @@ EXAMPLE_DECK = str(REPO_ROOT / "decks" / "example.csv")
 # The deck corpus is organized into per-archetype subfolders under decks/.
 CORPUS_DIR = REPO_ROOT / "decks"
 
+# The scraped corpus is a pulled release artifact, not committed. Only the
+# corpus-dependent tests are marked to skip when it is absent (e.g. on CI, which
+# checks out just the committed example deck) — the pure-logic sampler tests
+# below run everywhere, so CI still exercises them.
+_HAS_CORPUS = bool(list(CORPUS_DIR.glob("*/*.csv"))) if CORPUS_DIR.is_dir() else False
+requires_corpus = pytest.mark.skipif(
+    not _HAS_CORPUS,
+    reason="scraped deck corpus not installed; run ./scripts/fetch_decks.sh",
+)
+
 
 def _fake_pool(n: int) -> list[list[int]]:
     """Build ``n`` distinguishable 60-card decks (deck k is all card id k).
@@ -230,6 +240,7 @@ def test_build_deck_sampler_dispatch() -> None:
         build_deck_sampler({"kind": "nope"})
 
 
+@requires_corpus
 def test_resolve_and_load_scraped_pool() -> None:
     """
     The corpus directory resolves recursively to loadable 60-card deck CSVs.
@@ -241,6 +252,7 @@ def test_resolve_and_load_scraped_pool() -> None:
     assert all(len(d) == 60 for d in decks)
 
 
+@requires_corpus
 def test_corpus_pool_excludes_loose_example_deck() -> None:
     """
     Loose CSVs in the corpus root (the example smoke deck) are not pooled.
@@ -252,6 +264,7 @@ def test_corpus_pool_excludes_loose_example_deck() -> None:
     assert all(Path(p).parent != CORPUS_DIR for p in paths)
 
 
+@requires_corpus
 def test_resolve_single_archetype_folder() -> None:
     """
     Pointing the resolver at one archetype folder yields just its decks.
@@ -291,6 +304,7 @@ def test_sampler_spec_defaults_to_fixed() -> None:
     assert len(spec["deck0"]) == 60
 
 
+@requires_corpus
 def test_sampler_spec_builds_pool_from_directory() -> None:
     """
     A ``deck_pool`` directory produces a pool spec over the loaded corpus.
@@ -302,6 +316,7 @@ def test_sampler_spec_builds_pool_from_directory() -> None:
     assert spec["mode"] == "uniform"
 
 
+@requires_corpus
 def test_sampler_spec_holdout_is_disjoint() -> None:
     """
     Train and holdout splits share no decks, so eval measures unseen decks.
@@ -315,6 +330,7 @@ def test_sampler_spec_holdout_is_disjoint() -> None:
     assert train_set.isdisjoint(holdout_set)  # unseen at train time
 
 
+@requires_corpus
 def test_eval_matchup_overrides_only_eval_split() -> None:
     """
     ``eval_deck_matchup`` changes the eval matchup without touching training.
@@ -329,6 +345,7 @@ def test_eval_matchup_overrides_only_eval_split() -> None:
     assert _build_sampler_spec(cfg, deck_split="eval")["matchup"] == "mirror"
 
 
+@requires_corpus
 def test_eval_matchup_falls_back_to_deck_matchup_when_unset() -> None:
     """
     Without an ``eval_deck_matchup`` key, eval inherits the training matchup.
@@ -340,6 +357,7 @@ def test_eval_matchup_falls_back_to_deck_matchup_when_unset() -> None:
     assert _build_sampler_spec(cfg, deck_split="eval")["matchup"] == "independent"
 
 
+@requires_corpus
 def test_mix_and_weighting_apply_to_train_not_eval() -> None:
     """
     ``deck_mirror_prob``/``deck_weighting`` shape the train draw but not eval.
@@ -371,6 +389,7 @@ def test_record_winrate_parsing() -> None:
     assert _record_winrate("garbage") is None
 
 
+@requires_corpus
 def test_deck_weights_from_real_manifest() -> None:
     """
     Win-rate weighting over the real corpus yields one floored weight per deck.
@@ -383,6 +402,7 @@ def test_deck_weights_from_real_manifest() -> None:
         _deck_weights(paths, "bogus")
 
 
+@requires_corpus
 def test_sampler_spec_zero_holdout_evaluates_on_full_pool() -> None:
     """
     With no holdout, train and eval both draw from the whole pool.
@@ -393,6 +413,7 @@ def test_sampler_spec_zero_holdout_evaluates_on_full_pool() -> None:
     assert len(train) == len(holdout)  # both see the whole pool
 
 
+@requires_corpus
 def test_env_samples_different_decks_across_resets() -> None:
     """
     A pool-backed env draws a different deck across resets (per-episode sampling).
