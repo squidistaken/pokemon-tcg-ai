@@ -1,11 +1,14 @@
 """
-Export a Kaggle submission checkpoint from a training run.
+Export the checkpoint + config pair main.py loads for inference.
 
 Writes ``checkpoint/model.pt`` (an actor-critic state_dict) and
 ``checkpoint/model_config.yaml`` (the resolved ``model`` config plus the
-``max_options``/``encoder`` needed to rebuild the observation/action specs),
+``max_options``/``encoder`` needed to rebuild the observation/action specs) --
 the two files ``main.py`` loads at inference time via
-:func:`src.policies.inference.load_inference_agent`.
+:func:`src.policies.inference.load_inference_agent`. This is not the Kaggle
+submission packaging step (no bundling/zipping/CLI upload here); it just
+produces the artifact that checkpoint-loading code needs to have something to
+load.
 
 The config is composed the normal Hydra way (``conf/config.yaml`` + any
 overrides), so it always matches whatever architecture is current. The
@@ -17,9 +20,9 @@ that exercises the same checkpoint/config format ahead of a real run.
 
 Run from the repository root::
 
-    uv run python scripts/export_submission_checkpoint.py
-    uv run python scripts/export_submission_checkpoint.py --source-checkpoint outputs/.../snapshot_000000004096.pt
-    uv run python scripts/export_submission_checkpoint.py --overrides model/backbone=mlp model/head=linear
+    uv run python scripts/export_inference_checkpoint.py
+    uv run python scripts/export_inference_checkpoint.py --source-checkpoint outputs/.../snapshot_000000004096.pt
+    uv run python scripts/export_inference_checkpoint.py --overrides model/backbone=mlp model/head=linear
 """
 import argparse
 import sys
@@ -66,7 +69,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """
     Compose the model config, build (and optionally load) the actor-critic,
-    and write the submission checkpoint pair.
+    and write the checkpoint + config pair.
     """
     args = parse_args()
     with initialize_config_dir(version_base=None, config_dir=str(REPO_ROOT / "conf")):

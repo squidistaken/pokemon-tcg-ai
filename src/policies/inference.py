@@ -54,7 +54,7 @@ def load_inference_agent(
     ``model_config_path`` itself and derives the specs via
     :func:`build_inference_specs`, so it needs nothing but the two files on
     disk. This is the loader used by ``main.py`` and by
-    ``scripts/export_submission_checkpoint.py``.
+    ``scripts/export_inference_checkpoint.py``.
 
     :param checkpoint_path: Path to a :func:`~src.policies.
         greedy_policy_opponent.save_actor_critic` state_dict.

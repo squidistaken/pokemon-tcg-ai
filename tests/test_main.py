@@ -48,7 +48,7 @@ def real_observation() -> dict:
 def _write_checkpoint(output_dir, structured_model_cfg) -> None:
     """
     Write a checkpoint + model config pair matching ``structured_model_cfg``
-    into ``output_dir``, mirroring ``scripts/export_submission_checkpoint.py``.
+    into ``output_dir``, mirroring ``scripts/export_inference_checkpoint.py``.
     """
     obs_spec, _, action_spec = build_inference_specs(MAX_OPTIONS)
     actor_critic = build_actor_critic(structured_model_cfg, obs_spec, action_spec)

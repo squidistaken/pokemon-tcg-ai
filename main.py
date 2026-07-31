@@ -63,7 +63,7 @@ def _load_agent() -> GreedyPolicyOpponent:
         FileNotFoundError: If the checkpoint or its config is missing. A
             submission without a trained model is a packaging mistake, not a
             state to silently degrade from; run
-            ``scripts/export_submission_checkpoint.py`` first.
+            ``scripts/export_inference_checkpoint.py`` first.
     """
     global _agent
     if _agent is None:
@@ -72,7 +72,7 @@ def _load_agent() -> GreedyPolicyOpponent:
         if not os.path.exists(checkpoint_path) or not os.path.exists(model_config_path):
             raise FileNotFoundError(
                 f"Missing checkpoint ({checkpoint_path!r}) or model config ({model_config_path!r}). "
-                "Run scripts/export_submission_checkpoint.py before submitting."
+                "Run scripts/export_inference_checkpoint.py before submitting."
             )
         _agent = load_inference_agent(
             checkpoint_path, model_config_path, deterministic=DETERMINISTIC_INFERENCE
