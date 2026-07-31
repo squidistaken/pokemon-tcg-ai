@@ -89,7 +89,7 @@ class Curriculum:
         # the workers were supposed to have drawn them under.
         self._published: dict[int, float] = {}
         self._published_collision = 0.0
-        self._drawn_probability_sum = 0.0
+        self._drawn_fidelity_sum = 0.0
         self._drawn_episodes = 0
         self._buffer.prefill(range(archetypes.pair_count))
         self.publish()
@@ -182,9 +182,14 @@ class Curriculum:
         :param level_id: Matchup identifier of a finished episode.
         """
         probability = self._published.get(level_id)
-        if probability is None:
+        if probability is None or self._published_collision <= 0.0:
             return
-        self._drawn_probability_sum += probability
+        # Divide here rather than in metrics(): publish() replaces the
+        # collision probability straight after observe(), so deferring the
+        # division would score this batch's draws against the *next* batch's
+        # distribution. Harmless while the distribution drifts slowly, wildly
+        # wrong when it does not.
+        self._drawn_fidelity_sum += probability / self._published_collision
         self._drawn_episodes += 1
 
     def _sampling_fidelity(self) -> float:
@@ -197,11 +202,18 @@ class Curriculum:
         this way makes the metric read 1.0 whether the distribution is sharp or
         flat, so one threshold holds for the whole run:
 
-        * ``~1.0`` -- workers are drawing from the published distribution.
+        * **order 1** -- workers are drawing from the published distribution.
+          Readings somewhat below 1 are normal rather than a fault: a level is
+          chosen at episode reset, which can precede the episode's end by a
+          batch or two, so some episodes were drawn under a slightly older
+          distribution. Measured around 0.6--0.8 in healthy runs.
         * ``~0.0`` -- draws are unrelated to it. The distribution is computed
           and published correctly but never reaches the samplers, which is
           invisible in every other counter here: visits, maturity and scores
           all keep advancing while the curriculum steers nothing.
+
+        Alarm on a *sustained collapse toward zero*, not on any departure
+        from 1.
 
         A ratio rather than a correlation because a batch holds only tens of
         episodes spread over a level space thousands wide; a histogram over
@@ -210,10 +222,9 @@ class Curriculum:
 
         :return: The ratio, or NaN before any episode has been attributed.
         """
-        if self._drawn_episodes == 0 or self._published_collision <= 0.0:
+        if self._drawn_episodes == 0:
             return float("nan")
-        mean_drawn = self._drawn_probability_sum / self._drawn_episodes
-        return mean_drawn / self._published_collision
+        return self._drawn_fidelity_sum / self._drawn_episodes
 
     def metrics(self) -> dict[str, float]:
         """
@@ -226,7 +237,7 @@ class Curriculum:
         """
         stats = self._buffer.stats()
         stats["sampling_fidelity"] = self._sampling_fidelity()
-        self._drawn_probability_sum = 0.0
+        self._drawn_fidelity_sum = 0.0
         self._drawn_episodes = 0
         return stats
 

@@ -241,10 +241,14 @@ class LevelBuffer:
         """
         Sampling probability for each held matchup.
 
-        Mixes a rank-based score distribution with a staleness distribution, as
-        in Jiang et al. (2021). Ranking rather than using raw scores keeps
-        selection scale-invariant, which matters because residual magnitudes
-        shrink over training.
+        Runs in two regimes. While any level is still below ``min_visits`` the
+        buffer is *measuring*: it has no trustworthy score for those levels, so
+        all mass goes uniformly to the least-visited of them (see
+        :meth:`_coverage_distribution`). Once every level is measured it
+        switches to *prioritizing*, mixing a rank-based score distribution with
+        a staleness distribution as in Jiang et al. (2021). Ranking rather than
+        using raw scores keeps selection scale-invariant, which matters because
+        residual magnitudes shrink over training.
 
         :return: Probabilities aligned with :attr:`entries`, summing to one.
             Empty if the buffer is empty.
@@ -252,6 +256,10 @@ class LevelBuffer:
         count = self.size
         if count == 0:
             return np.empty(0, dtype=np.float64)
+
+        coverage = self._coverage_distribution()
+        if coverage is not None:
+            return coverage
 
         scores = np.array([self.score(entry) for entry in self._entries])
         # Rank 1 is the highest score; ties resolve by position, which is
@@ -277,6 +285,37 @@ class LevelBuffer:
             1.0 - self._staleness_coefficient
         ) * score_dist + self._staleness_coefficient * staleness_dist
         return mixed / mixed.sum()
+
+    def _coverage_distribution(self) -> np.ndarray | None:
+        """
+        Sweep the least-measured levels while any still lack a trusted score.
+
+        A level below ``min_visits`` has no score to rank on, so until it is
+        measured the buffer is doing survey work rather than prioritization.
+        Folding those levels into the rank distribution instead -- by scoring
+        them ``inf`` so they sort first -- makes that survey random: the top
+        rank takes a large share of the mass, so the same few unmeasured levels
+        are drawn repeatedly while others wait. That turns coverage into a
+        coupon-collector problem costing on the order of ``n log n`` episodes
+        rather than ``n``, which in practice consumed most of a run's budget
+        before any prioritization began.
+
+        Restricting the mass to the *joint-least-visited* unmeasured levels and
+        spreading it uniformly over them sweeps the space instead: every level
+        in the current tier is measured once before the tier below it is
+        touched. It also removes a tie-break-by-buffer-position artefact, since
+        equally-visited levels now receive equal mass rather than being ordered
+        by index.
+
+        :return: The coverage distribution, or None when every level is
+            measured and normal prioritization should take over.
+        """
+        visits = np.array([entry.visits for entry in self._entries])
+        unmeasured = visits < self._min_visits
+        if not unmeasured.any():
+            return None
+        tier = unmeasured & (visits == visits[unmeasured].min())
+        return tier / tier.sum()
 
     def pair_ids(self) -> np.ndarray:
         """

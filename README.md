@@ -130,7 +130,8 @@ scripts/                     Standalone dev scripts (not part of the training en
   run_selfplay_compile.sh      1M-frame self-play run with torch.compile (caps Inductor's compile workers)
 decks/                       Example deck CSVs
 docs/                        Design docs (torchrl_environment.md, game.md, research/curriculum-design.md,
-                             training-performance.md: measured throughput and recommended num_workers)
+                             training-performance.md: measured throughput and recommended num_workers,
+                             research/curriculum-experiment-01.md: PLR vs uniform results)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
 main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
 slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts

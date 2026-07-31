@@ -91,13 +91,33 @@ delivery to the workers was broken.
   `spawn` first. The assertion is correct and worth keeping, but it would not have
   caught this bug and should not be treated as the safety net.
 
-## Recommended follow-up
+## The guard against this: `curriculum/sampling_fidelity`
 
-Log `r(realized_visits, published_distribution)` as a training metric. Every
-existing diagnostic — `curriculum/matured`, `visits_mean`, `score_mean` — looked
-healthy for the entire duration of this failure. That one number would have made
-it obvious within the first batch, and it is the only cheap guard that does not
-depend on reproducing the multiprocessing conditions in a test.
+Every existing diagnostic — `curriculum/matured`, `visits_mean`, `score_mean` —
+looked healthy for the whole duration of this failure, so a metric was added
+that watches the thing that actually broke.
+
+For each finished episode, take the probability the live distribution gave its
+level, and divide by `sum(p^2)` — the average a genuine draw from that
+distribution would have produced. Normalizing this way keeps the reading
+scale-free as the distribution sharpens over training.
+
+- **order 1** — workers are drawing from the published distribution. Values
+  somewhat under 1 are normal: a level is chosen at episode reset, which can
+  precede the episode's end by a batch or two, so some episodes were drawn under
+  a slightly older distribution. Healthy runs measure ~0.6–0.8.
+- **~0** — draws are unrelated to it, i.e. this bug.
+
+Alarm on a sustained collapse toward zero, not on any departure from 1. On the
+60k-frame reproduction it read 0.014 → 0.219 → 0.394 broken versus
+0.118 → 0.845 → 1.288 fixed, so it separates within a couple of batches.
+
+**Ordering pitfall, hit and fixed once already.** The division must happen when
+each draw is recorded, not later in `metrics()`. `_update` calls `observe()` then
+`publish()`, and `publish()` overwrites the stored `sum(p^2)` — so deferring the
+division scores one batch's draws against the *next* batch's distribution. That
+stayed hidden while the distribution drifted slowly, then produced readings up to
+282 once the coverage sweep started moving it sharply between batches.
 
 ## Status of prior results
 

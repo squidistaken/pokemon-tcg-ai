@@ -489,6 +489,11 @@ def test_sampling_fidelity_reads_one_when_draws_follow_the_distribution() -> Non
     regardless of how concentrated the distribution happens to be.
     """
     curriculum = make_curriculum()
+    # Measure every level first, so the buffer is prioritizing rather than
+    # sweeping and the published distribution is genuinely uneven.
+    for entry in curriculum.buffer.entries:
+        for _ in range(3):
+            curriculum.buffer.commit(entry.pair_id, 0.1 * (entry.pair_id + 1))
     curriculum.publish()
     probabilities = curriculum.buffer.distribution()
     drawn = int(np.argmax(probabilities))
@@ -505,7 +510,7 @@ def test_sampling_fidelity_reads_one_when_draws_follow_the_distribution() -> Non
 
     expected = probabilities[drawn] / float(np.square(probabilities).sum())
     assert curriculum.metrics()["sampling_fidelity"] == pytest.approx(expected, rel=1e-6)
-    assert expected > 1.0, "a peaked distribution should score above one here"
+    assert expected > 1.0, "an uneven distribution should score above one here"
 
 
 def test_sampling_fidelity_collapses_when_workers_ignore_the_distribution() -> None:
@@ -539,3 +544,69 @@ def test_sampling_fidelity_collapses_when_workers_ignore_the_distribution() -> N
     )
 
     assert curriculum.metrics()["sampling_fidelity"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_unmeasured_levels_are_swept_uniformly_not_ranked() -> None:
+    """
+    Coverage must spread over the least-visited levels, not concentrate.
+
+    Scoring unmeasured levels ``inf`` and letting them compete in the rank
+    distribution gives the top rank a large share of the mass, so the same few
+    get drawn repeatedly. Every level in the current visit tier should instead
+    be equally likely.
+    """
+    buffer = make_buffer(capacity=16, min_visits=3)
+    buffer.prefill(range(8))
+    buffer.commit(0, 0.5)
+
+    distribution = buffer.distribution()
+
+    # Level 0 has one visit; the other seven have none, so only they are drawn.
+    assert distribution[0] == pytest.approx(0.0)
+    assert distribution[1:] == pytest.approx(np.full(7, 1.0 / 7))
+
+
+def test_coverage_yields_to_prioritization_once_everything_is_measured() -> None:
+    """
+    The sweep is survey work; scores must take over the moment it finishes.
+    """
+    buffer = make_buffer(capacity=16, min_visits=2)
+    buffer.prefill([0, 1])
+    for _ in range(2):
+        buffer.commit(0, 0.9)
+    # One level still unmeasured -> pure coverage, all mass on it.
+    assert buffer.distribution() == pytest.approx([0.0, 1.0])
+
+    for _ in range(2):
+        buffer.commit(1, 0.0)
+    # Both measured -> the high-residual level must now dominate.
+    prioritized = buffer.distribution()
+    assert prioritized[0] > prioritized[1]
+
+
+def test_sweeping_matures_the_buffer_near_the_theoretical_floor() -> None:
+    """
+    Coverage should cost about ``levels x min_visits`` episodes, not n log n.
+
+    This is the change's whole purpose. Drawing from the published distribution
+    each episode, a systematic sweep measures the space in close to the minimum
+    number of episodes, where sampling unmeasured levels by rank costs far more
+    and leaves little of a run's budget for actual prioritization.
+    """
+    levels, min_visits = 200, 3
+    buffer = make_buffer(capacity=levels * 2, min_visits=min_visits)
+    buffer.prefill(range(levels))
+    generator = np.random.default_rng(0)
+
+    episodes = 0
+    while any(entry.visits < min_visits for entry in buffer.entries):
+        probabilities = buffer.distribution()
+        drawn = int(generator.choice(len(probabilities), p=probabilities))
+        buffer.commit(buffer.entries[drawn].pair_id, 0.1)
+        episodes += 1
+        assert episodes < 10 * levels, "sweep failed to terminate"
+
+    floor = levels * min_visits
+    assert episodes == floor, (
+        f"expected the sweep to hit the {floor}-episode floor, took {episodes}"
+    )
