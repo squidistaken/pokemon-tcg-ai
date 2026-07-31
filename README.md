@@ -174,28 +174,6 @@ profiles select a normal Hydra config and add scheduler-specific overrides;
 they do not participate in local Hydra composition. Complete launch configs are
 available as `baseline`, `ppo`, and `ppo_selfplay`.
 
-## Kaggle submission
-
-`main.py` is the fixed-format Kaggle entry point; its `agent()` loads
-`checkpoint/model.pt` + `checkpoint/model_config.yaml` once (lazily, on the
-first non-deck-selection call) and plays greedily with it via
-`GreedyPolicyOpponent`. Both files are committed so the repository is always a
-self-contained submission; a missing checkpoint or config raises rather than
-silently falling back to random play, since that would mean the submission
-was packaged incorrectly.
-
-**The committed checkpoint is currently a placeholder**: freshly initialized,
-untrained weights, exported purely to exercise the loading path end-to-end.
-Regenerate it from a real training run before actually submitting:
-```bash
-python -m src.train agent=ppo train=ppo_selfplay   # or any other training config
-python scripts/export_submission_checkpoint.py --source-checkpoint <path/to/snapshot.pt>
-```
-Omitting `--source-checkpoint` re-exports a fresh placeholder instead. Pass
-`--overrides` to match whatever `model/backbone` / `model/head` the run used,
-e.g. `--overrides model/backbone=mlp model/head=linear` (the current default,
-so it's rarely needed in practice).
-
 ## CI
 
 GitHub Actions runs linting, type-checking, and tests for pull requests that
