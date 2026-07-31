@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any, cast
 
 import hydra
 from dotenv import load_dotenv
@@ -7,7 +8,12 @@ from omegaconf import DictConfig, OmegaConf
 
 from src.policies.greedy_policy_opponent import load_actor_critic
 from src.policies.ppo_actor import build_ppo_operator
-from src.training import build_evaluator, build_probe_specs
+from src.training import (
+    TrainingCallback,
+    WeightsAndBiases,
+    build_evaluator,
+    build_probe_specs,
+)
 
 load_dotenv(Path(__file__).parents[1] / ".env", override=False)
 
@@ -37,6 +43,11 @@ def main(cfg: DictConfig) -> None:
     actor_critic = load_actor_critic(checkpoint_path, cfg, obs_spec, action_spec, device="cpu")
     policy = build_ppo_operator(actor_critic, action_spec).get_policy_operator()
 
+    callbacks: list[TrainingCallback] = [hydra.utils.instantiate(callback) for callback in cfg.callbacks]
+    run_config = cast(dict[str, Any], OmegaConf.to_container(cfg, resolve=True))
+    for callback in callbacks:
+        callback.on_train_start(run_config)
+
     evaluator = build_evaluator(cfg, obs_spec, action_spec)
     try:
         metrics = evaluator.evaluate(policy)
@@ -56,6 +67,15 @@ def main(cfg: DictConfig) -> None:
         f"worst_quartile={metrics.get('archetype_win_rate_worst_quartile', float('nan')):.3f} "
         f"min={metrics.get('archetype_win_rate_min', float('nan')):.3f}"
     )
+
+    for callback in callbacks:
+        if isinstance(callback, WeightsAndBiases):
+            callback.log_table(
+                "deck_field/win_rate",
+                ["archetype", "win_rate"],
+                [(name, metrics[f"archetype_win_rate/{name}"]) for name in archetypes],
+            )
+        callback.on_train_end(metrics)
 
 
 if __name__ == "__main__":
