@@ -126,9 +126,7 @@ class WeightsAndBiases(TrainingCallback):
         Log one evaluation point against the same frame axis as training.
 
         :param step: Frames collected at the time of the evaluation.
-        :param metrics: Evaluation metrics, including one flat
-            ``archetype_win_rate/<archetype>`` entry per archetype when the
-            evaluator breaks the win-rate down per deck archetype.
+        :param metrics: Evaluation metrics.
         """
         archetype_rates = {
             key[len(_ARCHETYPE_PREFIX):]: value
@@ -137,7 +135,10 @@ class WeightsAndBiases(TrainingCallback):
         }
         if archetype_rates:
             self._latest_archetype_rates = archetype_rates
-        self._log("eval", step, metrics)
+        summary = {
+            key: value for key, value in metrics.items() if not key.startswith(_ARCHETYPE_PREFIX)
+        }
+        self._log("eval", step, summary)
 
     def log_table(self, key: str, columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
         """
