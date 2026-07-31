@@ -134,8 +134,7 @@ def _build_ppo_trainer(
         )
         eval_opponent_factory = None
         if opponent_factory is not None:
-            callbacks = [
-                *callbacks,
+            new_callbacks: list[TrainingCallback] = [
                 SnapshotCallback(
                     actor_critic=actor_critic,
                     checkpoint_dir=checkpoint_dir,
@@ -143,8 +142,7 @@ def _build_ppo_trainer(
                 ),
             ]
             if bool(cfg.train.get("cross_play", False)):
-                callbacks = [
-                    *callbacks,
+                new_callbacks.append(
                     CrossPlayCallback(
                         actor_critic=actor_critic,
                         cfg=cfg,
@@ -155,8 +153,9 @@ def _build_ppo_trainer(
                         n_games=int(cfg.train.get("cross_play_games", 20)),
                         max_checkpoints=int(cfg.train.get("cross_play_max_checkpoints", 8)),
                         seed=int(cfg.seed),
-                    ),
-                ]
+                    )
+                )
+            callbacks = [*new_callbacks, *callbacks]
 
     frames_per_batch = int(
         cfg.agent.get("frames_per_batch", cfg.collector.frames_per_batch)
