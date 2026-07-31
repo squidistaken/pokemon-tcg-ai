@@ -17,15 +17,15 @@ DECK = load_deck(DECK_PATH)
 @pytest.fixture(autouse=True)
 def _reset_cached_agent():
     """
-    Clear ``main``'s lazily-built agent singleton around every test.
+    Clear ``main``'s cached agent around every test.
 
     Without this, whichever test runs first would permanently cache an
     agent built from its own tmp_path checkpoint, and every later test
     would silently reuse it instead of loading its own.
     """
-    main._agent = None  # noqa: SLF001
+    main._load_agent.cache_clear()  # noqa: SLF001
     yield
-    main._agent = None  # noqa: SLF001
+    main._load_agent.cache_clear()  # noqa: SLF001
 
 
 @pytest.fixture
@@ -90,10 +90,10 @@ def test_agent_reuses_cached_instance(tmp_path, monkeypatch, structured_model_cf
     _write_checkpoint(tmp_path / "checkpoint", structured_model_cfg)
 
     main.agent(real_observation)
-    agent = main._agent  # noqa: SLF001
-    assert agent is not None
+    first = main._load_agent()  # noqa: SLF001
     main.agent(real_observation)
-    assert main._agent is agent  # noqa: SLF001
+    second = main._load_agent()  # noqa: SLF001
+    assert first is second
 
 
 def test_agent_raises_when_checkpoint_missing(tmp_path, monkeypatch, real_observation) -> None:
