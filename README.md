@@ -129,7 +129,8 @@ scripts/                     Standalone dev scripts (not part of the training en
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
   run_selfplay_compile.sh      1M-frame self-play run with torch.compile (caps Inductor's compile workers)
 decks/                       Example deck CSVs
-docs/                        Design docs (torchrl_environment.md, game.md, research/curriculum-design.md)
+docs/                        Design docs (torchrl_environment.md, game.md, research/curriculum-design.md,
+                             training-performance.md: measured throughput and recommended num_workers)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
 main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
 slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts

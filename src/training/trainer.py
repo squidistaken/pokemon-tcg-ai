@@ -5,6 +5,7 @@ from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
 from typing import Any, cast
 
+import torch.multiprocessing as torch_mp
 from tensordict import TensorDict
 from torch import Tensor, nn
 from torchrl.collectors import Collector
@@ -288,9 +289,19 @@ class Trainer(BaseTrainer):
         """
         Build the vectorized environment from the injected factories.
 
+        The process-wide start method is forced to match before construction.
+        Importing torchrl sets it to ``spawn``, and ``ParallelEnv`` starts its
+        workers lazily on first use, so the constructor argument alone does not
+        decide how they are ultimately created. Under ``spawn`` anything the
+        factories close over is pickled, which silently gives every worker a
+        private copy of what was meant to be shared memory -- the level
+        curriculum's distribution channel in particular, which then freezes at
+        whatever was published before collection began.
+
         :return: ParallelEnv (fork workers) or SerialEnv over the factories.
         """
         if self._use_parallel_env:
+            torch_mp.set_start_method(self._mp_start_method, force=True)
             return ParallelEnv(
                 num_workers=len(self._env_factories),
                 create_env_fn=self._env_factories,

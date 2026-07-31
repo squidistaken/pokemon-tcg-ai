@@ -11,6 +11,9 @@ from src.env.curriculum_deck_sampler import NO_LEVEL, CurriculumDeckSampler
 from src.env.curriculum_handles import CurriculumHandles
 from src.env.tcg_env import TCGEnv
 from src.policies.random_masked_policy import RandomMaskedPolicy
+import torch.multiprocessing as torch_mp
+
+from src.training.trainer import Trainer
 from tests.test_tcg_env import DECK
 
 CAPACITY = 64
@@ -199,6 +202,12 @@ def test_level_updates_reach_running_parallel_workers() -> None:
     same values forever. So the first distribution is published first, and a
     second one after the workers are already running.
     """
+    # Reproduce the process state training actually runs in: importing torchrl
+    # sets the global start method to "spawn", and ParallelEnv starts workers
+    # lazily, so this is what they would be created under.
+    previous = torch_mp.get_start_method(allow_none=True)
+    torch_mp.set_start_method("spawn", force=True)
+
     index = make_index({"a": 2, "b": 2})
     handles = CurriculumHandles.allocate(CAPACITY)
     first = index.pair_id(1, 0)
@@ -249,6 +258,12 @@ def test_curriculum_env_specs_stay_consistent() -> None:
     """
     The added keys must not break torchrl's spec contract.
     """
+    # Reproduce the process state training actually runs in: importing torchrl
+    # sets the global start method to "spawn", and ParallelEnv starts workers
+    # lazily, so this is what they would be created under.
+    previous = torch_mp.get_start_method(allow_none=True)
+    torch_mp.set_start_method("spawn", force=True)
+
     index = make_index({"a": 2, "b": 2})
     handles = CurriculumHandles.allocate(CAPACITY)
     handles.publish(torch.tensor([index.pair_id(0, 1)]), torch.tensor([1.0]))
@@ -266,3 +281,69 @@ def test_rejects_non_fork_start_methods() -> None:
     for method in ("spawn", "forkserver"):
         with pytest.raises(ValueError, match="fork"):
             CurriculumHandles.require_shared_start_method(method)
+
+
+def test_workers_track_a_republished_distribution_through_the_trainer_path() -> None:
+    """
+    The distribution must still reach workers built the way training builds them.
+
+    :func:`test_level_updates_reach_running_parallel_workers` constructs the
+    ``ParallelEnv`` directly and publishes a single slot at probability one, so
+    it passes even when the channel is a per-worker *copy*: a copy holds the
+    right values until the learner republishes, and that test's first publish
+    happens before the fork.
+
+    Training goes through :func:`~src.training.trainer.Trainer._make_vec_env`,
+    which matters because importing torchrl sets the process-wide start method
+    to ``spawn`` and ``ParallelEnv`` starts its workers lazily. Under ``spawn``
+    the factories are pickled, every worker gets a private channel, and the
+    curriculum silently freezes at whatever was published before collection --
+    with ties among the initial ``inf`` scores broken by buffer position, that
+    is a Zipf over ``pair_id`` rather than anything the learner computed.
+
+    So this republishes *after* the workers are running and asserts the draws
+    actually move, which a copied channel cannot do.
+    """
+    # Reproduce the process state training actually runs in: importing torchrl
+    # sets the global start method to "spawn", and ParallelEnv starts workers
+    # lazily, so this is what they would be created under.
+    previous = torch_mp.get_start_method(allow_none=True)
+    torch_mp.set_start_method("spawn", force=True)
+
+    index = make_index({"a": 2, "b": 2})
+    handles = CurriculumHandles.allocate(CAPACITY)
+    pair_ids = torch.tensor([index.pair_id(j, k) for j in range(2) for k in range(2)])
+    spread = torch.full((4,), 0.25)
+    handles.publish(pair_ids, spread)
+
+    trainer = Trainer(
+        env_factories=[
+            partial(make_curriculum_env, index, handles, 0),
+            partial(make_curriculum_env, index, handles, 1),
+        ],
+        policy=RandomMaskedPolicy(),
+        frames_per_batch=8,
+        total_frames=8,
+        mp_start_method="fork",
+        serial_for_single=False,
+    )
+    env = trainer._make_vec_env()  # noqa: SLF001 - the construction under test
+    try:
+        env.reset()
+        target = index.pair_id(1, 1)
+        focused = torch.zeros(4)
+        focused[pair_ids.tolist().index(target)] = 1.0
+        handles.publish(pair_ids, focused)
+
+        env.reset()
+        drawn = env.rollout(
+            max_steps=6, policy=RandomMaskedPolicy(), break_when_any_done=False
+        )["level_id"]
+    finally:
+        env.close()
+        torch_mp.set_start_method(previous or "fork", force=True)
+
+    assert set(drawn.reshape(-1).tolist()) == {target}, (
+        "workers kept serving the pre-fork distribution; the channel was copied, "
+        "not shared, so the curriculum would be frozen for the whole run"
+    )

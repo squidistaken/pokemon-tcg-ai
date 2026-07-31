@@ -84,6 +84,13 @@ class Curriculum:
         self._buffer = buffer
         self._anchor_only_scoring = anchor_only_scoring
         self._open = [_OpenEpisode() for _ in range(num_workers)]
+        # Probability the live distribution assigns to each pair_id, kept so
+        # observe() can check the episodes that came back against the weights
+        # the workers were supposed to have drawn them under.
+        self._published: dict[int, float] = {}
+        self._published_collision = 0.0
+        self._drawn_probability_sum = 0.0
+        self._drawn_episodes = 0
         self._buffer.prefill(range(archetypes.pair_count))
         self.publish()
 
@@ -156,20 +163,72 @@ class Curriculum:
         distribution = self._buffer.distribution()
         if distribution.size == 0:
             return
+        pair_ids = self._buffer.pair_ids()
         self._handles.publish(
-            torch.from_numpy(self._buffer.pair_ids()),
+            torch.from_numpy(pair_ids),
             torch.from_numpy(np.ascontiguousarray(distribution, dtype=np.float32)),
         )
+        # Snapshot what the workers will now be drawing under, so the next
+        # batch's episodes can be checked against it.
+        self._published = dict(
+            zip(pair_ids.tolist(), distribution.tolist(), strict=True)
+        )
+        self._published_collision = float(np.square(distribution).sum())
+
+    def _record_draw(self, level_id: int) -> None:
+        """
+        Note the probability the live distribution gave a level that came back.
+
+        :param level_id: Matchup identifier of a finished episode.
+        """
+        probability = self._published.get(level_id)
+        if probability is None:
+            return
+        self._drawn_probability_sum += probability
+        self._drawn_episodes += 1
+
+    def _sampling_fidelity(self) -> float:
+        """
+        How closely the episodes actually played track the published weights.
+
+        Averages the published probability of every level that came back and
+        divides by the probability a genuine draw from that distribution would
+        have averaged (its collision probability, ``sum(p^2)``). Normalizing
+        this way makes the metric read 1.0 whether the distribution is sharp or
+        flat, so one threshold holds for the whole run:
+
+        * ``~1.0`` -- workers are drawing from the published distribution.
+        * ``~0.0`` -- draws are unrelated to it. The distribution is computed
+          and published correctly but never reaches the samplers, which is
+          invisible in every other counter here: visits, maturity and scores
+          all keep advancing while the curriculum steers nothing.
+
+        A ratio rather than a correlation because a batch holds only tens of
+        episodes spread over a level space thousands wide; a histogram over
+        that is almost entirely zeros, whereas a mean over the episodes that
+        did come back is stable.
+
+        :return: The ratio, or NaN before any episode has been attributed.
+        """
+        if self._drawn_episodes == 0 or self._published_collision <= 0.0:
+            return float("nan")
+        mean_drawn = self._drawn_probability_sum / self._drawn_episodes
+        return mean_drawn / self._published_collision
 
     def metrics(self) -> dict[str, float]:
         """
         Curriculum statistics for the training callbacks.
 
-        :return: Buffer counters, plus the share of episodes played against the
-            anchor, which is the diagnostic for whether league drift is
-            contaminating level scores.
+        :return: Buffer counters, the share of episodes played against the
+            anchor (the diagnostic for whether league drift is contaminating
+            level scores), and the sampling-fidelity check described in
+            :meth:`_sampling_fidelity`.
         """
-        return self._buffer.stats()
+        stats = self._buffer.stats()
+        stats["sampling_fidelity"] = self._sampling_fidelity()
+        self._drawn_probability_sum = 0.0
+        self._drawn_episodes = 0
+        return stats
 
     def save_state(self, path: str | Path) -> None:
         """
@@ -222,6 +281,8 @@ class Curriculum:
                 else None
             )
             scored = not self._anchor_only_scoring or bool(anchors[end].item())
+            if accumulator.steps > 0 and accumulator.level_id != NO_LEVEL:
+                self._record_draw(accumulator.level_id)
             if accumulator.steps > 0 and accumulator.level_id != NO_LEVEL and scored:
                 self._buffer.commit(
                     accumulator.level_id,

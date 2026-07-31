@@ -1,6 +1,7 @@
 import shutil
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 from omegaconf import DictConfig, OmegaConf
@@ -477,3 +478,64 @@ def test_save_state_is_reloadable(tmp_path: Path) -> None:
     assert destination.exists()
     assert state["buffer"]["wins"][0] == pytest.approx(1.0)
     assert state["archetypes"] == list(curriculum.archetypes.names)
+
+
+def test_sampling_fidelity_reads_one_when_draws_follow_the_distribution() -> None:
+    """
+    The diagnostic must read ~1 when the samplers honour the published weights.
+
+    Fidelity divides the mean published probability of the levels that came
+    back by the mean a genuine draw would have produced, so agreement is 1.0
+    regardless of how concentrated the distribution happens to be.
+    """
+    curriculum = make_curriculum()
+    curriculum.publish()
+    probabilities = curriculum.buffer.distribution()
+    drawn = int(np.argmax(probabilities))
+
+    # Every episode lands on the single most probable level, which is what a
+    # draw from a distribution this peaked overwhelmingly does.
+    curriculum.observe(
+        batch(
+            levels=[[drawn] * STEPS] * WORKERS,
+            residuals=[[0.5] * STEPS] * WORKERS,
+            done=[[False] * (STEPS - 1) + [True]] * WORKERS,
+        )
+    )
+
+    expected = probabilities[drawn] / float(np.square(probabilities).sum())
+    assert curriculum.metrics()["sampling_fidelity"] == pytest.approx(expected, rel=1e-6)
+    assert expected > 1.0, "a peaked distribution should score above one here"
+
+
+def test_sampling_fidelity_collapses_when_workers_ignore_the_distribution() -> None:
+    """
+    The diagnostic must fall toward zero when draws are unrelated to the weights.
+
+    This is the failure it exists to catch: the buffer keeps scoring, maturing
+    and republishing perfectly well while the samplers serve a stale channel,
+    so every other counter looks healthy. Here the published distribution is
+    concentrated on one level but the episodes come back from a different one.
+    """
+    curriculum = make_curriculum()
+    focused = np.zeros(curriculum.buffer.size)
+    focused[0] = 1.0
+    curriculum.handles.publish(
+        torch.from_numpy(curriculum.buffer.pair_ids()),
+        torch.from_numpy(focused.astype(np.float32)),
+    )
+    curriculum._published = dict(  # noqa: SLF001 - mimics a publish()
+        zip(curriculum.buffer.pair_ids().tolist(), focused.tolist(), strict=True)
+    )
+    curriculum._published_collision = float(np.square(focused).sum())  # noqa: SLF001
+
+    ignored = int(curriculum.buffer.pair_ids()[1])
+    curriculum.observe(
+        batch(
+            levels=[[ignored] * STEPS] * WORKERS,
+            residuals=[[0.5] * STEPS] * WORKERS,
+            done=[[False] * (STEPS - 1) + [True]] * WORKERS,
+        )
+    )
+
+    assert curriculum.metrics()["sampling_fidelity"] == pytest.approx(0.0, abs=1e-9)
