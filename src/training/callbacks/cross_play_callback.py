@@ -5,10 +5,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+import wandb
 from omegaconf import DictConfig
 from torchrl.data import Categorical, Composite
 
-import wandb
 from src.env.battle_handle import BattleHandle
 from src.env.deck_sampler import DeckSampler, build_deck_sampler
 from src.env.snapshot_opponent_pool import SNAPSHOT_SUFFIX
@@ -201,7 +201,7 @@ class CrossPlayCallback(TrainingCallback):
     def _current_opponent(self) -> Policy:
         """
         Copy the live learner's weights into a fresh greedy opponent.
-        
+
         :return: A greedy opponent playing the current parameters.
         """
         snapshot = build_actor_critic(self._cfg, self._obs_spec, self._action_spec)
