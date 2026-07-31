@@ -1,0 +1,22 @@
+# Best-response exploitability probe: freeze a trained agent and train a fresh
+# learner to beat it across the multi-deck corpus.
+#
+# The learner's eval/win_rate is the frozen agent's exploitability, or how
+# beatable a dedicated best-responder finds it.
+#
+# Usage:
+#   python -m src.train --config-name ppo_best_response \
+#     train.best_response_checkpoint=/path/to/agent.pt
+defaults:
+  - config
+  - override /agent: ppo
+  - override /train: ppo_selfplay
+  - override /env: multideck
+  - _self_
+
+train:
+  best_response: true
+  # No self-play league to rank checkpoints within; snapshotting still runs so
+  # the trained best-responder itself is recoverable.
+  cross_play: false
+  eval_episodes: 150

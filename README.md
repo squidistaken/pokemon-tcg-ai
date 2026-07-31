@@ -119,6 +119,7 @@ conf/                        Hydra configs (config.yaml + env/, agent/, model/, 
 .env.example                 Template for untracked W&B, Kaggle, and submission defaults
 scripts/                     Standalone dev scripts (not part of the training entry point)
   bench_throughput.py          Collection throughput benchmark (naive vs SerialEnv vs ParallelEnv)
+  export_inference_checkpoint.py  Export assets for the repository-root inference entry point
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
   make_submission.py           Build a Kaggle .tar.gz and optionally submit it through the Kaggle CLI
   run_selfplay_compile.sh      1M-frame self-play run with torch.compile (caps Inductor's compile workers)
@@ -126,16 +127,11 @@ submission/
   main.py                      Kaggle entryfile template; `agent` is deliberately its final callable
   cg_api.py                    Pure-Python observation parser (no native simulator dependency)
   runtime.py                   Torch-only structured encoder/model/greedy inference implementation
+checkpoint/                  Assets generated for the repository-root inference entry point
 decks/                       Example deck CSVs
 docs/                        Design docs (torchrl_environment.md, game.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
-main.py                      Original random starter agent; not used by the submission builder
-  export_inference_checkpoint.py  Writes checkpoint/model.pt + model_config.yaml for main.py
-decks/                       Example deck CSVs
-docs/                        Design docs (torchrl_environment.md, game.md)
-tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
-checkpoint/                  Inference model config; generate model.pt from a trained run before submission
-main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
+main.py                      Alternate inference entry point; not used by make_submission.py
 slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts
 ```
 
@@ -193,6 +189,40 @@ Evaluation is serial and costs collection throughput, so it is a trade between
 curve resolution and speed. `train.eval_deterministic` (default `true`) scores
 the policy's argmax; set it to `false` to score the sampling behaviour used
 during collection.
+
+### Cross-play and checkpoint selection
+
+`train.cross_play=true` (with self-play on) scores the learner against its own
+frozen history through the greedy serving path. During training it logs
+`crossplay/vs_latest_snapshot` (am I still improving on my past self); at run end
+it round-robins the checkpoints into a win-rate matrix and an order-free
+Bradley-Terry **Elo** ranking, written as `crossplay_matrix.csv` /
+`crossplay_elo.csv` in the run directory and logged as `crossplay/elo/<ckpt>`.
+The Elo ranking is the tool for picking which checkpoint to submit.
+
+### Exploitability (best-response)
+
+```bash
+python -m src.train --config-name ppo_best_response \
+  train.best_response_checkpoint=/path/to/agent.pt
+```
+Freezes the given agent and trains a fresh learner to beat it across the corpus;
+the learner's `eval/win_rate` is that agent's **exploitability** — how beatable a
+dedicated best-responder finds it. A robust, Nash-like agent holds the
+best-responder near 0.5; a brittle one is driven far above. This is the read the
+ByteRL attack exposed that a self-play win-rate hides.
+
+### Deck-pool-width sweep
+
+`env.deck_pool_width=N` caps training to `N` archetypes while the held-out eval
+set stays fixed, so a sweep measures how generalization scales with training
+diversity:
+```bash
+python -m src.train --config-name ppo_selfplay_multideck --multirun \
+  env.deck_pool_width=4,8,16,32
+```
+Compare `eval/archetype_win_rate_{mean,worst_quartile}` across the runs (grouped
+by `env.deck_pool_width` in W&B).
 
 Online W&B logging is required when selected: configure `WANDB_API_KEY` in an
 untracked `.env` or run `wandb login --verify`. Authentication, connection, or

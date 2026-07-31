@@ -12,6 +12,8 @@ from src.training.callbacks.base import TrainingCallback
 
 logger = logging.getLogger(__name__)
 
+_ARCHETYPE_PREFIX = "archetype_win_rate/"
+
 WandbMode = Literal["online", "offline", "disabled"]
 _VALID_MODES: tuple[str, ...] = get_args(WandbMode)
 
@@ -74,6 +76,7 @@ class WeightsAndBiases(TrainingCallback):
         self._dir = dir
         self._log_checkpoints = log_checkpoints
         self._run: Run | None = None
+        self._latest_archetype_rates: dict[str, float] = {}
 
     def on_train_start(self, run_config: Mapping[str, Any]) -> None:
         """
@@ -130,7 +133,32 @@ class WeightsAndBiases(TrainingCallback):
         :param step: Frames collected at the time of the evaluation.
         :param metrics: Evaluation metrics.
         """
-        self._log("eval", step, metrics)
+        archetype_rates = {
+            key[len(_ARCHETYPE_PREFIX):]: value
+            for key, value in metrics.items()
+            if key.startswith(_ARCHETYPE_PREFIX)
+        }
+        if archetype_rates:
+            self._latest_archetype_rates = archetype_rates
+        summary = {
+            key: value for key, value in metrics.items() if not key.startswith(_ARCHETYPE_PREFIX)
+        }
+        self._log("eval", step, summary)
+
+    def log_table(self, key: str, columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
+        """
+        Log a one-shot table to the run.
+
+        :param key: W&B key the table is logged under.
+        :param columns: Column names.
+        :param rows: Table rows, one sequence of cell values per row.
+        """
+        if self._run is None:
+            return
+        import wandb
+
+        table = wandb.Table(columns=list(columns), data=[list(row) for row in rows])
+        self._run.log({key: table})
 
     def log_checkpoint(self, path: Path, digest: str, frames: int) -> None:
         """
@@ -181,6 +209,12 @@ class WeightsAndBiases(TrainingCallback):
         """
         if self._run is None:
             return
+        if self._latest_archetype_rates:
+            self.log_table(
+                "eval/archetype_win_rate_table",
+                ["archetype", "win_rate"],
+                sorted(self._latest_archetype_rates.items()),
+            )
         for key, value in summary.items():
             self._run.summary[f"summary/{key}"] = value
         self._run.finish()

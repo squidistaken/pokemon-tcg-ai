@@ -1,0 +1,21 @@
+# Deck field-performance probe: which held-out deck to submit to Kaggle.
+#
+# This entry point deals the agent and its opponent independent decks from the
+# held-out pool, with both sides piloted by the same trained checkpoint, so the
+# resulting per-archetype win rate isolates deck strength as a field-performance proxy.
+#
+# Usage:
+#   python -m src.eval_deck_field train.eval_opponent_checkpoint=/path/to/agent.pt
+defaults:
+  - config
+  - override /agent: ppo
+  - override /train: ppo_selfplay
+  - override /env: multideck
+  - _self_
+
+env:
+  eval_deck_matchup: independent
+
+train:
+  eval_opponent: checkpoint
+  eval_episodes: 300

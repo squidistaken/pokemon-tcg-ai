@@ -21,6 +21,11 @@ deck_switch_steps: 0
 #   uniform     -> each deck equally likely, i.i.d. per episode.
 #   round_robin -> deterministic rotation covering every deck evenly.
 deck_sampling: uniform
+# Draw strategy for the periodic evaluator only. "null" falls back to deck_sampling.
+# Set this to "round_robin" so eval deterministically and evenly covers the held-out pool:
+# the per-archetype breakdown then reflects the policy, not the luck of which held-out decks
+# a uniform draw sampled that round.
+eval_deck_sampling: null
 # Probability that a training episode is a mirror match (both seats the same
 # deck); the rest are independent draws. null derives it from deck_matchup
 # (mirror -> 1.0, independent -> 0.0). Set e.g. 0.5 to mix the two, or sweep it
@@ -36,6 +41,12 @@ deck_weighting: null
 # Fraction of the pool held out from training and used only for evaluation, so
 # eval measures generalization to unseen decks. 0.0 trains on the whole pool.
 deck_holdout_frac: 0.0
+# Cap the training pool to this many archetypes (the held-out eval set is left
+# untouched). null uses every training archetype. Sweep it across runs
+# (--multirun env.deck_pool_width=4,8,16,32) to measure how held-out
+# generalization scales with training deck diversity. The chosen archetypes are
+# deterministic given deck_split_seed.
+deck_pool_width: null
 # Seed for the deterministic train/holdout split.
 deck_split_seed: 0
 # Padded size of the option space (stop action excluded); must exceed the
