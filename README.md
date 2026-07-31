@@ -182,6 +182,40 @@ curve resolution and speed. `train.eval_deterministic` (default `true`) scores
 the policy's argmax; set it to `false` to score the sampling behaviour used
 during collection.
 
+### Cross-play and checkpoint selection
+
+`train.cross_play=true` (with self-play on) scores the learner against its own
+frozen history through the greedy serving path. During training it logs
+`crossplay/vs_latest_snapshot` (am I still improving on my past self); at run end
+it round-robins the checkpoints into a win-rate matrix and an order-free
+Bradley-Terry **Elo** ranking, written as `crossplay_matrix.csv` /
+`crossplay_elo.csv` in the run directory and logged as `crossplay/elo/<ckpt>`.
+The Elo ranking is the tool for picking which checkpoint to submit.
+
+### Exploitability (best-response)
+
+```bash
+python -m src.train --config-name ppo_best_response \
+  train.best_response_checkpoint=/path/to/agent.pt
+```
+Freezes the given agent and trains a fresh learner to beat it across the corpus;
+the learner's `eval/win_rate` is that agent's **exploitability** — how beatable a
+dedicated best-responder finds it. A robust, Nash-like agent holds the
+best-responder near 0.5; a brittle one is driven far above. This is the read the
+ByteRL attack exposed that a self-play win-rate hides.
+
+### Deck-pool-width sweep
+
+`env.deck_pool_width=N` caps training to `N` archetypes while the held-out eval
+set stays fixed, so a sweep measures how generalization scales with training
+diversity:
+```bash
+python -m src.train --config-name ppo_selfplay_multideck --multirun \
+  env.deck_pool_width=4,8,16,32
+```
+Compare `eval/archetype_win_rate_{mean,worst_quartile}` across the runs (grouped
+by `env.deck_pool_width` in W&B).
+
 Online W&B logging is required when selected: configure `WANDB_API_KEY` in an
 untracked `.env` or run `wandb login --verify`. Authentication, connection, or
 logging failures stop training. Use `wandb.mode=offline` only when local
