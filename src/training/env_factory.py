@@ -189,6 +189,28 @@ def _deck_labels(kept_paths: list[str]) -> list[str]:
     return labels
 
 
+def _limit_pool_width(
+    idx: list[int], kept_paths: list[str], width: int, seed: int
+) -> list[int]:
+    """
+    Restrict training-deck indices to a deterministic subset of archetypes.
+
+    :param idx: Candidate deck indices (the training split).
+    :param kept_paths: Deck paths aligned with the full pool, indexed by ``idx``.
+    :param width: Number of archetypes to keep.
+    :param seed: Seed for the deterministic archetype choice.
+    :return: The subset of ``idx`` whose decks belong to the chosen archetypes.
+    :raises ValueError: If ``width`` is below 1.
+    """
+    if width < 1:
+        raise ValueError(f"deck_pool_width must be >= 1, got {width}")
+    labels = _deck_labels([kept_paths[i] for i in idx])
+    archetypes = sorted(set(labels))
+    random.Random(seed).shuffle(archetypes)
+    chosen = set(archetypes[:width])
+    return [i for i, label in zip(idx, labels, strict=True) if label in chosen]
+
+
 def _deck_weights(kept_paths: list[str], scheme: str) -> list[float]:
     """
     Compute per-deck sampling weights from manifest metadata.
@@ -253,6 +275,13 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
         holdout_frac=float(cfg.env.get("deck_holdout_frac", 0.0)),
         seed=int(cfg.env.get("deck_split_seed", 0)),
     )
+    width = cfg.env.get("deck_pool_width")
+    if width is not None:
+        # The held-out eval set stays fixed so a width sweep varies training
+        # diversity against a constant yardstick.
+        train_idx = _limit_pool_width(
+            train_idx, kept_paths, int(width), int(cfg.env.get("deck_split_seed", 0))
+        )
     idx = holdout_idx if deck_split == "eval" else train_idx
     matchup = cfg.env.get("deck_matchup", "mirror")
     spec: dict[str, Any] = {

@@ -41,6 +41,12 @@ deck_weighting: null
 # Fraction of the pool held out from training and used only for evaluation, so
 # eval measures generalization to unseen decks. 0.0 trains on the whole pool.
 deck_holdout_frac: 0.0
+# Cap the training pool to this many archetypes (the held-out eval set is left
+# untouched). null uses every training archetype. Sweep it across runs
+# (--multirun env.deck_pool_width=4,8,16,32) to measure how held-out
+# generalization scales with training deck diversity. The chosen archetypes are
+# deterministic given deck_split_seed.
+deck_pool_width: null
 # Seed for the deterministic train/holdout split.
 deck_split_seed: 0
 # Padded size of the option space (stop action excluded); must exceed the

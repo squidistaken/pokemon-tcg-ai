@@ -13,6 +13,7 @@ from src.training.env_factory import (
     _build_sampler_spec,
     _deck_labels,
     _deck_weights,
+    _limit_pool_width,
     _record_winrate,
 )
 
@@ -494,6 +495,52 @@ def test_deck_labels_prefer_manifest_archetype() -> None:
     labels = _deck_labels(paths)
     assert len(labels) == len(paths)
     assert all(isinstance(label, str) and label for label in labels)
+
+
+def test_limit_pool_width_keeps_exactly_n_archetypes(tmp_path: Path) -> None:
+    """
+    Width filtering keeps decks from exactly ``width`` archetypes, deterministically.
+    """
+    paths: list[str] = []
+    for archetype in range(4):
+        folder = tmp_path / f"arch{archetype}"
+        folder.mkdir()
+        for deck in range(2):
+            csv = folder / f"deck{deck}.csv"
+            csv.write_text("\n".join("1" for _ in range(60)))
+            paths.append(str(csv))
+    idx = list(range(len(paths)))
+
+    kept = _limit_pool_width(idx, paths, width=2, seed=0)
+    archetypes = {Path(paths[i]).parent.name for i in kept}
+    assert len(archetypes) == 2  # exactly the requested number of archetypes
+    assert set(kept) <= set(idx)
+    assert _limit_pool_width(idx, paths, width=2, seed=0) == kept  # deterministic
+
+
+def test_limit_pool_width_rejects_below_one() -> None:
+    """
+    A width below one is rejected rather than silently emptying the pool.
+    """
+    with pytest.raises(ValueError, match="deck_pool_width"):
+        _limit_pool_width([0], ["arch/a.csv"], width=0, seed=0)
+
+
+@requires_corpus
+def test_deck_pool_width_narrows_train_but_not_eval() -> None:
+    """
+    ``deck_pool_width`` shrinks the training pool while the held-out set is fixed.
+    """
+    full = _env_cfg(deck_pool=str(CORPUS_DIR), deck_holdout_frac=0.2)
+    narrow = _env_cfg(deck_pool=str(CORPUS_DIR), deck_holdout_frac=0.2, deck_pool_width=5)
+    assert (
+        len(_build_sampler_spec(narrow, deck_split="train")["decks"])
+        < len(_build_sampler_spec(full, deck_split="train")["decks"])
+    )
+    assert (
+        len(_build_sampler_spec(narrow, deck_split="eval")["decks"])
+        == len(_build_sampler_spec(full, deck_split="eval")["decks"])
+    )
 
 
 def test_deck_labels_fall_back_to_folder_name(tmp_path: Path) -> None:
