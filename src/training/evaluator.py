@@ -38,7 +38,7 @@ def _archetype_metrics(per_archetype: dict[str, list[int]]) -> dict[str, float]:
     Summarize per-archetype tallies into generalization metrics.
 
     :param per_archetype: Mapping archetype -> ``[scored episodes, wins]``.
-    :return: Macro mean/std/min/max, the archetype count, and one
+    :return: Macro mean/std/min/max/worst-quartile, the archetype count, and one
         ``archetype_win_rate/<name>`` series per archetype. Empty when nothing
         was recorded (unlabelled pool).
     """
@@ -49,11 +49,14 @@ def _archetype_metrics(per_archetype: dict[str, list[int]]) -> dict[str, float]:
         for archetype, (scored, wins) in per_archetype.items()
     }
     values = list(rates.values())
+    ordered = sorted(values)
+    worst_quartile = ordered[: max(1, len(ordered) // 4)]
     metrics: dict[str, float] = {
         "archetype_count": float(len(rates)),
         "archetype_win_rate_mean": statistics.fmean(values),
         "archetype_win_rate_std": statistics.pstdev(values) if len(values) > 1 else 0.0,
         "archetype_win_rate_min": min(values),
+        "archetype_win_rate_worst_quartile": statistics.fmean(worst_quartile),
         "archetype_win_rate_max": max(values),
     }
     for archetype, rate in rates.items():
@@ -212,11 +215,12 @@ class Evaluator:
         if "archetype_win_rate_mean" in metrics:
             logger.info(
                 "Per-archetype win-rate over %d archetype(s): mean=%.3f std=%.3f "
-                "min=%.3f max=%.3f",
+                "min=%.3f worst_quartile=%.3f max=%.3f",
                 int(metrics["archetype_count"]),
                 metrics["archetype_win_rate_mean"],
                 metrics["archetype_win_rate_std"],
                 metrics["archetype_win_rate_min"],
+                metrics["archetype_win_rate_worst_quartile"],
                 metrics["archetype_win_rate_max"],
             )
         return metrics

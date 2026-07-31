@@ -43,6 +43,25 @@ def test_archetype_metrics_single_archetype_has_zero_spread() -> None:
     metrics = _archetype_metrics({"A": [4, 3]})
     assert metrics["archetype_win_rate_mean"] == 0.75
     assert metrics["archetype_win_rate_std"] == 0.0
+    # Bottom quartile of a single archetype is that archetype.
+    assert metrics["archetype_win_rate_worst_quartile"] == 0.75
+
+
+def test_worst_quartile_averages_the_weakest_archetypes() -> None:
+    """
+    ``worst_quartile`` means the weakest 25% of archetypes, not the single min.
+    """
+    # 8 archetypes at rates 0.0..0.7; bottom quartile is the 2 weakest (0.0, 0.1).
+    per_archetype = {f"a{i}": [10, i] for i in range(8)}  # rate i/10
+    metrics = _archetype_metrics(per_archetype)
+    assert metrics["archetype_win_rate_min"] == 0.0
+    assert metrics["archetype_win_rate_worst_quartile"] == 0.05  # mean(0.0, 0.1)
+    # It sits between the fragile min and the macro mean.
+    assert (
+        metrics["archetype_win_rate_min"]
+        <= metrics["archetype_win_rate_worst_quartile"]
+        <= metrics["archetype_win_rate_mean"]
+    )
 
 
 def test_archetype_metrics_empty_is_absent() -> None:
