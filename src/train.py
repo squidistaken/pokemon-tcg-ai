@@ -7,20 +7,23 @@ import torch
 from dotenv import load_dotenv
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
-from torchrl.data import Categorical
+from torchrl.data import Categorical, Composite
 
 from src.policies.ppo_actor import build_actor_critic
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training import (
+    CrossPlayCallback,
     Evaluator,
     PPOTrainer,
     SnapshotCallback,
     Trainer,
     TrainingCallback,
+    build_best_response_opponent_factory,
     build_eval_opponent_factory,
     build_opponent_factory,
     make_env_factories,
 )
+from src.training.env_factory import OpponentFactory
 
 load_dotenv(Path(__file__).parents[1] / ".env", override=False)
 
@@ -118,18 +121,42 @@ def _build_ppo_trainer(
     actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
 
     checkpoint_dir = _resolve_checkpoint_dir(cfg)
-    opponent_factory = build_opponent_factory(
-        cfg, obs_spec, action_spec, checkpoint_dir
-    )
-    if opponent_factory is not None:
-        callbacks = [
-            *callbacks,
-            SnapshotCallback(
-                actor_critic=actor_critic,
-                checkpoint_dir=checkpoint_dir,
-                interval=int(cfg.train.snapshot_interval),
-            ),
-        ]
+    if bool(cfg.train.get("best_response", False)):
+        # Exploitability run: the learner both trains against and is scored
+        # against one frozen agent, and its eval win-rate is that agent's
+        # exploitability. No self-play league or snapshotting as the opponent is
+        # fixed, so cross-play against the learner's own history is meaningless.
+        opponent_factory = build_best_response_opponent_factory(cfg, obs_spec, action_spec)
+        eval_opponent_factory = opponent_factory
+    else:
+        opponent_factory = build_opponent_factory(
+            cfg, obs_spec, action_spec, checkpoint_dir
+        )
+        eval_opponent_factory = None
+        if opponent_factory is not None:
+            callbacks = [
+                *callbacks,
+                SnapshotCallback(
+                    actor_critic=actor_critic,
+                    checkpoint_dir=checkpoint_dir,
+                    interval=int(cfg.train.snapshot_interval),
+                ),
+            ]
+            if bool(cfg.train.get("cross_play", False)):
+                callbacks = [
+                    *callbacks,
+                    CrossPlayCallback(
+                        actor_critic=actor_critic,
+                        cfg=cfg,
+                        obs_spec=obs_spec,
+                        action_spec=action_spec,
+                        checkpoint_dir=checkpoint_dir,
+                        output_dir=HydraConfig.get().runtime.output_dir,
+                        n_games=int(cfg.train.get("cross_play_games", 20)),
+                        max_checkpoints=int(cfg.train.get("cross_play_max_checkpoints", 8)),
+                        seed=int(cfg.seed),
+                    ),
+                ]
 
     frames_per_batch = int(
         cfg.agent.get("frames_per_batch", cfg.collector.frames_per_batch)
@@ -165,7 +192,7 @@ def _build_ppo_trainer(
         reward_scaling=cfg.agent.get("reward_scaling", 1.0),
         callbacks=callbacks,
         run_config=run_config,
-        evaluator=_build_evaluator(cfg),
+        evaluator=_build_evaluator(cfg, obs_spec, action_spec, eval_opponent_factory),
         eval_interval=int(cfg.train.get("eval_interval", 0)),
     )
 
@@ -190,7 +217,12 @@ def _resolve_checkpoint_dir(cfg: DictConfig) -> Path:
     return Path(HydraConfig.get().runtime.output_dir) / configured
 
 
-def _build_evaluator(cfg: DictConfig) -> Evaluator | None:
+def _build_evaluator(
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
+    opponent_factory: OpponentFactory | None = None,
+) -> Evaluator | None:
     """
     Build the fixed-opponent evaluator selected by ``cfg.train``.
 
@@ -201,13 +233,23 @@ def _build_evaluator(cfg: DictConfig) -> Evaluator | None:
     reference is what makes the run's progress readable.
 
     :param cfg: Hydra configuration with a ``train`` section.
+    :param obs_spec: Environment observation spec, forwarded to the opponent
+        factory so a ``checkpoint`` reference can rebuild its network.
+    :param action_spec: Environment action spec, same purpose.
+    :param opponent_factory: Explicit eval opponent, overriding
+        ``cfg.train.eval_opponent``. Used by a best-response run to score the
+        learner against the same frozen agent it trains against.
     :return: An evaluator, or None when ``eval_interval`` disables evaluation.
     """
     if int(cfg.train.get("eval_interval", 0)) <= 0:
         return None
+    if opponent_factory is None:
+        opponent_factory = build_eval_opponent_factory(cfg, obs_spec, action_spec)
     return Evaluator(
         env_factory=make_env_factories(
-            cfg, opponent_factory=build_eval_opponent_factory(cfg), deck_split="eval"
+            cfg,
+            opponent_factory=opponent_factory,
+            deck_split="eval",
         )[0],
         n_episodes=int(cfg.train.get("eval_episodes", 100)),
         device=cfg.agent.get("device", "cpu"),
