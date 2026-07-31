@@ -140,7 +140,8 @@ levels**, sweeping the space in tiers instead of letting `inf` scores compete in
 the rank distribution. Once everything is measured, the normal rank + staleness
 mixture takes over.
 
-Re-measured on the same config (650k frames, 16 workers):
+Re-measured on the same config (650k frames, 16 workers;
+[run](https://wandb.ai/pokemon-tcg-ai/pokemon-tcg-ai/runs/7yvq9zy3)):
 
 | | maturation | episodes | vs floor | exploitation window of a 2M run |
 |---|---|---|---|---|
