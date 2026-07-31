@@ -1,4 +1,3 @@
-import functools
 import os
 
 from cg.api import Observation, to_observation_class
@@ -19,6 +18,8 @@ MODEL_CONFIG_PATH = os.environ.get("PTCG_MODEL_CONFIG_PATH", "checkpoint/model_c
 # to greedy (deterministic) action selection. This only affects the Kaggle
 # inference path here, not training/self-play, which has its own default.
 DETERMINISTIC_INFERENCE = False
+
+_agent: GreedyPolicyOpponent | None = None
 
 
 def _resolve_path(file_path: str) -> str:
@@ -50,15 +51,13 @@ def read_deck_csv() -> list[int]:
     return deck
 
 
-@functools.cache
 def _load_agent() -> GreedyPolicyOpponent:
     """
     Build (once) and return the checkpointed agent used for inference.
 
-    Cached (rather than reloaded) on every call: ``agent()`` is called once
-    per selection for the whole match, so rebuilding the network and
-    reloading weights on every call would be pure overhead. Call
-    ``_load_agent.cache_clear()`` to force a reload (e.g. between tests).
+    Lazily constructed on first use and cached in ``_agent``: ``agent()``
+    is called once per selection for the whole match, so rebuilding the
+    network and reloading weights on every call would be pure overhead.
 
     Returns:
         GreedyPolicyOpponent: Our submission agent, wrapping the loaded
@@ -70,14 +69,19 @@ def _load_agent() -> GreedyPolicyOpponent:
             state to silently degrade from; run
             ``scripts/export_inference_checkpoint.py`` first.
     """
-    checkpoint_path = _resolve_path(CHECKPOINT_PATH)
-    model_config_path = _resolve_path(MODEL_CONFIG_PATH)
-    if not os.path.exists(checkpoint_path) or not os.path.exists(model_config_path):
-        raise FileNotFoundError(
-            f"Missing checkpoint ({checkpoint_path!r}) or model config ({model_config_path!r}). "
-            "Run scripts/export_inference_checkpoint.py before submitting."
+    global _agent
+    if _agent is None:
+        checkpoint_path = _resolve_path(CHECKPOINT_PATH)
+        model_config_path = _resolve_path(MODEL_CONFIG_PATH)
+        if not os.path.exists(checkpoint_path) or not os.path.exists(model_config_path):
+            raise FileNotFoundError(
+                f"Missing checkpoint ({checkpoint_path!r}) or model config ({model_config_path!r}). "
+                "Run scripts/export_inference_checkpoint.py before submitting."
+            )
+        _agent = load_inference_agent(
+            checkpoint_path, model_config_path, deterministic=DETERMINISTIC_INFERENCE
         )
-    return load_inference_agent(checkpoint_path, model_config_path, deterministic=DETERMINISTIC_INFERENCE)
+    return _agent
 
 
 def agent(obs_dict: dict) -> list[int]:
