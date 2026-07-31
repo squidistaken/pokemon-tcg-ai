@@ -173,16 +173,30 @@ def build_deck_sampler(spec: dict[str, Any], seed: int | None = None) -> DeckSam
     """
     Build a :class:`DeckSampler` from a plain, picklable spec dict.
 
-    :param spec: ``{"kind": "fixed", "deck0": [...], "deck1": [...]}`` or
+    :param spec: ``{"kind": "fixed", "deck0": [...], "deck1": [...]}``,
         ``{"kind": "pool", "decks": [[...], ...], "matchup": ..., "mode": ...,
-        "mirror_prob": ..., "weights": [...]}`` (the last two optional).
-    :param seed: Seed forwarded to the pool sampler (ignored for fixed).
+        "mirror_prob": ..., "weights": [...]}`` (the last two optional), or
+        ``{"kind": "curriculum", "decks": [[...], ...], "archetypes": ...,
+        "handles": ...}``.
+    :param seed: Seed forwarded to the pool and curriculum samplers (ignored
+        for fixed).
     :return: A constructed deck sampler.
     :raises ValueError: If ``spec["kind"]`` is unknown.
     """
     kind = spec.get("kind")
     if kind == "fixed":
         return FixedDeckSampler(spec["deck0"], spec["deck1"])
+    if kind == "curriculum":
+        # Imported here rather than at module scope: the curriculum sampler
+        # pulls in torch, and this module is otherwise dependency-free.
+        from .curriculum_deck_sampler import CurriculumDeckSampler
+
+        return CurriculumDeckSampler(
+            decks=spec["decks"],
+            archetypes=spec["archetypes"],
+            handles=spec["handles"],
+            seed=seed,
+        )
     if kind == "pool":
         return PoolDeckSampler(
             decks=spec["decks"],

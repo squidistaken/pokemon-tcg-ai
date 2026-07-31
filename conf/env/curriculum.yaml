@@ -1,0 +1,21 @@
+# Prioritized Level Replay over deck-archetype matchups, on the tournament corpus.
+#
+# Usage:
+#   python -m src.train agent=ppo env=curriculum train=ppo_selfplay
+#
+# Inherits multideck (which turns the deck pool on and holds out 20% of the
+# corpus for evaluation) and enables the curriculum on top. Instead of drawing
+# both decks uniformly, each episode's matchup is drawn from a distribution the
+# learner maintains from critic residuals, concentrating training on the
+# matchups it still misjudges. Pair with train=ppo_selfplay so the opponent
+# axis is prioritized too: a hard matchup against an obsolete snapshot is still
+# a trivial win, and its score would then reflect opponent weakness rather than
+# matchup difficulty.
+#
+# See docs/research/curriculum-design.md.
+defaults:
+  - multideck
+  - _self_
+
+curriculum:
+  enabled: true

@@ -1,0 +1,332 @@
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+import torch
+from omegaconf import DictConfig
+from tensordict import TensorDict
+
+from src.env.archetype_index import ArchetypeIndex
+from src.env.curriculum_deck_sampler import NO_LEVEL
+from src.env.curriculum_handles import CurriculumHandles
+from src.env.level_buffer import LevelBuffer
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _OpenEpisode:
+    """
+    Partial episode carried across batch boundaries for one collector row.
+
+    Episodes here run far longer than a rollout, so most batches end mid-game.
+    Committing what a batch happens to contain would make the visit count
+    measure batches rather than episodes, and the maturity threshold would
+    then be counting the wrong thing.
+
+    :param level_id: Matchup this episode is being played on.
+    :param residual_sum: Sum of critic residuals seen so far.
+    :param steps: Number of steps contributing to ``residual_sum``.
+    """
+
+    level_id: int = NO_LEVEL
+    residual_sum: float = 0.0
+    steps: int = 0
+
+    def reset(self) -> None:
+        """
+        Clear the accumulator for the next episode.
+        """
+        self.level_id = NO_LEVEL
+        self.residual_sum = 0.0
+        self.steps = 0
+
+
+class Curriculum:
+    """
+    Learner-side owner of the level curriculum.
+
+    Holds the :class:`~src.env.level_buffer.LevelBuffer`, consumes each
+    collected batch after advantage estimation, and republishes the resulting
+    sampling distribution to the environment workers.
+
+    Scoring lives here rather than in the workers because the signal is a
+    critic residual, which the environments cannot compute. The workers only
+    need the conclusion, which reaches them through
+    :class:`~src.env.curriculum_handles.CurriculumHandles`. That asymmetry is
+    specific to the level curriculum: opponent selection is driven by terminal
+    rewards the environment already sees, so it stays worker-local and needs no
+    channel at all.
+    """
+
+    def __init__(
+            self,
+            archetypes: ArchetypeIndex,
+            handles: CurriculumHandles,
+            buffer: LevelBuffer,
+            num_workers: int,
+            anchor_only_scoring: bool = False,
+    ) -> None:
+        """
+        :param archetypes: Grouping of the deck pool into archetypes.
+        :param handles: Shared channel the distribution is published to.
+        :param buffer: Level buffer to score into.
+        :param num_workers: Collector rows, one accumulator each.
+        :param anchor_only_scoring: Score only episodes played against the
+            anchor opponent. Off by default: it removes the drift that a
+            strengthening league induces in level scores, at the cost of
+            discarding most episodes' scoring signal. Enable only if the
+            logged diagnostic shows that drift is material.
+        """
+        self._archetypes = archetypes
+        self._handles = handles
+        self._buffer = buffer
+        self._anchor_only_scoring = anchor_only_scoring
+        self._open = [_OpenEpisode() for _ in range(num_workers)]
+        self._buffer.prefill(range(archetypes.pair_count))
+        self.publish()
+
+    @property
+    def buffer(self) -> LevelBuffer:
+        """
+        :return: The level buffer being scored into.
+        """
+        return self._buffer
+
+    @property
+    def archetypes(self) -> ArchetypeIndex:
+        """
+        :return: The archetype grouping levels are drawn from.
+        """
+        return self._archetypes
+
+    @property
+    def handles(self) -> CurriculumHandles:
+        """
+        :return: The shared channel handed to the environment factories.
+        """
+        return self._handles
+
+    def observe(self, data: TensorDict) -> None:
+        """
+        Score every episode that finished inside a collected batch.
+
+        Expects the batch *after* advantage estimation, so ``value_target`` and
+        ``state_value`` are present. Reads the raw pair rather than
+        ``advantage`` deliberately: with ``average_gae`` enabled the advantages
+        are standardized per batch, which would make the score a batch-relative
+        quantity rather than a measure of critic bias.
+
+        :param data: Collected batch shaped ``(workers, time)``.
+        :raises KeyError: If advantage estimation has not been run on ``data``.
+        """
+        for key in ("value_target", "state_value"):
+            if key not in data:
+                raise KeyError(
+                    f"{key!r} missing; run the advantage module before observe()"
+                )
+        rows, steps = data.batch_size[0], data.batch_size[1]
+        levels = data["level_id"].reshape(rows, steps)
+        residuals = (data["value_target"] - data["state_value"]).reshape(rows, steps)
+        done = data["next", "done"].reshape(rows, steps)
+        # Segment on `done` but decide outcomes on `terminated`: a run cut off
+        # by the engine's selection cap ends the episode without producing a
+        # result, and recording its zero reward would enter a phantom draw into
+        # the matchup matrix.
+        terminated = data["next", "terminated"].reshape(rows, steps)
+        rewards = data["next", "reward"].reshape(rows, steps)
+        anchors = data["opponent_is_anchor"].reshape(rows, steps)
+
+        for row in range(rows):
+            self._observe_row(
+                self._open[row],
+                levels[row],
+                residuals[row],
+                done[row],
+                terminated[row],
+                rewards[row],
+                anchors[row],
+            )
+
+    def publish(self) -> None:
+        """
+        Recompute the sampling distribution and hand it to the workers.
+        """
+        distribution = self._buffer.distribution()
+        if distribution.size == 0:
+            return
+        self._handles.publish(
+            torch.from_numpy(self._buffer.pair_ids()),
+            torch.from_numpy(np.ascontiguousarray(distribution, dtype=np.float32)),
+        )
+
+    def metrics(self) -> dict[str, float]:
+        """
+        Curriculum statistics for the training callbacks.
+
+        :return: Buffer counters, plus the share of episodes played against the
+            anchor, which is the diagnostic for whether league drift is
+            contaminating level scores.
+        """
+        return self._buffer.stats()
+
+    def save_state(self, path: str | Path) -> None:
+        """
+        Write the buffer's entries to disk.
+
+        Deck selection needs win/loss tallies over a window of training, which
+        a single end-of-run total cannot provide, so these are dumped
+        periodically and differenced afterwards.
+
+        :param path: Destination file.
+        """
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "archetypes": list(self._archetypes.names),
+            "buffer": self._buffer.state_dict(),
+        }
+        staging = destination.with_suffix(destination.suffix + ".tmp")
+        torch.save(state, staging)
+        staging.replace(destination)
+        logger.debug("Wrote curriculum state to %s", destination)
+
+    def _observe_row(
+            self,
+            accumulator: _OpenEpisode,
+            levels: torch.Tensor,
+            residuals: torch.Tensor,
+            done: torch.Tensor,
+            terminated: torch.Tensor,
+            rewards: torch.Tensor,
+            anchors: torch.Tensor,
+    ) -> None:
+        """
+        Fold one collector row into the buffer, committing at episode ends.
+
+        :param accumulator: This row's carried partial episode.
+        :param levels: Matchup identifier per step.
+        :param residuals: Critic residual per step.
+        :param done: Episode-end flag per step.
+        :param terminated: Natural-termination flag per step.
+        :param rewards: Reward per step.
+        :param anchors: Whether the anchor opponent played, per step.
+        """
+        start = 0
+        for end in torch.nonzero(done).flatten().tolist():
+            self._extend(accumulator, levels, residuals, start, end + 1)
+            outcome = (
+                self._outcome(float(rewards[end].item()))
+                if bool(terminated[end].item()) and bool(anchors[end].item())
+                else None
+            )
+            scored = not self._anchor_only_scoring or bool(anchors[end].item())
+            if accumulator.steps > 0 and accumulator.level_id != NO_LEVEL and scored:
+                self._buffer.commit(
+                    accumulator.level_id,
+                    accumulator.residual_sum / accumulator.steps,
+                    outcome,
+                )
+            accumulator.reset()
+            start = end + 1
+        self._extend(accumulator, levels, residuals, start, levels.shape[0])
+
+    @staticmethod
+    def _extend(
+            accumulator: _OpenEpisode,
+            levels: torch.Tensor,
+            residuals: torch.Tensor,
+            start: int,
+            end: int,
+    ) -> None:
+        """
+        Add a run of steps to a row's open episode.
+
+        :param accumulator: Accumulator to extend.
+        :param levels: Matchup identifier per step.
+        :param residuals: Critic residual per step.
+        :param start: First step index, inclusive.
+        :param end: Last step index, exclusive.
+        """
+        if end <= start:
+            return
+        if accumulator.steps == 0:
+            accumulator.level_id = int(levels[start].item())
+        accumulator.residual_sum += float(residuals[start:end].sum().item())
+        accumulator.steps += end - start
+
+    @staticmethod
+    def _outcome(reward: float) -> float:
+        """
+        Map a terminal reward to a win fraction.
+
+        :param reward: Terminal reward from the agent's perspective.
+        :return: 1.0 for a win, 0.0 for a loss, 0.5 for a draw.
+        """
+        if reward > 0.0:
+            return 1.0
+        if reward < 0.0:
+            return 0.0
+        return 0.5
+
+
+def build_curriculum(cfg: DictConfig) -> Curriculum | None:
+    """
+    Construct the level curriculum described by ``cfg.env.curriculum``.
+
+    Returns None when the curriculum is disabled, which leaves the environments
+    on whichever deck sampler the config already selected.
+
+    :param cfg: Hydra configuration with ``env`` and top-level ``seed``.
+    :return: A curriculum, or None when disabled.
+    :raises ValueError: If enabled without a deck pool, under a worker start
+        method that cannot share memory, or with a capacity below the number of
+        matchups the corpus produces.
+    """
+    settings = cfg.env.get("curriculum")
+    if not settings or not settings.get("enabled", False):
+        return None
+    if not cfg.env.get("deck_pool"):
+        raise ValueError(
+            "env.curriculum.enabled requires env.deck_pool: the curriculum scores "
+            "archetype matchups, and a fixed deck0/deck1 pair has only one."
+        )
+    CurriculumHandles.require_shared_start_method(str(cfg.env.mp_start_method))
+
+    # Deferred: env_factory imports from src.training, so a module-level import
+    # here would close a cycle.
+    from src.training.env_factory import load_deck_pool
+
+    # The train split only: the held-out decks exist to measure generalization,
+    # so scoring matchups over them would train on the evaluation set.
+    _decks, paths = load_deck_pool(cfg, deck_split="train")
+    archetypes = ArchetypeIndex.from_paths(paths)
+    capacity = int(settings.get("capacity", 2000))
+    if archetypes.pair_count > capacity:
+        raise ValueError(
+            f"the corpus yields {archetypes.count} archetypes and therefore "
+            f"{archetypes.pair_count} matchups, above env.curriculum.capacity="
+            f"{capacity}. Raise the capacity, or group the corpus more coarsely; "
+            f"silently covering part of the level space would bias the curriculum."
+        )
+    buffer = LevelBuffer(
+        capacity=capacity,
+        score_temperature=float(settings.get("score_temperature", 0.9)),
+        staleness_coefficient=float(settings.get("staleness_coefficient", 0.4)),
+        min_visits=int(settings.get("min_visits", 5)),
+        seed=int(cfg.seed),
+    )
+    logger.info(
+        "Level curriculum over %d archetypes (%d matchups), capacity %d",
+        archetypes.count,
+        archetypes.pair_count,
+        capacity,
+    )
+    return Curriculum(
+        archetypes=archetypes,
+        handles=CurriculumHandles.allocate(capacity),
+        buffer=buffer,
+        num_workers=int(cfg.env.num_workers),
+        anchor_only_scoring=bool(settings.get("anchor_only_scoring", False)),
+    )

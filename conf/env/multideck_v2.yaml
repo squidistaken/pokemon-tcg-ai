@@ -1,0 +1,102 @@
+# Merged deck corpus (decks/ + decks_v2/), restricted to archetypes with at
+# least 15 lists: 37 archetypes, 1759 decks.
+#
+# Why both roots: the two corpora are different tournament snapshots that share
+# archetype names but almost no individual lists (14 of 2071 decks overlap by
+# content hash). Pointing the pool at both is lossless -- ArchetypeIndex groups
+# by folder *name*, so same-named folders across roots merge into one
+# archetype. Extracting one over the other would instead silently replace 143
+# same-named files that hold different decks.
+#
+# Why the >=15 filter: the curriculum's level space is archetype *pairs*, so it
+# grows with the square of the archetype count while the episode budget stays
+# fixed. All 104 archetypes give 10,816 matchups, or ~1.4 episodes each at 2M
+# frames -- far too few for a level's mean-residual score to mean anything. The
+# threshold trades the long tail of rarely-played archetypes (keeping 1759 of
+# 2071 decks) for 1369 matchups at ~11 episodes each, where scores are averages
+# over enough games to rank on.
+#
+# Usage:
+#   python -m src.train agent=ppo env=multideck_v2 train=ppo_selfplay
+defaults:
+  - default
+  - _self_
+
+deck_matchup: independent
+eval_deck_matchup: mirror
+deck_sampling: uniform
+deck_holdout_frac: 0.2
+
+deck_pool:
+  - decks/alakazam-dudunsparce
+  - decks_v2/alakazam-dudunsparce
+  - decks/basic-box
+  - decks_v2/basic-box
+  - decks/ceruledge
+  - decks_v2/ceruledge
+  - decks/clefairy-ogerpon
+  - decks_v2/clefairy-ogerpon
+  - decks/crustle
+  - decks_v2/crustle
+  - decks/cynthias-garchomp
+  - decks_v2/cynthias-garchomp
+  - decks/decidueye
+  - decks_v2/decidueye
+  - decks/diancie-dusknoir
+  - decks_v2/diancie-dusknoir
+  - decks/dragapult
+  - decks_v2/dragapult
+  - decks/dragapult-blaziken
+  - decks_v2/dragapult-blaziken
+  - decks/dragapult-dudunsparce
+  - decks_v2/dragapult-dudunsparce
+  - decks/dragapult-dusknoir
+  - decks_v2/dragapult-dusknoir
+  - decks/ethans-typhlosion
+  - decks_v2/ethans-typhlosion
+  - decks/festival-lead
+  - decks_v2/festival-lead
+  - decks_v2/flareon-noctowl
+  - decks/greninja
+  - decks_v2/greninja
+  - decks/grimmsnarl-froslass
+  - decks_v2/grimmsnarl-froslass
+  - decks/hops-trevenant
+  - decks_v2/hops-trevenant
+  - decks_v2/hydreigon
+  - decks/kangaskhan-bouffalant
+  - decks_v2/kangaskhan-bouffalant
+  - decks/lopunny-dudunsparce
+  - decks_v2/lopunny-dudunsparce
+  - decks/lucario-hariyama
+  - decks_v2/lucario-hariyama
+  - decks/mega-lucario
+  - decks_v2/mega-lucario
+  - decks/mega-starmie
+  - decks_v2/mega-starmie
+  - decks/mega-venusaur
+  - decks_v2/mega-venusaur
+  - decks/ns-zoroark
+  - decks_v2/ns-zoroark
+  - decks/ogerpon-meganium-arboliva
+  - decks_v2/ogerpon-meganium-arboliva
+  - decks/ogerpon-meganium-hydrapple
+  - decks_v2/ogerpon-meganium-hydrapple
+  - decks/okidogi-barbaracle
+  - decks_v2/okidogi-barbaracle
+  - decks/other
+  - decks_v2/other
+  - decks/raging-bolt-ogerpon
+  - decks_v2/raging-bolt-ogerpon
+  - decks/rockets-honchkrow
+  - decks_v2/rockets-honchkrow
+  - decks/rockets-mewtwo
+  - decks_v2/rockets-mewtwo
+  - decks/slowking
+  - decks_v2/slowking
+  - decks/starmie-froslass
+  - decks_v2/starmie-froslass
+  - decks/stevens-metagross
+  - decks_v2/stevens-metagross
+  - decks/ursaluna-lunatone
+  - decks_v2/ursaluna-lunatone

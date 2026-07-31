@@ -41,6 +41,7 @@ class Evaluator:
             max_steps: int = 2000,
             device: torch.device | str = "cpu",
             deterministic: bool = True,
+            name: str = "eval",
     ) -> None:
         """
         :param env_factory: Builds the evaluation environment; called once and
@@ -53,13 +54,24 @@ class Evaluator:
             on CPU, so observations are moved across per step.
         :param deterministic: Take the distribution's mode instead of sampling
             from it. Defaults to True for a low-variance progress signal.
+        :param name: Label identifying which reference opponent this evaluator
+            scores against, used in its log line so several evaluators running
+            side by side stay distinguishable.
         """
         self._env_factory = env_factory
         self._n_episodes = n_episodes
         self._max_steps = max_steps
         self._device = torch.device(device)
         self._deterministic = deterministic
+        self._name = name
         self._env: EnvBase | None = None
+
+    @property
+    def name(self) -> str:
+        """
+        :return: Label identifying this evaluator's reference opponent.
+        """
+        return self._name
 
     def _get_env(self) -> EnvBase:
         """
@@ -129,7 +141,8 @@ class Evaluator:
                 self._n_episodes,
             )
         logger.info(
-            "Evaluation over %d terminated episodes: win_rate=%.3f draw_rate=%.3f",
+            "Evaluation [%s] over %d terminated episodes: win_rate=%.3f draw_rate=%.3f",
+            self._name,
             episodes,
             metrics["win_rate"],
             metrics["draw_rate"],

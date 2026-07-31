@@ -4,6 +4,7 @@ from pathlib import Path
 
 import torch
 from tensordict import TensorDict
+from torchrl.data import Composite
 
 from cg.api import AreaType, OptionType
 from src.env.card_database import CardDatabase
@@ -110,12 +111,21 @@ def test_fixture_observations_match_spec() -> None:
         "deck_search", "yes_no", "attack_option", "energy_select", "terminal",
     }
     assert expected_cases.issubset(set(fixtures.keys()))
+    # The fixtures are the encoder handoff contract, so they carry the encoded
+    # observation and the mask derived from it, not the env's own bookkeeping
+    # keys (level_id, opponent_is_anchor), which no model consumes. Checking
+    # against the full composite would make every env-side key a reason to
+    # regenerate committed fixtures.
+    fixture_spec = Composite(
+        observation=env.observation_spec["observation"],
+        action_mask=env.observation_spec["action_mask"],
+    )
     # `fixtures` is a TensorDict, not a dict: iterating it directly walks the (empty)
     # batch dimension instead of the keys, so `.keys()` is required here and Ruff's
     # "remove .keys()" simplification must be suppressed.
     for case in fixtures.keys():  # noqa: SIM118
         case_td = fixtures[case]
-        assert env.observation_spec.is_in(case_td.select("observation", "action_mask")), (
+        assert fixture_spec.is_in(case_td.select("observation", "action_mask")), (
             f"fixture case '{case}' does not match the observation spec"
         )
     env.close()

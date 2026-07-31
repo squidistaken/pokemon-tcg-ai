@@ -1,0 +1,42 @@
+# Prioritized Level Replay over the merged, archetype-filtered corpus.
+#
+# Inherits multideck_v2 (both deck roots, archetypes with >=15 lists, 20% of
+# the lists held out for evaluation) and enables the curriculum on top.
+#
+# The settings below are chosen against a ~2M-frame budget (~15,000 episodes)
+# over 37 archetypes = 1369 matchups, i.e. ~11 episodes per matchup. The
+# governing constraint is that this is a *tournament* agent: concentrating hard
+# on a few matchups would raise mean learning progress while leaving the policy
+# fragile against the rest of the field, so the sampler is deliberately kept
+# less greedy than the PLR paper's Procgen settings.
+#
+# Usage:
+#   python -m src.train agent=ppo env=curriculum_v2 train=ppo_selfplay
+#
+# See docs/research/curriculum-design.md.
+defaults:
+  - multideck_v2
+  - _self_
+
+curriculum:
+  enabled: true
+  # Episodes before a level's score is trusted. Every matchup below this floor
+  # scores `inf` and so outranks every measured one, which is what drives
+  # initial coverage -- but it also means the buffer is still filling rather
+  # than prioritizing until the floor is cleared across the space. At 1369
+  # matchups that costs 1369*3 ~ 4,100 episodes, about 27% of the run, leaving
+  # the remainder to actually exploit the scores. Raising this to 5 would push
+  # it past 45%.
+  min_visits: 3
+  # Rank-distribution temperature; the sampler draws proportional to
+  # (1/rank)^(1/T). At 0.9 the top decile of matchups takes ~6x its uniform
+  # share while the bottom half still receives ~19% of episodes, so no matchup
+  # is written off permanently and a level whose score later rises can be
+  # promoted back. Greedier settings (0.7 -> effective sample size ~13 of 1369)
+  # would train on ~1% of the field.
+  score_temperature: 0.9
+  # Weight of the staleness term. Below the 0.4 used on the larger level space:
+  # with ~11 episodes per matchup here, levels are revisited often enough that
+  # less of the budget needs reserving for recovering neglected ones, so it is
+  # better spent on prioritization.
+  staleness_coefficient: 0.3

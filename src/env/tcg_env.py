@@ -9,6 +9,7 @@ from torchrl.envs import EnvBase
 from cg.api import Observation, SelectData, State
 
 from .battle_handle import BattleHandle
+from .curriculum_deck_sampler import NO_LEVEL
 from .deck_sampler import DeckSampler, FixedDeckSampler
 from .observation_encoder import ObservationEncoder
 from .random_opponent import RandomOpponent
@@ -106,10 +107,20 @@ class TCGEnv(EnvBase):
         self._selection_count = 0
         self._truncate_flag = False
 
+        self._level_id = NO_LEVEL
+        self._opponent_is_anchor = True
+
         n_actions = max_options + 1
+        # ``level_id`` and ``opponent_is_anchor`` sit beside the observation
+        # rather than inside it: they exist so the learner can attribute each
+        # step back to the curriculum level and opponent that produced it, and
+        # the model never reads them (it consumes only the keys named in its
+        # backbone's ``in_keys``). Both are constant across an episode.
         self.observation_spec = Composite(
             observation=self._encoder.spec(),
             action_mask=Binary(n=n_actions, dtype=torch.bool),
+            level_id=Unbounded(shape=(1,), dtype=torch.int64),
+            opponent_is_anchor=Binary(1, dtype=torch.bool),
         )
         self.action_spec = Categorical(n_actions, dtype=torch.int64)
         self.reward_spec = Unbounded(shape=(1,), dtype=torch.float32)
@@ -192,6 +203,12 @@ class TCGEnv(EnvBase):
             if self._steps_since_switch >= self._deck_switch_steps:
                 self._deck0, self._deck1 = self._deck_sampler.sample()
                 self._steps_since_switch = 0
+                # Only meaningful under a curriculum sampler; every other
+                # sampler leaves the level at NO_LEVEL, which the learner skips.
+                self._level_id = int(getattr(self._deck_sampler, "level_id", NO_LEVEL))
+            self._opponent_is_anchor = bool(
+                getattr(self._opponent, "active_is_anchor", True)
+            )
             observation = self._handle.start(self._deck0, self._deck1)
             observation = self._advance_to_agent(observation)
             if not self._game_over(observation) and not self._truncate_flag:
@@ -232,6 +249,8 @@ class TCGEnv(EnvBase):
         terminated = self._game_over(observation)
         truncated = self._truncate_flag and not terminated
         reward = self._terminal_reward(observation) if terminated else 0.0
+        if terminated:
+            self._report_outcome(reward)
         out = self._build_obs_tensordict()
         self._set_step_keys(
             out, reward=reward, terminated=terminated, truncated=truncated
@@ -259,6 +278,22 @@ class TCGEnv(EnvBase):
         """
         self._handle.finish()
         super().close(raise_if_closed=raise_if_closed)
+
+    def _report_outcome(self, reward: float) -> None:
+        """
+        Tell the opponent policy how the finished battle went, if it cares.
+
+        Leagues that weight their members by strength (e.g.
+        :class:`~src.env.pfsp_opponent_pool.PFSPOpponentPool`) need the result
+        of each episode, and the terminal reward is only available here. Other
+        opponents do not expose the hook and are left untouched, exactly as
+        with ``on_reset``.
+
+        :param reward: Terminal reward from the agent's perspective.
+        """
+        record_outcome = getattr(self._opponent, "record_outcome", None)
+        if record_outcome is not None:
+            record_outcome(reward)
 
     def _advance_to_agent(self, observation: Observation) -> Observation:
         """
@@ -337,6 +372,12 @@ class TCGEnv(EnvBase):
             {
                 "observation": obs.to(self.device),
                 "action_mask": self._build_mask().to(self.device),
+                "level_id": torch.tensor(
+                    [self._level_id], dtype=torch.int64, device=self.device
+                ),
+                "opponent_is_anchor": torch.tensor(
+                    [self._opponent_is_anchor], dtype=torch.bool, device=self.device
+                ),
             },
             batch_size=torch.Size(()),
         )

@@ -14,6 +14,7 @@ from tqdm import tqdm
 from src.training.base_trainer import BaseTrainer
 from src.training.callbacks import CallbackList, TrainingCallback
 from src.training.evaluator import Evaluator
+from src.training.multi_evaluator import MultiEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class Trainer(BaseTrainer):
             serial_for_single: bool = True,
             callbacks: Iterable[TrainingCallback] | None = None,
             run_config: Mapping[str, Any] | None = None,
-            evaluator: Evaluator | None = None,
+            evaluator: Evaluator | MultiEvaluator | None = None,
             eval_interval: int = 0,
     ) -> None:
         """
@@ -90,9 +91,11 @@ class Trainer(BaseTrainer):
             end. None attaches nothing, leaving console logging as the only sink.
         :param run_config: Opaque run metadata (in practice the resolved Hydra
             config) forwarded verbatim to ``on_train_start``; never read here.
-        :param evaluator: Scores the policy against a fixed reference opponent
-            every ``eval_interval`` frames, reporting through ``on_eval_end``.
-            None skips evaluation entirely. Needed under self-play, where the
+        :param evaluator: Scores the policy against one fixed reference opponent
+            (:class:`~src.training.evaluator.Evaluator`) or several
+            (:class:`~src.training.multi_evaluator.MultiEvaluator`) every
+            ``eval_interval`` frames, reporting through ``on_eval_end``. None
+            skips evaluation entirely. Needed under self-play, where the
             collected win-rate is pinned near 0.5 by construction.
         :param eval_interval: Frames between evaluations; ``0`` disables them
             even when an evaluator is supplied.

@@ -7,16 +7,19 @@ import torch
 from dotenv import load_dotenv
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
-from torchrl.data import Categorical
+from torchrl.data import Categorical, Composite
 
 from src.policies.ppo_actor import build_actor_critic
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training import (
+    CurriculumStateCallback,
     Evaluator,
+    MultiEvaluator,
     PPOTrainer,
     SnapshotCallback,
     Trainer,
     TrainingCallback,
+    build_curriculum,
     build_eval_opponent_factory,
     build_opponent_factory,
     make_env_factories,
@@ -131,11 +134,27 @@ def _build_ppo_trainer(
             ),
         ]
 
+    curriculum = build_curriculum(cfg)
+    if curriculum is not None:
+        callbacks = [
+            *callbacks,
+            CurriculumStateCallback(
+                curriculum=curriculum,
+                state_dir=checkpoint_dir.parent / "curriculum",
+                interval=int(
+                    cfg.env.curriculum.get("state_interval")
+                    or cfg.collector.frames_per_batch * 50
+                ),
+            ),
+        ]
+
     frames_per_batch = int(
         cfg.agent.get("frames_per_batch", cfg.collector.frames_per_batch)
     )
     return PPOTrainer(
-        env_factories=make_env_factories(cfg, opponent_factory=opponent_factory),
+        env_factories=make_env_factories(
+            cfg, opponent_factory=opponent_factory, curriculum=curriculum
+        ),
         actor_critic=actor_critic,
         action_spec=action_spec,
         frames_per_batch=frames_per_batch,
@@ -165,8 +184,9 @@ def _build_ppo_trainer(
         reward_scaling=cfg.agent.get("reward_scaling", 1.0),
         callbacks=callbacks,
         run_config=run_config,
-        evaluator=_build_evaluator(cfg),
+        evaluator=_build_evaluator(cfg, obs_spec, action_spec, checkpoint_dir),
         eval_interval=int(cfg.train.get("eval_interval", 0)),
+        curriculum=curriculum,
     )
 
 
@@ -190,29 +210,86 @@ def _resolve_checkpoint_dir(cfg: DictConfig) -> Path:
     return Path(HydraConfig.get().runtime.output_dir) / configured
 
 
-def _build_evaluator(cfg: DictConfig) -> Evaluator | None:
+def _build_evaluator(
+    cfg: DictConfig,
+    obs_spec: Composite | None = None,
+    action_spec: Categorical | None = None,
+    checkpoint_dir: Path | None = None,
+) -> Evaluator | MultiEvaluator | None:
     """
-    Build the fixed-opponent evaluator selected by ``cfg.train``.
+    Build the fixed-opponent evaluator(s) selected by ``cfg.train``.
 
     The evaluation environment is given its opponent explicitly, from
-    ``cfg.train.eval_opponent``, rather than inheriting whichever opponent
-    :class:`~src.env.tcg_env.TCGEnv` happens to default to. Under self-play the
-    collected ``win_rate`` is pinned near 0.5 by construction, so this fixed
-    reference is what makes the run's progress readable.
+    ``cfg.train.eval_opponents`` (or the singular ``eval_opponent``), rather
+    than inheriting whichever opponent :class:`~src.env.tcg_env.TCGEnv` happens
+    to default to. Under self-play the collected ``win_rate`` is pinned near
+    0.5 by construction, so this fixed reference is what makes the run's
+    progress readable.
+
+    With several opponents configured the result is a
+    :class:`~src.training.multi_evaluator.MultiEvaluator`, whose metrics are
+    namespaced per opponent.
 
     :param cfg: Hydra configuration with a ``train`` section.
+    :param obs_spec: Environment observation spec, forwarded to
+        :func:`~src.training.self_play.build_eval_opponent_factory` for
+        snapshot-backed opponents.
+    :param action_spec: Environment action spec, same.
+    :param checkpoint_dir: Snapshot directory, forwarded for
+        ``first_snapshot``.
     :return: An evaluator, or None when ``eval_interval`` disables evaluation.
     """
     if int(cfg.train.get("eval_interval", 0)) <= 0:
         return None
-    return Evaluator(
-        env_factory=make_env_factories(
-            cfg, opponent_factory=build_eval_opponent_factory(cfg), deck_split="eval"
-        )[0],
-        n_episodes=int(cfg.train.get("eval_episodes", 100)),
-        device=cfg.agent.get("device", "cpu"),
-        deterministic=bool(cfg.train.get("eval_deterministic", True)),
-    )
+    names = _eval_opponent_names(cfg)
+    evaluators = [
+        Evaluator(
+            env_factory=make_env_factories(
+                cfg,
+                opponent_factory=build_eval_opponent_factory(
+                    cfg, obs_spec, action_spec, checkpoint_dir, opponent=name
+                ),
+                deck_split="eval",
+            )[0],
+            n_episodes=int(cfg.train.get("eval_episodes", 100)),
+            device=cfg.agent.get("device", "cpu"),
+            deterministic=bool(cfg.train.get("eval_deterministic", True)),
+            name=_eval_label(name),
+        )
+        for name in names
+    ]
+    return evaluators[0] if len(evaluators) == 1 else MultiEvaluator(evaluators)
+
+
+def _eval_opponent_names(cfg: DictConfig) -> list[str]:
+    """
+    Resolve which reference opponents the evaluator scores against.
+
+    ``train.eval_opponents`` (plural, a list) takes precedence when set, so a
+    run can be scored against several references at once — typically a frozen
+    snapshot, which keeps discriminating late in training, alongside random,
+    which stays comparable across runs. Falls back to the singular
+    ``train.eval_opponent``.
+
+    :param cfg: Hydra configuration with a ``train`` section.
+    :return: Opponent names, in the order they should be evaluated.
+    """
+    configured = cfg.train.get("eval_opponents")
+    if configured:
+        return [str(name) for name in configured]
+    return [str(cfg.train.get("eval_opponent", "random"))]
+
+
+def _eval_label(opponent: str) -> str:
+    """
+    Shorten an opponent spec into a metric-key-friendly label.
+
+    :param opponent: Opponent name or checkpoint path.
+    :return: Label used to namespace this evaluator's metrics.
+    """
+    if opponent.endswith(".pt"):
+        return Path(opponent).stem
+    return opponent
 
 
 if __name__ == "__main__":
