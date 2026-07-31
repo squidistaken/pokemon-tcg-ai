@@ -105,7 +105,7 @@ scripts/                     Standalone dev scripts (not part of the training en
 decks/                       Example deck CSVs
 docs/                        Design docs (torchrl_environment.md, game.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
-checkpoint/                  Committed Kaggle submission checkpoint (model.pt + model_config.yaml)
+checkpoint/                  Inference model config; generate model.pt from a trained run before submission
 main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
 slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts
 ```
@@ -180,4 +180,3 @@ available as `baseline`, `ppo`, and `ppo_selfplay`.
 GitHub Actions runs linting, type-checking, and tests for pull requests that
 are ready for review. Draft pull requests intentionally skip CI to stay within
 the GitHub Actions free-plan budget.
-

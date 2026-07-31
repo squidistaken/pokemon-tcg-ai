@@ -1,14 +1,20 @@
+from types import SimpleNamespace
+
+import pytest
 import torch
 from omegaconf import OmegaConf
+from tensordict import TensorDict
+from torch import nn
 from torchrl.envs import TransformedEnv
 from torchrl.envs.transforms import ActionMask
 
+from src.env.battle_handle import BattleHandle
 from src.env.deck import load_deck
 from src.env.structured_observation_encoder import StructuredObservationEncoder
 from src.env.tcg_env import TCGEnv
 from src.policies.greedy_policy_opponent import save_actor_critic
 from src.policies.inference import (
-    SamplingPolicyAgent,
+    InferenceAgent,
     build_inference_specs,
     load_inference_agent,
 )
@@ -33,47 +39,148 @@ def _logits(option_logits: list[float], stop: float) -> torch.Tensor:
     return logits
 
 
-def test_sample_select_picks_only_extreme_logit() -> None:
+def test_sampling_agent_picks_only_extreme_logit() -> None:
     """
     With one logit overwhelming the rest, sampling converges to the argmax
     (a sanity check that probability mass concentrates as expected).
     """
     torch.manual_seed(0)
-    picks = SamplingPolicyAgent.sample_select(
-        _logits([0.0, 0.0, 50.0, 0.0], stop=-50.0),
-        n_options=4,
-        min_count=1,
-        max_count=1,
+    class EmptyEncoder:
+        @staticmethod
+        def encode(*_args) -> TensorDict:
+            return TensorDict({}, batch_size=torch.Size(()))
+
+    class ExtremeActor(nn.Module):
+        @staticmethod
+        def policy_logits(encoded: TensorDict) -> torch.Tensor:
+            del encoded
+            return _logits([0.0, 0.0, 50.0, 0.0], stop=-50.0)
+
+    agent = InferenceAgent(
+        ExtremeActor(), EmptyEncoder(), max_options=MAX_OPTIONS
+    )  # type: ignore[arg-type]
+    observation = SimpleNamespace(
+        select=SimpleNamespace(option=[object()] * 4, minCount=1, maxCount=1),
+        current=SimpleNamespace(yourIndex=0),
     )
-    assert picks == [2]
+
+    assert agent(observation) == [2]  # type: ignore[arg-type]
 
 
-def test_sample_select_respects_min_and_max_counts() -> None:
+def test_sampling_agent_recomputes_logits_for_partial_selects() -> None:
     """
-    Sampling never returns fewer than minCount or more than maxCount picks,
-    and never repeats or picks an out-of-range option, across many draws.
+    A multi-pick is served like training: re-encode and re-run the policy after
+    each pick so the updated already-chosen count can change the next action.
     """
-    torch.manual_seed(1)
-    logits = _logits([1.0, 0.9, 0.8, 0.7], stop=0.5)
-    for _ in range(50):
-        picks = SamplingPolicyAgent.sample_select(logits, n_options=4, min_count=1, max_count=3)
-        assert 1 <= len(picks) <= 3
-        assert len(set(picks)) == len(picks)
-        assert all(0 <= pick < 4 for pick in picks)
+
+    class RecordingEncoder:
+        def __init__(self) -> None:
+            self.counts: list[int] = []
+
+        def encode(self, observation, seat: int, already_chosen_option_count: int) -> TensorDict:
+            del observation, seat
+            self.counts.append(already_chosen_option_count)
+            return TensorDict({}, batch_size=torch.Size(()))
+
+    class PickThenStopActor(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def policy_logits(self, encoded: TensorDict) -> torch.Tensor:
+            del encoded
+            self.calls += 1
+            logits = torch.full((N_ACTIONS,), -1e9)
+            logits[2 if self.calls == 1 else N_ACTIONS - 1] = 1e9
+            return logits
+
+    encoder = RecordingEncoder()
+    actor = PickThenStopActor()
+    agent = InferenceAgent(
+        actor, encoder, max_options=MAX_OPTIONS
+    )  # type: ignore[arg-type]
+    observation = SimpleNamespace(
+        select=SimpleNamespace(option=[object()] * 4, minCount=1, maxCount=3),
+        current=SimpleNamespace(yourIndex=0),
+    )
+
+    assert agent(observation) == [2]  # type: ignore[arg-type]
+    assert encoder.counts == [0, 1]
+    assert actor.calls == 2
 
 
-def test_sample_select_is_stochastic() -> None:
+def test_sampling_agent_is_stochastic() -> None:
     """
     Repeated draws from a close-scoring distribution don't all return the
     same single pick.
     """
     torch.manual_seed(2)
-    logits = _logits([1.0, 0.9], stop=-50.0)
-    picks = {
-        tuple(SamplingPolicyAgent.sample_select(logits, n_options=2, min_count=1, max_count=1))
-        for _ in range(30)
-    }
+    class EmptyEncoder:
+        @staticmethod
+        def encode(*_args) -> TensorDict:
+            return TensorDict({}, batch_size=torch.Size(()))
+
+    class CloseActor(nn.Module):
+        @staticmethod
+        def policy_logits(encoded: TensorDict) -> torch.Tensor:
+            del encoded
+            return _logits([1.0, 0.9], stop=-50.0)
+
+    agent = InferenceAgent(
+        CloseActor(), EmptyEncoder(), max_options=MAX_OPTIONS
+    )  # type: ignore[arg-type]
+    observation = SimpleNamespace(
+        select=SimpleNamespace(option=[object()] * 2, minCount=1, maxCount=1),
+        current=SimpleNamespace(yourIndex=0),
+    )
+    picks = {agent(observation)[0] for _ in range(30)}  # type: ignore[arg-type]
     assert len(picks) > 1
+
+
+def test_sampling_agent_rejects_option_overflow() -> None:
+    """Inference fails clearly rather than truncating the engine option list."""
+
+    class EmptyEncoder:
+        @staticmethod
+        def encode(observation, seat: int, already_chosen_option_count: int) -> TensorDict:
+            del observation, seat, already_chosen_option_count
+            return TensorDict({}, batch_size=torch.Size(()))
+
+    class SmallActor(nn.Module):
+        @staticmethod
+        def policy_logits(encoded: TensorDict) -> torch.Tensor:
+            del encoded
+            return torch.zeros(3)  # two options plus stop
+
+    agent = InferenceAgent(
+        SmallActor(), EmptyEncoder(), max_options=2
+    )  # type: ignore[arg-type]
+    observation = SimpleNamespace(
+        select=SimpleNamespace(option=[object()] * 3, minCount=1, maxCount=1),
+        current=SimpleNamespace(yourIndex=0),
+    )
+
+    with pytest.raises(ValueError, match="offers 3 options"):
+        agent(observation)  # type: ignore[arg-type]
+
+
+def test_structured_encoder_updates_cached_pick_count_only() -> None:
+    """The multi-pick fast path mutates only the count-dependent global field."""
+    handle = BattleHandle()
+    try:
+        observation = handle.start(DECK, DECK)
+    finally:
+        handle.finish()
+    assert observation.current is not None
+    encoder = StructuredObservationEncoder(max_options=MAX_OPTIONS)
+    encoded = encoder.encode(observation, observation.current.yourIndex, 0)
+    globals_before = encoded["globals"].clone()
+
+    assert encoder.update_already_chosen_option_count(encoded, 2)
+
+    expected = globals_before.clone()
+    expected[encoder.ALREADY_CHOSEN_OPTION_COUNT_INDEX] = 2.0
+    assert torch.equal(encoded["globals"], expected)
 
 
 def _run_episode(opponent) -> torch.Tensor:
@@ -107,7 +214,11 @@ def test_sampling_agent_plays_legal_episode(structured_model_cfg, structured_obs
     """
     torch.manual_seed(5)
     actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
-    agent = SamplingPolicyAgent(actor_critic, StructuredObservationEncoder(max_options=MAX_OPTIONS))
+    agent = InferenceAgent(
+        actor_critic,
+        StructuredObservationEncoder(max_options=MAX_OPTIONS),
+        max_options=MAX_OPTIONS,
+    )
     done = _run_episode(agent)
     assert bool(done.any())
 

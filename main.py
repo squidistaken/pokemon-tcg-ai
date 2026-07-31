@@ -1,7 +1,7 @@
 import os
 
 from cg.api import Observation, to_observation_class
-from src.policies.inference import SamplingPolicyAgent, load_inference_agent
+from src.policies.inference import InferenceAgent, load_inference_agent
 
 # Overridable via env var rather than hardcoded: main.py has no CLI args or
 # config file of its own (Kaggle just calls agent(obs_dict) directly), so this
@@ -11,7 +11,7 @@ KAGGLE_AGENT_DIR = os.environ.get("PTCG_KAGGLE_AGENT_DIR", "/kaggle_simulations/
 CHECKPOINT_PATH = os.environ.get("PTCG_CHECKPOINT_PATH", "checkpoint/model.pt")
 MODEL_CONFIG_PATH = os.environ.get("PTCG_MODEL_CONFIG_PATH", "checkpoint/model_config.yaml")
 
-_agent: SamplingPolicyAgent | None = None
+_agent: InferenceAgent | None = None
 
 
 def _resolve_path(file_path: str) -> str:
@@ -43,7 +43,7 @@ def read_deck_csv() -> list[int]:
     return deck
 
 
-def _load_agent() -> SamplingPolicyAgent:
+def _load_agent() -> InferenceAgent:
     """
     Build (once) and return the checkpointed agent used for inference.
 
@@ -52,7 +52,7 @@ def _load_agent() -> SamplingPolicyAgent:
     network and reloading weights on every call would be pure overhead.
 
     Returns:
-        SamplingPolicyAgent: Our submission agent, wrapping the loaded
+        InferenceAgent: Our submission agent, wrapping the loaded
             checkpoint and sampling from its learned distribution.
 
     Raises:

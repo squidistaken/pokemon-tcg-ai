@@ -4,7 +4,6 @@ import torch
 from omegaconf import OmegaConf
 from tensordict import TensorDict
 from torchrl.data import Categorical, Composite
-from torchrl.modules.distributions import MaskedCategorical
 
 from cg.api import Observation
 from src.env.observation_encoder import ObservationEncoder
@@ -34,7 +33,7 @@ def build_inference_specs(
     return obs_spec, encoder, action_spec
 
 
-class SamplingPolicyAgent:
+class InferenceAgent:
     """
     Our Kaggle submission agent: wraps a trained actor-critic and samples
     actions from its learned distribution.
@@ -49,17 +48,23 @@ class SamplingPolicyAgent:
         self,
         actor_critic: ActorCritic,
         encoder: ObservationEncoder,
+        max_options: int,
         device: torch.device | str = "cpu",
     ) -> None:
         """
         :param actor_critic: Trained actor-critic to act with; put into eval
             mode and never updated here.
         :param encoder: Observation encoder matching the one used in training.
+        :param max_options: Option capacity the actor was trained with, not
+            including the synthetic stop action.
         :param device: Device for inference.
         """
+        if max_options < 0:
+            raise ValueError("max_options must be non-negative.")
         self._device = torch.device(device)
         self._actor_critic = actor_critic.to(self._device).eval()
         self._encoder = encoder
+        self._max_options = max_options
 
     @torch.inference_mode()
     def __call__(self, observation: Observation) -> list[int]:
@@ -77,70 +82,112 @@ class SamplingPolicyAgent:
             raise ValueError(
                 "SamplingPolicyAgent requires an observation with current state and select."
             )
+        n_options = len(select.option)
+        min_count = select.minCount
+        max_count = select.maxCount
+        if not 0 <= min_count <= max_count <= n_options:
+            raise ValueError(
+                "Invalid selection bounds: expected "
+                f"0 <= minCount ({min_count}) <= maxCount ({max_count}) "
+                f"<= option count ({n_options})."
+            )
+        if n_options > self._max_options:
+            raise ValueError(
+                f"Selection offers {n_options} options but the checkpoint supports "
+                f"only {self._max_options}; export a checkpoint with a larger "
+                "max_options."
+            )
+        if max_count == 0:
+            return []
+
         seat = state.yourIndex
-        # Match TCGEnv, which nests the encoder output under "observation".
-        encoded = TensorDict(
-            {"observation": self._encoder.encode(observation, seat, 0)},
-            batch_size=torch.Size(()),
-        )
-        # Guarded: on CPU .to() would still walk and copy every leaf for
-        # nothing, on every move.
-        if self._device.type != "cpu":
-            encoded = encoded.to(self._device)
-        logits = self._actor_critic.policy_logits(encoded)
-        return self.sample_select(
-            logits,
-            n_options=len(select.option),
-            min_count=select.minCount,
-            max_count=select.maxCount,
-        )
-
-    @staticmethod
-    def sample_select(
-        logits: torch.Tensor,
-        n_options: int,
-        min_count: int,
-        max_count: int,
-    ) -> list[int]:
-        """
-        Sample option indices from action logits, one pick at a time.
-
-        Options ``0..n_options-1`` map to logits ``0..n_options-1``; the final
-        logit is the synthetic **stop**. At each step, samples a masked
-        categorical over the not-yet-picked options (plus stop, once
-        ``minCount`` picks have been made), stopping when stop is drawn or
-        ``maxCount`` is reached.
-
-        :param logits: Action logits of shape ``(n_actions,)`` where
-            ``n_actions = max_options + 1``.
-        :param n_options: Number of real options offered by the selection.
-        :param min_count: Minimum number of options to pick.
-        :param max_count: Maximum number of options to pick.
-        :return: Chosen option indices (a subset of ``range(n_options)``).
-        """
-        capacity = logits.shape[-1] - 1
-        n_options = min(n_options, capacity)
-        max_count = min(max_count, n_options)
-        stop_index = capacity
-        mask = torch.zeros_like(logits, dtype=torch.bool)
-        mask[:n_options] = True
+        encoded = self._encode_observation(observation, seat, 0)
         picks: list[int] = []
+        stop_index = self._max_options
+        mask = torch.zeros(
+            self._max_options + 1,
+            dtype=torch.bool,
+            device=self._device,
+        )
+        mask[:n_options] = True
         while len(picks) < max_count:
             if len(picks) >= min_count:
                 mask[stop_index] = True
-            chosen = int(MaskedCategorical(logits=logits, mask=mask).sample())
+            chosen = self._sample_action(encoded, mask)
             if chosen == stop_index:
                 break
             picks.append(chosen)
             mask[chosen] = False
+            if len(picks) < max_count:
+                # TCGEnv presents every partial pick as a new policy step. The
+                # policy must therefore see the new count before scoring the
+                # next action. Structured encoding can update its sole
+                # count-dependent field in place; unknown encoders fall back
+                # to a full re-encode.
+                encoded_observation = encoded.get("observation")
+                update_count = getattr(
+                    self._encoder, "update_already_chosen_option_count", None
+                )
+                if update_count is None or not update_count(
+                    encoded_observation, len(picks)
+                ):
+                    encoded = self._encode_observation(
+                        observation, seat, len(picks)
+                    )
         return picks
+
+    def _encode_observation(
+        self,
+        observation: Observation,
+        seat: int,
+        already_chosen_option_count: int,
+    ) -> TensorDict:
+        """Encode and transfer one policy observation."""
+        encoded = TensorDict(
+            {
+                "observation": self._encoder.encode(
+                    observation, seat, already_chosen_option_count
+                )
+            },
+            batch_size=torch.Size(()),
+        )
+        # On CPU, .to() would still walk every leaf on every engine decision.
+        if self._device.type != "cpu":
+            encoded = encoded.to(self._device, non_blocking=True)
+        return encoded
+
+    def _sample_action(
+        self,
+        encoded_observation: TensorDict,
+        mask: torch.Tensor,
+    ) -> int:
+        """
+        Run the policy and sample one legal action for an encoded observation.
+
+        Uses PyTorch directly instead of constructing a TorchRL distribution
+        object for every partial pick. ``mask`` is True for legal actions.
+
+        :param encoded_observation: Model-ready observation TensorDict.
+        :param mask: Bool tensor with the same shape, marking legal actions.
+        :return: Sampled action index.
+        """
+        logits = self._actor_critic.policy_logits(encoded_observation)
+        if logits.ndim != 1 or mask.shape != logits.shape:
+            raise ValueError(
+                f"Expected matching one-dimensional logits/mask, got "
+                f"{tuple(logits.shape)} and {tuple(mask.shape)}."
+            )
+        if not bool(mask.any()):
+            raise ValueError("Cannot sample an action from an empty mask.")
+        probabilities = torch.softmax(logits.masked_fill(~mask, -torch.inf), dim=0)
+        return int(torch.multinomial(probabilities, 1).item())
 
 
 def load_inference_agent(
     checkpoint_path: str | Path,
     model_config_path: str | Path,
     device: torch.device | str = "cpu",
-) -> SamplingPolicyAgent:
+) -> InferenceAgent:
     """
     Rebuild the submission agent from a self-contained checkpoint + config
     pair.
@@ -158,13 +205,25 @@ def load_inference_agent(
     :return: The checkpoint's agent, ready to act.
     """
     model_config = OmegaConf.load(model_config_path)
+    max_options = int(model_config.max_options)
     obs_spec, encoder, action_spec = build_inference_specs(
-        max_options=int(model_config.max_options),
+        max_options=max_options,
         encoder_name=str(model_config.get("encoder", "structured")),
     )
     actor_critic = build_actor_critic(model_config, obs_spec, action_spec)
+    target_device = torch.device(device)
     state_dict = torch.load(
-        Path(checkpoint_path), map_location=device, weights_only=True
+        Path(checkpoint_path),
+        map_location=target_device,
+        weights_only=True,
+        mmap=target_device.type == "cpu",
     )
-    actor_critic.load_state_dict(state_dict)
-    return SamplingPolicyAgent(actor_critic, encoder, device=device)
+    # No optimizer exists in serving, so assigning checkpoint tensors avoids
+    # copying every parameter into the freshly constructed module.
+    actor_critic.load_state_dict(state_dict, assign=True)
+    return InferenceAgent(
+        actor_critic,
+        encoder,
+        max_options=max_options,
+        device=device,
+    )
