@@ -1,5 +1,7 @@
 # Curriculum experiment 01 — PLR vs uniform, single seed
 
+# TODO THIS WILL BE UPDATED WITH NEWER RESULTS
+
 Run 2026-07-31. W&B group `curriculum_ab_20260731_185835`
 (`curriculum-s0` = `efot5bq9`, `uniform-s0` = `v5k2mgpk`).
 

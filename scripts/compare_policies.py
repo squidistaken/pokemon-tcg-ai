@@ -4,20 +4,24 @@ Compare two policies against a shared frozen opponent with held-out decks.
 Evaluates both against the same (opponent checkpoint + held-out opponent deck)
 pairs and reports mean and worst-decile win rate.
 """
-import argparse, json, statistics, sys, torch
+import argparse
+import json
+import statistics
 from pathlib import Path
-from collections.abc import Callable
+
+import torch
 from omegaconf import OmegaConf
 from torchrl.envs import TransformedEnv
 from torchrl.envs.transforms import ActionMask
 from torchrl.envs.utils import ExplorationType, set_exploration_type, step_mdp
+
 from src.env.deck import load_deck, resolve_deck_paths
 from src.env.tcg_env import TCGEnv
 from src.policies.greedy_policy_opponent import load_greedy_opponent
 from tests.conftest import MAX_OPTIONS
 
+
 def _load_policy(checkpoint_path, device="cpu"):
-    from src.training.env_factory import make_encoder
     cfg = OmegaConf.create({
         "seed": 0,
         "model": {
@@ -110,11 +114,11 @@ def main():
     held_out = [load_deck(p) for p in all_paths if Path(p).parent.name != arch_name and p != str(args.agent_deck)]
     print(f"Agent: {arch_name}  |  Held-out opponent decks: {len(held_out)}/{len(all_paths)}  |  Games per pair: {args.episodes}")
 
-    print(f"\n--- Uniform ---")
+    print("\n--- Uniform ---")
     ur = evaluate(uniform_pol, agent_deck, opponent, held_out, args.episodes, args.seed)
     print(f"mean={ur['mean']:.3f}  worst_decile={ur['worst_decile']:.3f}")
 
-    print(f"\n--- Curriculum ---")
+    print("\n--- Curriculum ---")
     cr = evaluate(curriculum_pol, agent_deck, opponent, held_out, args.episodes, args.seed + 10000)
     print(f"mean={cr['mean']:.3f}  worst_decile={cr['worst_decile']:.3f}")
 

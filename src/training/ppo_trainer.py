@@ -20,8 +20,8 @@ from src.policies.ppo_actor import build_ppo_operator
 from src.training.callbacks import TrainingCallback
 from src.training.curriculum import Curriculum
 from src.training.evaluator import Evaluator
-from src.training.multi_evaluator import MultiEvaluator
 from src.training.loss._helpers import _sum_loss_keys
+from src.training.multi_evaluator import MultiEvaluator
 from src.training.trainer import Trainer
 
 logger = logging.getLogger(__name__)

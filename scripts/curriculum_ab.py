@@ -33,7 +33,7 @@ import statistics
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parents[1]
@@ -244,7 +244,7 @@ def main() -> None:
     wandb_group = None
     if not args.no_wandb:
         wandb_group = args.wandb_group or (
-            f"curriculum_ab_{datetime.now():%Y%m%d_%H%M%S}"
+            f"curriculum_ab_{datetime.now(UTC):%Y%m%d_%H%M%S}"
         )
         print(f"W&B group: {wandb_group}", flush=True)
 

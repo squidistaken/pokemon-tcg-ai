@@ -11,7 +11,9 @@ from src.env.observation_encoder import ObservationEncoder
 from src.env.pfsp_opponent_pool import PFSPOpponentPool
 from src.env.random_opponent import RandomOpponent
 from src.env.snapshot_opponent_pool import SnapshotOpponentPool
-from src.policies.greedy_policy_opponent import GreedyPolicyOpponent, load_greedy_opponent
+from src.policies.greedy_policy_opponent import (
+    load_greedy_opponent,
+)
 from src.training.env_factory import OpponentFactory, make_encoder
 
 logger = logging.getLogger(__name__)

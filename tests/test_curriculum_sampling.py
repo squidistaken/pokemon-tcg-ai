@@ -2,6 +2,7 @@ from functools import partial
 
 import pytest
 import torch
+import torch.multiprocessing as torch_mp
 from torchrl.envs import ParallelEnv, TransformedEnv
 from torchrl.envs.transforms import ActionMask
 from torchrl.envs.utils import check_env_specs
@@ -11,8 +12,6 @@ from src.env.curriculum_deck_sampler import NO_LEVEL, CurriculumDeckSampler
 from src.env.curriculum_handles import CurriculumHandles
 from src.env.tcg_env import TCGEnv
 from src.policies.random_masked_policy import RandomMaskedPolicy
-import torch.multiprocessing as torch_mp
-
 from src.training.trainer import Trainer
 from tests.test_tcg_env import DECK
 
@@ -235,6 +234,7 @@ def test_level_updates_reach_running_parallel_workers() -> None:
         )
     finally:
         env.close()
+        torch_mp.set_start_method(previous or "fork", force=True)
 
     assert set(before["level_id"].reshape(-1).tolist()) == {first}
     assert set(after["level_id"].reshape(-1).tolist()) == {second}, (
@@ -269,8 +269,11 @@ def test_curriculum_env_specs_stay_consistent() -> None:
     handles.publish(torch.tensor([index.pair_id(0, 1)]), torch.tensor([1.0]))
     env = make_curriculum_env(index, handles, seed=0)
 
-    check_env_specs(env)
-    env.close()
+    try:
+        check_env_specs(env)
+    finally:
+        env.close()
+        torch_mp.set_start_method(previous or "fork", force=True)
 
 
 def test_rejects_non_fork_start_methods() -> None:
