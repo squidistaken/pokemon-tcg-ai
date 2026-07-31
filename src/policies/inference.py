@@ -36,7 +36,7 @@ def build_inference_specs(
     return obs_spec, encoder, action_spec
 
 
-def load_inference_opponent(
+def load_inference_agent(
         checkpoint_path: str | Path,
         model_config_path: str | Path,
         device: torch.device | str = "cpu",
@@ -44,13 +44,16 @@ def load_inference_opponent(
         generator: torch.Generator | None = None,
 ) -> GreedyPolicyOpponent:
     """
-    Rebuild an opponent from a self-contained checkpoint + config pair.
+    Rebuild the submission agent from a self-contained checkpoint + config
+    pair.
 
     Unlike :func:`~src.policies.greedy_policy_opponent.load_greedy_opponent`
-    (which takes specs from a live training environment), this reads
-    ``max_options``/``encoder`` from ``model_config_path`` itself and derives
-    the specs via :func:`build_inference_specs`, so it needs nothing but the
-    two files on disk. This is the loader used by ``main.py`` and by
+    (which builds a self-play *opponent* from specs taken off a live training
+    environment), this is for instantiating our own agent for Kaggle
+    submission: it reads ``max_options``/``encoder`` from
+    ``model_config_path`` itself and derives the specs via
+    :func:`build_inference_specs`, so it needs nothing but the two files on
+    disk. This is the loader used by ``main.py`` and by
     ``scripts/export_submission_checkpoint.py``.
 
     :param checkpoint_path: Path to a :func:`~src.policies.
@@ -69,7 +72,7 @@ def load_inference_opponent(
         keeps its own, separate default of True.
     :param generator: Optional RNG for reproducible sampling; ignored when
         ``deterministic`` is True.
-    :return: An opponent playing the checkpoint's policy.
+    :return: The checkpoint's agent, ready to act.
     """
     model_config = OmegaConf.load(model_config_path)
     obs_spec, encoder, action_spec = build_inference_specs(

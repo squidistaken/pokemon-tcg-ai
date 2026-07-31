@@ -15,17 +15,17 @@ DECK = load_deck(DECK_PATH)
 
 
 @pytest.fixture(autouse=True)
-def _reset_cached_opponent():
+def _reset_cached_agent():
     """
-    Clear ``main``'s lazily-built opponent singleton around every test.
+    Clear ``main``'s lazily-built agent singleton around every test.
 
     Without this, whichever test runs first would permanently cache an
-    opponent built from its own tmp_path checkpoint, and every later test
+    agent built from its own tmp_path checkpoint, and every later test
     would silently reuse it instead of loading its own.
     """
-    main._opponent = None  # noqa: SLF001
+    main._agent = None  # noqa: SLF001
     yield
-    main._opponent = None  # noqa: SLF001
+    main._agent = None  # noqa: SLF001
 
 
 @pytest.fixture
@@ -82,18 +82,18 @@ def test_agent_selects_legal_options_from_checkpoint(tmp_path, monkeypatch, stru
     assert all(0 <= pick < option_count for pick in picks)
 
 
-def test_agent_reuses_cached_opponent(tmp_path, monkeypatch, structured_model_cfg, real_observation) -> None:
+def test_agent_reuses_cached_instance(tmp_path, monkeypatch, structured_model_cfg, real_observation) -> None:
     """
-    The opponent is built once and cached, not rebuilt on every call.
+    The agent is built once and cached, not rebuilt on every call.
     """
     monkeypatch.chdir(tmp_path)
     _write_checkpoint(tmp_path / "checkpoint", structured_model_cfg)
 
     main.agent(real_observation)
-    opponent = main._opponent  # noqa: SLF001
-    assert opponent is not None
+    agent = main._agent  # noqa: SLF001
+    assert agent is not None
     main.agent(real_observation)
-    assert main._opponent is opponent  # noqa: SLF001
+    assert main._agent is agent  # noqa: SLF001
 
 
 def test_agent_raises_when_checkpoint_missing(tmp_path, monkeypatch, real_observation) -> None:

@@ -5,7 +5,7 @@ Writes ``checkpoint/model.pt`` (an actor-critic state_dict) and
 ``checkpoint/model_config.yaml`` (the resolved ``model`` config plus the
 ``max_options``/``encoder`` needed to rebuild the observation/action specs),
 the two files ``main.py`` loads at inference time via
-:func:`src.policies.inference.load_inference_opponent`.
+:func:`src.policies.inference.load_inference_agent`.
 
 The config is composed the normal Hydra way (``conf/config.yaml`` + any
 overrides), so it always matches whatever architecture is current. The

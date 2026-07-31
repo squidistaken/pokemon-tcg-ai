@@ -2,7 +2,7 @@ import os
 
 from cg.api import Observation, to_observation_class
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
-from src.policies.inference import load_inference_opponent
+from src.policies.inference import load_inference_agent
 
 KAGGLE_AGENT_DIR = "/kaggle_simulations/agent/"
 CHECKPOINT_PATH = "checkpoint/model.pt"
@@ -15,7 +15,7 @@ MODEL_CONFIG_PATH = "checkpoint/model_config.yaml"
 # inference path here, not training/self-play, which has its own default.
 DETERMINISTIC_INFERENCE = False
 
-_opponent: GreedyPolicyOpponent | None = None
+_agent: GreedyPolicyOpponent | None = None
 
 
 def _resolve_path(file_path: str) -> str:
@@ -47,17 +47,17 @@ def read_deck_csv() -> list[int]:
     return deck
 
 
-def _load_opponent() -> GreedyPolicyOpponent:
+def _load_agent() -> GreedyPolicyOpponent:
     """
-    Build (once) and return the checkpointed policy used for inference.
+    Build (once) and return the checkpointed agent used for inference.
 
-    Lazily constructed on first use and cached in ``_opponent``: ``agent()``
+    Lazily constructed on first use and cached in ``_agent``: ``agent()``
     is called once per selection for the whole match, so rebuilding the
     network and reloading weights on every call would be pure overhead.
 
     Returns:
-        GreedyPolicyOpponent: Policy wrapping the loaded checkpoint, sampling
-            from its learned distribution.
+        GreedyPolicyOpponent: Our submission agent, wrapping the loaded
+            checkpoint and sampling from its learned distribution.
 
     Raises:
         FileNotFoundError: If the checkpoint or its config is missing. A
@@ -65,8 +65,8 @@ def _load_opponent() -> GreedyPolicyOpponent:
             state to silently degrade from; run
             ``scripts/export_submission_checkpoint.py`` first.
     """
-    global _opponent
-    if _opponent is None:
+    global _agent
+    if _agent is None:
         checkpoint_path = _resolve_path(CHECKPOINT_PATH)
         model_config_path = _resolve_path(MODEL_CONFIG_PATH)
         if not os.path.exists(checkpoint_path) or not os.path.exists(model_config_path):
@@ -74,10 +74,10 @@ def _load_opponent() -> GreedyPolicyOpponent:
                 f"Missing checkpoint ({checkpoint_path!r}) or model config ({model_config_path!r}). "
                 "Run scripts/export_submission_checkpoint.py before submitting."
             )
-        _opponent = load_inference_opponent(
+        _agent = load_inference_agent(
             checkpoint_path, model_config_path, deterministic=DETERMINISTIC_INFERENCE
         )
-    return _opponent
+    return _agent
 
 
 def agent(obs_dict: dict) -> list[int]:
@@ -97,4 +97,4 @@ def agent(obs_dict: dict) -> list[int]:
         # The deck must comply with the Pokémon Trading Card Game rules.
         return read_deck_csv()
 
-    return _load_opponent()(obs)
+    return _load_agent()(obs)
