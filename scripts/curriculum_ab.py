@@ -1,24 +1,30 @@
 """
 Compare training arms: fixed-deck, uniform deck sampling, and PLR curriculum.
 
-Runs up to three arms per seed — fixed (single deck pair, ``env=default``),
-uniform (multi-deck i.i.d., ``env=multideck``), and curriculum (multi-deck PLR,
-``env=curriculum``) — and extracts the final evaluation win rate from each.
+Runs up to three arms per seed -- fixed (single deck pair, ``env=default``),
+uniform (pooled i.i.d., ``env=multideck_v2``), and curriculum (same pool under
+PLR, ``env=curriculum_v2``) -- and extracts the final evaluation win rate of
+each against every reference opponent.
 
-All arms use ``train=ppo_selfplay`` with ``eval_opponent=first_snapshot``
-(stochastic eval against the oldest league snapshot), so the reference is
-stronger than random and doesn't saturate early.
+All arms use ``train=ppo_selfplay``, which scores each round against both the
+oldest league snapshot and a random opponent (``train.eval_opponents``). The
+snapshot keeps discriminating once random saturates; random stays comparable
+across arms and runs.
+
+Every arm logs to W&B under a shared group, one run per arm, so their curves
+overlay directly. Pass ``--no-wandb`` to turn that off.
 
 Usage::
 
-    # All three arms, 1 seed, 500k frames
-    python -m scripts.curriculum_ab --seeds 1 --frames 500000 --workers 16
+    # All three arms, curriculum first, 2M frames
+    python -m scripts.curriculum_ab --arms curriculum,uniform,fixed \
+        --seeds 1 --frames 2000000 --workers 16
 
     # Curriculum vs uniform only
-    python -m scripts.curriculum_ab --arms uniform,curriculum --seeds 1 --frames 500000
+    python -m scripts.curriculum_ab --arms uniform,curriculum --seeds 1
 
-    # Fixed deck only
-    python -m scripts.curriculum_ab --arms fixed --seeds 1 --frames 200000
+    # Quick local check with no W&B
+    python -m scripts.curriculum_ab --arms curriculum --frames 50000 --no-wandb
 """
 
 import argparse
@@ -27,6 +33,7 @@ import statistics
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parents[1]
@@ -95,6 +102,7 @@ def run_arm(
     eval_interval: int,
     eval_episodes: int,
     output_root: Path,
+    wandb_group: str | None,
     extra: list[str],
 ) -> dict[str, float] | None:
     """
@@ -107,6 +115,8 @@ def run_arm(
     :param eval_interval: Frames between evaluation rounds.
     :param eval_episodes: Episodes per reference opponent per round.
     :param output_root: Directory the run writes into.
+    :param wandb_group: W&B group tying this experiment's arms together; None
+        disables W&B for the run.
     :param extra: Additional Hydra overrides.
     :return: Final win rate per reference opponent, or None if the run
         produced no evaluation.
@@ -120,7 +130,6 @@ def run_arm(
         "agent=ppo",
         f"env={spec['env']}",
         "train=ppo_selfplay",
-        "callbacks=none",
         f"seed={seed}",
         "set_seed=true",
         "agent.device=cuda",
@@ -129,8 +138,20 @@ def run_arm(
         f"train.eval_interval={eval_interval}",
         f"train.eval_episodes={eval_episodes}",
         f"hydra.run.dir={run_dir}",
-        *extra,
     ]
+    if wandb_group is None:
+        command.append("callbacks=none")
+    else:
+        # The default wandb.name is derived from the agent/model choices, which
+        # are identical across arms -- without overriding it all three runs
+        # would land in W&B under the same name.
+        command += [
+            "callbacks=wandb",
+            f"wandb.group={wandb_group}",
+            f"wandb.name={arm}-s{seed}",
+            f"wandb.job_type={arm}",
+        ]
+    command += extra
     if spec["curriculum"] is not None:
         # Only the enable flag is forced here; every other curriculum setting
         # is owned by the env config, so the two pooled arms stay identical
@@ -201,6 +222,15 @@ def main() -> None:
         help="directory the runs write into",
     )
     parser.add_argument(
+        "--wandb-group",
+        type=str,
+        default=None,
+        help="W&B group for this experiment's arms (default: curriculum_ab_<timestamp>)",
+    )
+    parser.add_argument(
+        "--no-wandb", action="store_true", help="disable W&B logging entirely"
+    )
+    parser.add_argument(
         "override", nargs="*", help="extra Hydra overrides applied to all arms"
     )
     args = parser.parse_args()
@@ -210,6 +240,13 @@ def main() -> None:
     for name in arm_names:
         if name not in ARM_SPECS:
             parser.error(f"unknown arm {name!r}; expected fixed, uniform, curriculum")
+
+    wandb_group = None
+    if not args.no_wandb:
+        wandb_group = args.wandb_group or (
+            f"curriculum_ab_{datetime.now():%Y%m%d_%H%M%S}"
+        )
+        print(f"W&B group: {wandb_group}", flush=True)
 
     arms = {name: ArmResult(name) for name in arm_names}
     for seed in range(args.seeds):
@@ -223,6 +260,7 @@ def main() -> None:
                 args.eval_interval,
                 args.eval_episodes,
                 args.out,
+                wandb_group,
                 args.override,
             )
             if rates is None:
