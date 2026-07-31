@@ -48,3 +48,8 @@ are passed to Hydra:
 
 Use `--dry-run` to print the `sbatch` command without submitting. Online W&B
 requires `WANDB_API_KEY` in `.env` or a verified `wandb login`.
+
+`slurm-conf/logs/` contains only Slurm stdout/stderr. Completed training runs
+append their final checkpoint to the repository-local
+`logs/checkpoint_keys.csv`; `run_job.sh` exports and prints its absolute path,
+and the normal Python training callback performs the locked CSV append.

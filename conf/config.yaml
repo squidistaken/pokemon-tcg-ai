@@ -35,6 +35,8 @@ wandb:
   notes: null
   # Keep W&B's local files beside this Hydra run, including on scratch.
   dir: ${hydra:runtime.output_dir}
+  # Mirror the final PPO checkpoint as a W&B model artifact.
+  log_checkpoints: true
 
 # Keep Hydra's own logs and multirun artifacts under the configured output
 # location as well. The default expands to Hydra's usual outputs/date/time

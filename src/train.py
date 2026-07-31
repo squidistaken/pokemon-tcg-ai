@@ -17,6 +17,7 @@ from src.training import (
     SnapshotCallback,
     Trainer,
     TrainingCallback,
+    WeightsAndBiases,
     build_eval_opponent_factory,
     build_opponent_factory,
     make_env_factories,
@@ -121,15 +122,24 @@ def _build_ppo_trainer(
     opponent_factory = build_opponent_factory(
         cfg, obs_spec, action_spec, checkpoint_dir
     )
-    if opponent_factory is not None:
-        callbacks = [
-            *callbacks,
-            SnapshotCallback(
-                actor_critic=actor_critic,
-                checkpoint_dir=checkpoint_dir,
-                interval=int(cfg.train.snapshot_interval),
-            ),
-        ]
+    checkpoint_loggers = [
+        callback.log_checkpoint
+        for callback in callbacks
+        if isinstance(callback, WeightsAndBiases)
+    ]
+    # The checkpoint callback starts first and finishes before W&B. That keeps
+    # the W&B run alive while the final checkpoint artifact is logged.
+    callbacks = [
+        SnapshotCallback(
+            actor_critic=actor_critic,
+            checkpoint_dir=checkpoint_dir,
+            interval=int(cfg.train.snapshot_interval),
+            checkpoint_loggers=checkpoint_loggers,
+            registry_path=_resolve_checkpoint_registry(cfg),
+            repo_root=Path(__file__).parents[1],
+        ),
+        *callbacks,
+    ]
 
     frames_per_batch = int(
         cfg.agent.get("frames_per_batch", cfg.collector.frames_per_batch)
@@ -188,6 +198,14 @@ def _resolve_checkpoint_dir(cfg: DictConfig) -> Path:
     if configured.is_absolute():
         return configured
     return Path(HydraConfig.get().runtime.output_dir) / configured
+
+
+def _resolve_checkpoint_registry(cfg: DictConfig) -> Path:
+    """Resolve the append-only completed-checkpoint CSV from the repository root."""
+    configured = Path(cfg.paths.checkpoint_registry)
+    if configured.is_absolute():
+        return configured.resolve()
+    return (Path(__file__).parents[1] / configured).resolve()
 
 
 def _build_evaluator(cfg: DictConfig) -> Evaluator | None:

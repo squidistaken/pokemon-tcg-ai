@@ -8,7 +8,8 @@
 # of drifting against copies of itself. "random" is the only implemented value.
 warmup_opponent: random
 # Freeze the learner into the self-play pool every N collected frames
-# (0 disables snapshotting -> train against the warmup opponent only).
+# (0 disables periodic self-play snapshots -> train against the warmup
+# opponent only). Every PPO run still writes one final submission checkpoint.
 snapshot_interval: 0
 # Directory learner snapshots are written to and reloaded from (ParallelEnv
 # workers reload from disk; no shared Python object across processes).

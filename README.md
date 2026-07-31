@@ -115,15 +115,20 @@ conf/                        Hydra configs (config.yaml + env/, agent/, model/, 
   callbacks/
     wandb.yaml                  Default: Weights & Biases run (project/entity/group/tags/mode)
     none.yaml                    Console/Hydra log lines only; for throwaway runs
-.env.example                 Template for the untracked .env holding secrets (WANDB_API_KEY)
+.env.example                 Template for untracked W&B, Kaggle, and submission defaults
 scripts/                     Standalone dev scripts (not part of the training entry point)
   bench_throughput.py          Collection throughput benchmark (naive vs SerialEnv vs ParallelEnv)
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
+  make_submission.py           Build a Kaggle .tar.gz and optionally submit it through the Kaggle CLI
   run_selfplay_compile.sh      1M-frame self-play run with torch.compile (caps Inductor's compile workers)
+submission/
+  main.py                      Kaggle entryfile template; `agent` is deliberately its final callable
+  cg_api.py                    Pure-Python observation parser (no native simulator dependency)
+  runtime.py                   Torch-only structured encoder/model/greedy inference implementation
 decks/                       Example deck CSVs
 docs/                        Design docs (torchrl_environment.md, game.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
-main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
+main.py                      Original random starter agent; not used by the submission builder
 slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts
 ```
 
@@ -185,7 +190,103 @@ during collection.
 Online W&B logging is required when selected: configure `WANDB_API_KEY` in an
 untracked `.env` or run `wandb login --verify`. Authentication, connection, or
 logging failures stop training. Use `wandb.mode=offline` only when local
-recording for a later `wandb sync` is intentional.
+recording for a later `wandb sync` is intentional. The final PPO checkpoint is
+logged as a run-specific W&B model artifact by default; periodic self-play
+snapshots stay local. Set
+`wandb.log_checkpoints=false` to keep them local only.
+
+### Kaggle submissions
+
+Every PPO run writes a final checkpoint, even when `train.snapshot_interval=0`.
+It appends that checkpoint to the ignored repository-local
+`logs/checkpoint_keys.csv` and prints both its path and a 12-character SHA-256
+key:
+
+```text
+checkpoint: .../checkpoints/snapshot_000000016384.pt
+checkpoint-key: 5ac45db92f3e
+```
+
+Run submission commands from the repository root. `uv sync` installs the
+official Kaggle CLI. Put `KAGGLE_API_TOKEN` in the untracked `.env`, run
+`uv run kaggle auth login`, or configure another credential method supported
+by the CLI.
+
+Build the newest completed checkpoint (the bottom registry row) without
+uploading it:
+
+```bash
+uv run python scripts/make_submission.py \
+  --checkpoint latest \
+  --label my-agent \
+  --yes
+```
+
+To rebuild an existing label and upload it through the official CLI in one
+command, add `--force --submit`:
+
+```bash
+uv run python scripts/make_submission.py \
+  --checkpoint 5ac45db92f3e \
+  --label my-agent \
+  --submit \
+  --yes \
+  --force
+```
+
+Check the resulting Kaggle status with:
+
+```bash
+uv run dotenv run -- \
+  kaggle competitions submissions pokemon-tcg-ai-battle --csv
+```
+
+The command reads `.env`, resolves `latest` from `CHECKPOINT_KEYS_FILE` (default
+`logs/checkpoint_keys.csv`), and verifies the recorded SHA-256 before building.
+An explicit hash is resolved from the registry first; path/name lookup under
+`CHECKPOINTS_DIR` remains available for legacy or unregistered checkpoints. It
+defaults the deck to the checkpoint's recorded `env.deck0`, requires exactly
+60 integer entries, and accepts `--deck PATH` for an explicit override. Without
+`--submit`, it prints the exact `kaggle competitions submit ...` command but
+does not contact Kaggle. `--force` replaces only the selected label's staging
+directory and archive.
+
+The uploaded archive is deliberately small and self-contained:
+
+```text
+main.py
+cg_api.py
+runtime.py
+model.pt
+model_config.json
+deck.csv
+submission_manifest.json
+```
+
+The builder copies `submission/main.py`, not the repository-root random starter
+`main.py`. Kaggle executes that entryfile with an empty globals mapping and
+selects its final callable, so `agent` must remain the last callable defined in
+the file. The validator supplies `torch`, but neither TorchRL nor the
+repository's `cg` Python package. The bundle therefore carries a pure-Python
+observation parser and Torch-only inference implementation; it contains no
+TensorDict, Hydra, OmegaConf, or native simulator dependency.
+
+The current portable runtime supports structured-observation checkpoints using
+`MLPBackbone` and `LinearPolicyHead`. The builder strictly reconstructs both the
+training model and portable model, so an unsupported architecture or mismatched
+config fails before an archive is produced. For an old bare state-dict
+checkpoint without embedded config, pass its Hydra config with
+`--config path/to/.hydra/config.yaml`.
+
+Every build performs a fail-closed Kaggle preflight before producing output. It
+checks all bundled Python as Python 3.11, rejects dynamic imports, permits only
+an explicit standard-library allowlist plus `torch` and bundled modules,
+prepends the resolved bundle path and verifies that local imports resolve
+there, reproduces Kaggle's empty-globals compile/execute/last-callable loader,
+and calls the agent for both deck setup and a real model selection in an
+isolated interpreter. It then extracts the finished archive, checks its exact
+root file set and checkpoint/deck hashes, and repeats the same preflight against
+the extracted upload bytes. Any failure aborts before the optional CLI submit.
 
 Slurm support is kept separately in [`slurm-conf/`](slurm-conf/README.md). The
 profiles select a normal Hydra config and add scheduler-specific overrides;
@@ -197,4 +298,3 @@ available as `baseline`, `ppo`, and `ppo_selfplay`.
 GitHub Actions runs linting, type-checking, and tests for pull requests that
 are ready for review. Draft pull requests intentionally skip CI to stay within
 the GitHub Actions free-plan budget.
-
