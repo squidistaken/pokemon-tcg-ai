@@ -107,6 +107,8 @@ class StructuredObservationEncoder(ObservationEncoder):
     OPTION_SCALAR_COUNT = 6
     POKEMON_FEATURE_COUNT = 20
     ENERGY_TYPE_COUNT = 12
+    # Eight game fields followed by selection-present/min/max/option-count.
+    ALREADY_CHOSEN_OPTION_COUNT_INDEX = 12
 
     def __init__(
             self,
@@ -307,6 +309,17 @@ class StructuredObservationEncoder(ObservationEncoder):
             },
             batch_size=torch.Size(()),
         )
+
+    def update_already_chosen_option_count(
+            self,
+            encoded: TensorDict,
+            already_chosen_option_count: int,
+    ) -> bool:
+        """Update the sole count-dependent field in a cached encoding."""
+        encoded["globals"][self.ALREADY_CHOSEN_OPTION_COUNT_INDEX] = float(
+            already_chosen_option_count
+        )
+        return True
 
     @staticmethod
     def _encode_globals(

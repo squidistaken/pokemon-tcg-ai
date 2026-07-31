@@ -44,3 +44,22 @@ class ObservationEncoder(ABC):
             declared by :meth:`spec`.
         """
         raise NotImplementedError
+
+    def update_already_chosen_option_count(  # noqa: PLR6301 - optional instance extension point
+            self,
+            encoded: TensorDict,
+            already_chosen_option_count: int,
+    ) -> bool:
+        """
+        Update a cached encoding for the next partial multi-select pick.
+
+        Encoders may override this when the pick count is the only field that
+        changes between partial picks. Returning False asks inference to call
+        :meth:`encode` again, preserving correctness for other encoders.
+
+        :param encoded: Previously encoded observation to update in place.
+        :param already_chosen_option_count: New number of accumulated picks.
+        :return: True when the cached encoding was updated, otherwise False.
+        """
+        del encoded, already_chosen_option_count
+        return False
