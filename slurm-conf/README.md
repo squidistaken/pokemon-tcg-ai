@@ -48,17 +48,3 @@ are passed to Hydra:
 
 Use `--dry-run` to print the `sbatch` command without submitting. Online W&B
 requires `WANDB_API_KEY` in `.env` or a verified `wandb login`.
-
-## Evaluation
-
-`eval.sh` submits `src.eval_deck_field` (the per-deck field-performance probe,
-see the top-level README) instead of `src.train`, on the same profiles and
-with the same options as `train.sh`:
-
-```bash
-./slurm-conf/eval.sh --config eval_deck_field --slurm-config train_cpu \
-  train.eval_opponent_checkpoint=/path/to/agent.pt
-```
-
-`train.sh` itself also accepts `--module <dotted.path>` (default `src.train`)
-if you need to run some other entry point on a profile directly.
