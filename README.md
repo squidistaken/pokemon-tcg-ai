@@ -88,6 +88,7 @@ src/
   policies/
     random_masked_policy.py     Uniform random policy over the action mask (stand-in for the future PPO actor)
     greedy_policy_opponent.py   Greedy opponent baseline built on a saved ActorCritic checkpoint
+    inference.py                 SamplingPolicyAgent: main.py's submission agent, specs/checkpoint loading for Kaggle
     ppo_actor.py                 build_actor_critic / build_ppo_operator: assemble the ActorValueOperator from Hydra config
   training/
     trainer.py                  Trainer: parallel rollout collection via TorchRL's Collector
@@ -120,9 +121,11 @@ scripts/                     Standalone dev scripts (not part of the training en
   bench_throughput.py          Collection throughput benchmark (naive vs SerialEnv vs ParallelEnv)
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
   run_selfplay_compile.sh      1M-frame self-play run with torch.compile (caps Inductor's compile workers)
+  export_inference_checkpoint.py  Writes checkpoint/model.pt + model_config.yaml for main.py
 decks/                       Example deck CSVs
 docs/                        Design docs (torchrl_environment.md, game.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
+checkpoint/                  Inference model config; generate model.pt from a trained run before submission
 main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
 slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts
 ```
@@ -197,4 +200,3 @@ available as `baseline`, `ppo`, and `ppo_selfplay`.
 GitHub Actions runs linting, type-checking, and tests for pull requests that
 are ready for review. Draft pull requests intentionally skip CI to stay within
 the GitHub Actions free-plan budget.
-
