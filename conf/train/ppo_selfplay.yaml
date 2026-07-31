@@ -13,3 +13,5 @@ eval_interval: 50000  # every X timesteps
 # Fewer episodes than the default: this runs repeatedly during a run, and each
 # evaluation episode is time not spent collecting.
 eval_episodes: 15
+# On by default here: cross-play needs snapshot_interval > 0.
+cross_play: true

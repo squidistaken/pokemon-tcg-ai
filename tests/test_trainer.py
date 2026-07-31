@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import torch
 from omegaconf import DictConfig, OmegaConf
 
 from src.env.opponent_pool import OpponentPool
@@ -47,15 +48,16 @@ def test_trainer_collects_frames() -> None:
     """
     The base trainer runs pure collection over a SerialEnv and reports stats.
     """
+    torch.manual_seed(0)
     trainer = Trainer(
         env_factories=make_env_factories(make_cfg()),
         policy=RandomMaskedPolicy(),
-        frames_per_batch=64,
-        total_frames=128,
+        frames_per_batch=128,
+        total_frames=512,
         use_parallel_env=False,
     )
     stats = trainer.train()
-    assert stats["frames"] == 128
+    assert stats["frames"] == 512
     assert stats["episodes"] > 0
     assert 0.0 <= stats["win_rate"] <= 1.0
 
