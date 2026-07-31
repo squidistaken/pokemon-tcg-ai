@@ -88,6 +88,7 @@ src/
   policies/
     random_masked_policy.py     Uniform random policy over the action mask (stand-in for the future PPO actor)
     greedy_policy_opponent.py   Greedy opponent baseline built on a saved ActorCritic checkpoint
+    inference.py                 SamplingPolicyAgent: main.py's submission agent, specs/checkpoint loading for Kaggle
     ppo_actor.py                 build_actor_critic / build_ppo_operator: assemble the ActorValueOperator from Hydra config
   training/
     trainer.py                  Trainer: parallel rollout collection via TorchRL's Collector
@@ -129,6 +130,12 @@ decks/                       Example deck CSVs
 docs/                        Design docs (torchrl_environment.md, game.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
 main.py                      Original random starter agent; not used by the submission builder
+  export_inference_checkpoint.py  Writes checkpoint/model.pt + model_config.yaml for main.py
+decks/                       Example deck CSVs
+docs/                        Design docs (torchrl_environment.md, game.md)
+tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
+checkpoint/                  Inference model config; generate model.pt from a trained run before submission
+main.py                      Kaggle submission entry point (fixed format, uses cg.api directly)
 slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts
 ```
 
