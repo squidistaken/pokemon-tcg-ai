@@ -4,6 +4,7 @@ import torch
 from omegaconf import OmegaConf
 from tensordict import TensorDict
 from torchrl.data import Categorical, Composite
+from torchrl.modules.distributions import MaskedCategorical
 
 from cg.api import Observation
 from src.env.observation_encoder import ObservationEncoder
@@ -13,8 +14,8 @@ from src.training.env_factory import make_encoder
 
 
 def build_inference_specs(
-        max_options: int,
-        encoder_name: str = "structured",
+    max_options: int,
+    encoder_name: str = "structured",
 ) -> tuple[Composite, ObservationEncoder, Categorical]:
     """
     Build the observation/action specs :func:`~src.policies.ppo_actor.
@@ -45,24 +46,20 @@ class SamplingPolicyAgent:
     """
 
     def __init__(
-            self,
-            actor_critic: ActorCritic,
-            encoder: ObservationEncoder,
-            device: torch.device | str = "cpu",
-            generator: torch.Generator | None = None,
+        self,
+        actor_critic: ActorCritic,
+        encoder: ObservationEncoder,
+        device: torch.device | str = "cpu",
     ) -> None:
         """
         :param actor_critic: Trained actor-critic to act with; put into eval
             mode and never updated here.
         :param encoder: Observation encoder matching the one used in training.
         :param device: Device for inference.
-        :param generator: Optional RNG for reproducible sampling (e.g. in
-            tests).
         """
         self._device = torch.device(device)
         self._actor_critic = actor_critic.to(self._device).eval()
         self._encoder = encoder
-        self._generator = generator
 
     @torch.inference_mode()
     def __call__(self, observation: Observation) -> list[int]:
@@ -77,7 +74,9 @@ class SamplingPolicyAgent:
         select = observation.select
         state = observation.current
         if select is None or state is None:
-            raise ValueError("SamplingPolicyAgent requires an observation with current state and select.")
+            raise ValueError(
+                "SamplingPolicyAgent requires an observation with current state and select."
+            )
         seat = state.yourIndex
         # Match TCGEnv, which nests the encoder output under "observation".
         encoded = TensorDict(
@@ -94,57 +93,53 @@ class SamplingPolicyAgent:
             n_options=len(select.option),
             min_count=select.minCount,
             max_count=select.maxCount,
-            generator=self._generator,
         )
 
     @staticmethod
     def sample_select(
-            logits: torch.Tensor,
-            n_options: int,
-            min_count: int,
-            max_count: int,
-            generator: torch.Generator | None = None,
+        logits: torch.Tensor,
+        n_options: int,
+        min_count: int,
+        max_count: int,
     ) -> list[int]:
         """
         Sample option indices from action logits, one pick at a time.
 
         Options ``0..n_options-1`` map to logits ``0..n_options-1``; the final
-        logit is the synthetic **stop**. At each step, samples from the
-        softmax over the not-yet-picked options (plus stop, once ``minCount``
-        picks have been made), stopping when stop is drawn or ``maxCount`` is
-        reached.
+        logit is the synthetic **stop**. At each step, samples a masked
+        categorical over the not-yet-picked options (plus stop, once
+        ``minCount`` picks have been made), stopping when stop is drawn or
+        ``maxCount`` is reached.
 
         :param logits: Action logits of shape ``(n_actions,)`` where
             ``n_actions = max_options + 1``.
         :param n_options: Number of real options offered by the selection.
         :param min_count: Minimum number of options to pick.
         :param max_count: Maximum number of options to pick.
-        :param generator: Optional RNG for reproducible sampling.
         :return: Chosen option indices (a subset of ``range(n_options)``).
         """
         capacity = logits.shape[-1] - 1
         n_options = min(n_options, capacity)
         max_count = min(max_count, n_options)
         stop_index = capacity
-        remaining = list(range(n_options))
+        mask = torch.zeros_like(logits, dtype=torch.bool)
+        mask[:n_options] = True
         picks: list[int] = []
         while len(picks) < max_count:
-            candidates = remaining + ([stop_index] if len(picks) >= min_count else [])
-            probs = torch.softmax(logits[candidates], dim=-1)
-            choice = int(torch.multinomial(probs, 1, generator=generator).item())
-            chosen = candidates[choice]
+            if len(picks) >= min_count:
+                mask[stop_index] = True
+            chosen = int(MaskedCategorical(logits=logits, mask=mask).sample())
             if chosen == stop_index:
                 break
             picks.append(chosen)
-            remaining.remove(chosen)
+            mask[chosen] = False
         return picks
 
 
 def load_inference_agent(
-        checkpoint_path: str | Path,
-        model_config_path: str | Path,
-        device: torch.device | str = "cpu",
-        generator: torch.Generator | None = None,
+    checkpoint_path: str | Path,
+    model_config_path: str | Path,
+    device: torch.device | str = "cpu",
 ) -> SamplingPolicyAgent:
     """
     Rebuild the submission agent from a self-contained checkpoint + config
@@ -160,7 +155,6 @@ def load_inference_agent(
         checkpoint, holding the resolved ``model`` config plus
         ``max_options``/``encoder``.
     :param device: Device for inference.
-    :param generator: Optional RNG for reproducible sampling.
     :return: The checkpoint's agent, ready to act.
     """
     model_config = OmegaConf.load(model_config_path)
@@ -169,6 +163,8 @@ def load_inference_agent(
         encoder_name=str(model_config.get("encoder", "structured")),
     )
     actor_critic = build_actor_critic(model_config, obs_spec, action_spec)
-    state_dict = torch.load(Path(checkpoint_path), map_location=device, weights_only=True)
+    state_dict = torch.load(
+        Path(checkpoint_path), map_location=device, weights_only=True
+    )
     actor_critic.load_state_dict(state_dict)
-    return SamplingPolicyAgent(actor_critic, encoder, device=device, generator=generator)
+    return SamplingPolicyAgent(actor_critic, encoder, device=device)
