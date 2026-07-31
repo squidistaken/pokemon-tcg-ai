@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-if [ "$#" -lt 4 ]; then
-  echo "Usage: run_job.sh PROFILE_PATH CONFIG_NAME UV_ENVIRONMENT DEVICE [HYDRA_OVERRIDE ...]" >&2
+if [ "$#" -lt 5 ]; then
+  echo "Usage: run_job.sh PROFILE_PATH CONFIG_NAME UV_ENVIRONMENT DEVICE MODULE [HYDRA_OVERRIDE ...]" >&2
   exit 2
 fi
 
@@ -11,7 +11,8 @@ PROFILE_PATH="$1"
 CONFIG_NAME="$2"
 UV_ENVIRONMENT="$3"
 DEVICE="$4"
-shift 4
+MODULE="$5"
+shift 5
 
 # Slurm executes a copied script from its spool directory. submit.py sets
 # --chdir to the project root, so use the job's working directory instead of
@@ -44,6 +45,7 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 echo "Profile: $PROFILE_PATH"
+echo "Module: $MODULE"
 echo "Hydra config: conf/$CONFIG_NAME.yaml"
 echo "uv environment: $UV_ENVIRONMENT"
 echo "Job: ${SLURM_JOB_ID:-not-running-under-slurm}"
@@ -83,6 +85,6 @@ print(f"Engine: {sim.lib._name}")
 PY
 fi
 
-srun uv run --frozen --no-sync python -m src.train --config-name "$CONFIG_NAME" "$@"
+srun uv run --frozen --no-sync python -m "$MODULE" --config-name "$CONFIG_NAME" "$@"
 
 echo "End: $(date --iso-8601=seconds)"

@@ -108,10 +108,10 @@ def _setup_command(environment: str) -> str:
     return "./slurm-conf/setup_uv.sh"
 
 
-def _probe_environment(environment: str, python: Path) -> None:
-    """Check that the selected environment can import the training entry point."""
+def _probe_environment(environment: str, python: Path, module: str) -> None:
+    """Check that the selected environment can import the entry point module."""
     result = subprocess.run(
-        [str(python), "-c", "import src.train"],
+        [str(python), "-c", f"import {module}"],
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
@@ -127,7 +127,7 @@ def _probe_environment(environment: str, python: Path) -> None:
     )
 
 
-def _uv_environment(gpu_type: str) -> str:
+def _uv_environment(gpu_type: str, module: str) -> str:
     """Return the uv environment required by a GPU type."""
     name = ".venv-rtx" if gpu_type == "rtx_pro_6000" else ".venv"
     python = PROJECT_ROOT / name / "bin" / "python"
@@ -135,7 +135,7 @@ def _uv_environment(gpu_type: str) -> str:
         raise FileNotFoundError(
             f"required environment {name} is missing; run: {_setup_command(name)}"
         )
-    _probe_environment(name, python)
+    _probe_environment(name, python, module)
     return name
 
 
@@ -164,6 +164,7 @@ def _build_command(
     profile: dict[str, Any],
     config_name: str,
     extra_overrides: list[str],
+    module: str,
 ) -> list[str]:
     """Translate a profile into one explicit sbatch invocation."""
     slurm = profile.get("slurm")
@@ -193,7 +194,7 @@ def _build_command(
             raise ValueError("slurm.gpus_per_node must be 0 when gpu_type is 'none'")
     else:
         _require_single_resource(slurm, "gpus_per_node")
-    uv_environment = _uv_environment(gpu_type)
+    uv_environment = _uv_environment(gpu_type, module)
 
     command = ["sbatch", f"--chdir={PROJECT_ROOT}"]
     for key, option in SBATCH_OPTIONS.items():
@@ -213,6 +214,7 @@ def _build_command(
             config_name,
             uv_environment,
             device,
+            module,
             f"++agent.device={device}",
             *extra_overrides,
         ]
@@ -234,6 +236,11 @@ def main() -> None:
         help="Scheduler YAML under slurm-conf/ (with or without .yaml)",
     )
     parser.add_argument(
+        "--module",
+        default="src.train",
+        help="Python module to run under Hydra (default: src.train)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the sbatch command without submitting it",
@@ -252,6 +259,7 @@ def main() -> None:
             _load_profile(profile_path),
             args.config,
             args.overrides,
+            args.module,
         )
     except (FileNotFoundError, RuntimeError, TypeError, ValueError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
