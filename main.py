@@ -5,9 +5,13 @@ from cg.api import Observation, to_observation_class
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 from src.policies.inference import load_inference_agent
 
-KAGGLE_AGENT_DIR = "/kaggle_simulations/agent/"
-CHECKPOINT_PATH = "checkpoint/model.pt"
-MODEL_CONFIG_PATH = "checkpoint/model_config.yaml"
+# Overridable via env var rather than hardcoded: main.py has no CLI args or
+# config file of its own (Kaggle just calls agent(obs_dict) directly), so this
+# is the only lever to redirect these without editing the code -- e.g. once
+# the actual submission bundling (a separate issue) settles on its own layout.
+KAGGLE_AGENT_DIR = os.environ.get("PTCG_KAGGLE_AGENT_DIR", "/kaggle_simulations/agent/")
+CHECKPOINT_PATH = os.environ.get("PTCG_CHECKPOINT_PATH", "checkpoint/model.pt")
+MODEL_CONFIG_PATH = os.environ.get("PTCG_MODEL_CONFIG_PATH", "checkpoint/model_config.yaml")
 # Sample from the learned distribution rather than always taking the
 # highest-scoring options: a deterministic policy is a fixed function of the
 # observed state, which an opponent can learn and reliably counter, whereas
