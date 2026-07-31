@@ -3,10 +3,15 @@ import statistics
 from collections.abc import Callable
 
 import torch
+from omegaconf import DictConfig
 from tensordict import TensorDict
 from torch import nn
+from torchrl.data import Categorical, Composite
 from torchrl.envs import EnvBase
 from torchrl.envs.utils import ExplorationType, set_exploration_type, step_mdp
+
+from src.training.env_factory import OpponentFactory, make_env_factories
+from src.training.self_play import build_eval_opponent_factory
 
 logger = logging.getLogger(__name__)
 
@@ -263,3 +268,42 @@ class Evaluator:
         if self._env is not None:
             self._env.close()
             self._env = None
+
+
+def build_evaluator(
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
+    opponent_factory: OpponentFactory | None = None,
+    sampler_spec: dict[str, object] | None = None,
+) -> Evaluator:
+    """
+    Build the fixed-opponent evaluator.
+
+    :param cfg: Hydra configuration with a ``train`` section.
+    :param obs_spec: Environment observation spec, forwarded to the opponent
+        factory so a ``checkpoint`` reference can rebuild its network.
+    :param action_spec: Environment action spec, same purpose.
+    :param opponent_factory: Explicit eval opponent, overriding
+        ``cfg.train.eval_opponent``. Used by a best-response run to score the
+        learner against the same frozen agent it trains against.
+    :param sampler_spec: Precomputed eval-split sampler spec, for a caller that
+        already parsed the held-out deck pool (e.g. to share it with
+        ``CrossPlayCallback`` instead of each re-parsing it). Built fresh when
+        ``None``.
+    :return: A configured evaluator.
+    """
+    if opponent_factory is None:
+        opponent_factory = build_eval_opponent_factory(cfg, obs_spec, action_spec)
+    return Evaluator(
+        env_factory=make_env_factories(
+            cfg,
+            opponent_factory=opponent_factory,
+            deck_split="eval",
+            sampler_spec=sampler_spec,
+        )[0],
+        n_episodes=int(cfg.train.get("eval_episodes", 100)),
+        device=cfg.agent.get("device", "cpu"),
+        deterministic=bool(cfg.train.get("eval_deterministic", True)),
+        per_archetype=bool(cfg.train.get("eval_per_archetype", True)),
+    )

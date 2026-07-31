@@ -1,7 +1,6 @@
 import csv
 import logging
 import random
-import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -14,7 +13,8 @@ from src.env.battle_handle import BattleHandle
 from src.env.deck_sampler import DeckSampler, build_deck_sampler
 from src.env.snapshot_opponent_pool import SNAPSHOT_SUFFIX
 from src.models.actor_critic import ActorCritic
-from src.policies.greedy_policy_opponent import load_greedy_opponent, save_actor_critic
+from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
+from src.policies.ppo_actor import build_actor_critic
 from src.training.cross_play import (
     Policy,
     bradley_terry_elo,
@@ -22,6 +22,7 @@ from src.training.cross_play import (
     play_series,
 )
 from src.training.env_factory import _build_sampler_spec, make_encoder
+from src.training.self_play import _load_snapshot
 
 from .base import TrainingCallback
 
@@ -53,6 +54,7 @@ class CrossPlayCallback(TrainingCallback):
             n_games: int = 20,
             max_checkpoints: int = 8,
             seed: int = 0,
+            sampler_spec: dict[str, Any] | None = None,
     ) -> None:
         """
         :param actor_critic: The live learner, shared with the trainer; snapshot
@@ -68,6 +70,9 @@ class CrossPlayCallback(TrainingCallback):
             matrix; more than this are subsampled evenly across the run so the
             ranking still spans the whole trajectory without an N**2 blow-up.
         :param seed: Base seed for match seat assignment and deck draws.
+        :param sampler_spec: Precomputed eval-split sampler spec, for a caller
+            that already parsed the held-out deck pool and can share it instead of
+            this callback re-parsing it. Built fresh when ``None``.
         """
         self._actor_critic = actor_critic
         self._cfg = cfg
@@ -81,7 +86,12 @@ class CrossPlayCallback(TrainingCallback):
         self._encoder = make_encoder(
             cfg.env.get("encoder", "structured"), int(cfg.env.max_options)
         )
-        self._sampler_spec = _build_sampler_spec(cfg, deck_split="eval")
+        self._sampler_spec = (
+            sampler_spec if sampler_spec is not None else _build_sampler_spec(cfg, deck_split="eval")
+        )
+        # Persistent across on_eval_end calls so its round-robin/uniform cursor
+        # actually advances through the held-out pool over the run.
+        self._eval_sampler = build_deck_sampler(self._sampler_spec, seed=seed)
 
     def on_train_start(self, run_config: Mapping[str, Any]) -> None:
         """Unused; cross-play needs snapshots that do not exist yet at start."""
@@ -105,17 +115,16 @@ class CrossPlayCallback(TrainingCallback):
         if not snapshots:
             return
         latest = snapshots[-1]
-        with tempfile.TemporaryDirectory() as tmp:
-            current = self._current_opponent(Path(tmp))
-            opponent = self._load(latest)
-            result = play_series(
-                BattleHandle(),
-                current,
-                opponent,
-                self._sampler_factory(),
-                self._n_games,
-                random.Random(self._seed + step),
-            )
+        current = self._current_opponent()
+        opponent = self._load(latest)
+        result = play_series(
+            BattleHandle(),
+            current,
+            opponent,
+            self._eval_sampler,
+            self._n_games,
+            random.Random(self._seed + step),
+        )
         logger.info(
             "Cross-play vs latest snapshot %s over %d game(s): score=%.3f",
             latest.name, result.scored, result.score,
@@ -132,12 +141,11 @@ class CrossPlayCallback(TrainingCallback):
         if not checkpoints:
             logger.info("Cross-play skipped: no snapshots on disk to rank.")
             return
-        with tempfile.TemporaryDirectory() as tmp:
-            policies: dict[str, Policy] = {path.stem: self._load(path) for path in checkpoints}
-            policies["current"] = self._current_opponent(Path(tmp))
-            names, scores, games = crossplay_matrix(
-                policies, self._sampler_factory, n_games=self._n_games, seed=self._seed
-            )
+        policies: dict[str, Policy] = {path.stem: self._load(path) for path in checkpoints}
+        policies["current"] = self._current_opponent()
+        names, scores, games = crossplay_matrix(
+            policies, self._sampler_factory, n_games=self._n_games, seed=self._seed
+        )
         elo = bradley_terry_elo(names, scores, games)
         self._write_csvs(names, scores, elo)
         leader = max(names, key=lambda name: elo[name])
@@ -173,7 +181,9 @@ class CrossPlayCallback(TrainingCallback):
         if len(paths) <= self._max_checkpoints:
             return paths
         n = self._max_checkpoints
-        step = (len(paths) - 1) / (n - 1) if n > 1 else 0.0
+        if n == 1:
+            return [paths[-1]]
+        step = (len(paths) - 1) / (n - 1)
         indices = sorted({round(i * step) for i in range(n)} | {len(paths) - 1})
         return [paths[i] for i in indices]
 
@@ -184,20 +194,19 @@ class CrossPlayCallback(TrainingCallback):
         :param checkpoint_path: Snapshot path.
         :return: The greedy opponent.
         """
-        return load_greedy_opponent(
-            checkpoint_path, self._cfg, self._obs_spec, self._action_spec,
-            self._encoder, device="cpu",
+        return _load_snapshot(
+            checkpoint_path, self._cfg, self._obs_spec, self._action_spec, self._encoder
         )
 
-    def _current_opponent(self, tmp_dir: Path) -> Policy:
+    def _current_opponent(self) -> Policy:
         """
-        Snapshot the live learner and reload it as a fresh greedy opponent.
-
-        :param tmp_dir: Directory for the throwaway snapshot.
+        Copy the live learner's weights into a fresh greedy opponent.
+        
         :return: A greedy opponent playing the current parameters.
         """
-        path = save_actor_critic(self._actor_critic, tmp_dir / "current.pt")
-        return self._load(path)
+        snapshot = build_actor_critic(self._cfg, self._obs_spec, self._action_spec)
+        snapshot.load_state_dict(self._actor_critic.state_dict())
+        return GreedyPolicyOpponent(snapshot, self._encoder, device="cpu")
 
     def _sampler_factory(self) -> DeckSampler:
         """

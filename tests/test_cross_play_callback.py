@@ -88,3 +88,45 @@ def test_cross_play_callback_eval_scores_against_latest(
         checkpoint_dir=checkpoints, output_dir=tmp_path / "out", n_games=2, seed=0,
     )
     callback.on_eval_end(100, {})  # completes without raising
+
+
+def test_cross_play_callback_reuses_eval_sampler_across_calls(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    on_eval_end scores against a persistent sampler so its round-robin/uniform
+    cursor actually advances across evaluations, instead of a fresh,
+    identically-seeded sampler replaying the same decks every time.
+    """
+    cfg = _cfg(structured_model_cfg)
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    checkpoints = tmp_path / "ckpts"
+    _write_snapshots(actor_critic, checkpoints, (100,))
+
+    callback = CrossPlayCallback(
+        actor_critic, cfg, structured_obs_spec, action_spec,
+        checkpoint_dir=checkpoints, output_dir=tmp_path / "out", n_games=1, seed=0,
+    )
+    sampler_before = callback._eval_sampler  # noqa: SLF001
+    callback.on_eval_end(100, {})
+    assert callback._eval_sampler is sampler_before  # noqa: SLF001
+
+
+def test_select_checkpoints_caps_to_one(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    max_checkpoints=1 returns exactly the most recent checkpoint, not two.
+    """
+    cfg = _cfg(structured_model_cfg)
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    callback = CrossPlayCallback(
+        actor_critic, cfg, structured_obs_spec, action_spec,
+        checkpoint_dir=tmp_path / "ckpts", output_dir=tmp_path / "out",
+        n_games=1, max_checkpoints=1, seed=0,
+    )
+    paths = [Path(f"snapshot_{i:012d}.pt") for i in range(5)]
+
+    selected = callback._select_checkpoints(paths)  # noqa: SLF001
+
+    assert selected == [paths[-1]]

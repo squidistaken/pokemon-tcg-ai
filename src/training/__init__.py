@@ -6,8 +6,8 @@ from .callbacks import (
     TrainingCallback,
     WeightsAndBiases,
 )
-from .env_factory import make_env, make_env_factories
-from .evaluator import Evaluator
+from .env_factory import build_probe_specs, make_env, make_env_factories
+from .evaluator import Evaluator, build_evaluator
 from .ppo_trainer import PPOTrainer
 from .self_play import (
     build_best_response_opponent_factory,
@@ -28,7 +28,9 @@ __all__ = [
     "WeightsAndBiases",
     "build_best_response_opponent_factory",
     "build_eval_opponent_factory",
+    "build_evaluator",
     "build_opponent_factory",
+    "build_probe_specs",
     "make_env",
     "make_env_factories",
 ]

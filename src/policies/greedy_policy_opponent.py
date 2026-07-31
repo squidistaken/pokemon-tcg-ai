@@ -135,6 +135,29 @@ class GreedyPolicyOpponent:
         return picks
 
 
+def load_actor_critic(
+        checkpoint_path: str | Path,
+        cfg: DictConfig,
+        obs_spec: Composite,
+        action_spec: TensorSpec,
+        device: torch.device | str = "cpu",
+) -> ActorCritic:
+    """
+    Rebuild an actor-critic from config and load a snapshot's weights.
+
+    :param checkpoint_path: Path to a :func:`save_actor_critic` snapshot.
+    :param cfg: Hydra config used to build the matching architecture.
+    :param obs_spec: Environment observation composite spec.
+    :param action_spec: Environment action spec.
+    :param device: Device to load the weights onto.
+    :return: The reconstructed actor-critic with the checkpoint's weights.
+    """
+    actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
+    state_dict = torch.load(Path(checkpoint_path), map_location=device, weights_only=True)
+    actor_critic.load_state_dict(state_dict)
+    return actor_critic
+
+
 def load_greedy_opponent(
         checkpoint_path: str | Path,
         cfg: DictConfig,
@@ -144,14 +167,7 @@ def load_greedy_opponent(
         device: torch.device | str = "cpu",
 ) -> GreedyPolicyOpponent:
     """
-    Rebuild an actor-critic from config and load a snapshot as an opponent.
-
-    Reconstructs the network with :func:`~src.policies.ppo_actor.
-    build_actor_critic` (so it matches the trained architecture), loads the
-    checkpoint written by :func:`save_actor_critic`, and wraps it as a
-    :class:`GreedyPolicyOpponent`. Per the ``ParallelEnv`` worker-isolation
-    caveat, opponents load the network from disk in each worker rather than
-    sharing a Python object across processes.
+    Load a snapshot and wrap it as a greedy opponent.
 
     :param checkpoint_path: Path to a :func:`save_actor_critic` snapshot.
     :param cfg: Hydra config used to build the matching architecture.
@@ -161,7 +177,5 @@ def load_greedy_opponent(
     :param device: Device for inference.
     :return: A greedy opponent playing the snapshot.
     """
-    actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
-    state_dict = torch.load(Path(checkpoint_path), map_location=device, weights_only=True)
-    actor_critic.load_state_dict(state_dict)
+    actor_critic = load_actor_critic(checkpoint_path, cfg, obs_spec, action_spec, device)
     return GreedyPolicyOpponent(actor_critic, encoder, device=device)

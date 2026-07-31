@@ -7,6 +7,7 @@ from typing import Any
 
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
+from torchrl.data import Categorical, Composite
 from torchrl.envs import EnvBase, TransformedEnv
 from torchrl.envs.transforms import ActionMask
 
@@ -320,6 +321,7 @@ def make_env_factories(
     cfg: DictConfig,
     opponent_factory: OpponentFactory | None = None,
     deck_split: str = "train",
+    sampler_spec: dict[str, Any] | None = None,
 ) -> list[Callable[[], EnvBase]]:
     """
     Build one environment factory per worker from the Hydra config.
@@ -329,9 +331,13 @@ def make_env_factories(
     :param deck_split: ``"train"`` (default) or ``"eval"``. Only affects runs
         with ``env.deck_pool`` set and a non-zero ``env.deck_holdout_frac``,
         where ``"eval"`` draws from the held-out, never-trained decks.
+    :param sampler_spec: Precomputed spec from :func:`_build_sampler_spec`, for
+        a caller that already built one for this exact ``deck_split``.
+        Built fresh when ``None``.
     :return: List of ``cfg.env.num_workers`` picklable environment factories.
     """
-    sampler_spec = _build_sampler_spec(cfg, deck_split)
+    if sampler_spec is None:
+        sampler_spec = _build_sampler_spec(cfg, deck_split)
     encoder = cfg.env.get("encoder", "structured")
     deck_switch_steps = int(cfg.env.get("deck_switch_steps", 0))
     return [
@@ -346,3 +352,20 @@ def make_env_factories(
         )
         for worker in range(cfg.env.num_workers)
     ]
+
+
+def build_probe_specs(cfg: DictConfig) -> tuple[Composite, Categorical]:
+    """
+    Derive the observation/action specs from a throwaway environment instance.
+
+    :param cfg: Hydra configuration with ``seed`` and an ``env`` section.
+    :return: The environment's observation and action specs.
+    """
+    probe_env = make_env_factories(cfg)[0]()
+    try:
+        obs_spec = probe_env.observation_spec
+        action_spec = probe_env.action_spec
+    finally:
+        probe_env.close()
+    assert isinstance(action_spec, Categorical), "env action spec must be Categorical"
+    return obs_spec, action_spec

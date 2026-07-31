@@ -26,8 +26,8 @@ eval_episodes: 100
 # gives a lower-variance curve; stochastic matches collection-time behaviour.
 eval_deterministic: true
 # Break the held-out win-rate down per deck archetype and log its spread across
-# archetypes (eval/archetype_win_rate_{mean,std,min,max} plus one
-# eval/archetype_win_rate/<archetype> series each).
+# archetypes (eval/archetype_win_rate_{mean,std,min,max} plus one consolidated
+# eval/archetype_win_rates line chart, not per-archetype scalar history).
 eval_per_archetype: true
 # Fixed opponent the evaluator scores against, set explicitly rather than
 # inherited from the environment's default. It must not move with the learner,
@@ -53,12 +53,13 @@ cross_play_games: 20
 # Cap on checkpoints entered into the run-end matrix; more than this are
 # subsampled evenly across the run so the ranking stays O(cap^2), not O(all^2).
 cross_play_max_checkpoints: 8
-
 # Best-response (exploitability) run: instead of self-play, train this learner
 # against one frozen agent and score it against the same agent. The learner's
 # eval win-rate is that agent's exploitability -- how beatable a best-responder
-# finds it (a Nash-like agent holds it near 0.5). Overrides self-play; ignores
-# snapshot_interval and eval_opponent. Set eval_interval > 0 to see the curve.
+# finds it (a Nash-like agent holds it near 0.5). Overrides self-play and
+# eval_opponent; still honors snapshot_interval (so the best-responder itself
+# is recoverable) and ignores cross_play (no self-play league to rank within).
+# Set eval_interval > 0 to see the curve.
 best_response: false
 # Saved agent (a save_actor_critic .pt) whose exploitability is measured;
 # required when best_response is true. Relative paths resolve against the

@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
@@ -41,26 +42,21 @@ def build_eval_opponent_factory(
     if name == "random":
         return partial(RandomOpponent, seed=int(cfg.seed))
     if name == "checkpoint":
-        checkpoint = cfg.train.get("eval_opponent_checkpoint")
-        if not checkpoint:
-            raise ValueError(
-                "eval_opponent='checkpoint' requires train.eval_opponent_checkpoint "
-                "to point at a saved snapshot."
-            )
         if obs_spec is None or action_spec is None:
             raise ValueError(
                 "A checkpoint eval opponent needs obs/action specs to rebuild its "
                 "network; pass them to build_eval_opponent_factory."
             )
-        path = Path(to_absolute_path(str(checkpoint)))
-        if not path.is_file():
-            raise ValueError(f"eval_opponent_checkpoint {path} does not exist.")
-        return partial(
-            _make_checkpoint_opponent,
-            cfg=cfg,
-            obs_spec=obs_spec,
-            action_spec=action_spec,
-            checkpoint_path=path,
+        return _checkpoint_opponent_factory(
+            cfg,
+            obs_spec,
+            action_spec,
+            checkpoint=cfg.train.get("eval_opponent_checkpoint"),
+            missing_message=(
+                "eval_opponent='checkpoint' requires train.eval_opponent_checkpoint "
+                "to point at a saved snapshot."
+            ),
+            not_found_prefix="eval_opponent_checkpoint",
         )
     raise ValueError(
         f"Unsupported eval_opponent '{name}'; expected 'random' or 'checkpoint'."
@@ -87,15 +83,46 @@ def build_best_response_opponent_factory(
     :return: A picklable opponent factory playing the frozen checkpoint.
     :raises ValueError: If the checkpoint path is missing or does not exist.
     """
-    checkpoint = cfg.train.get("best_response_checkpoint")
-    if not checkpoint:
-        raise ValueError(
+    return _checkpoint_opponent_factory(
+        cfg,
+        obs_spec,
+        action_spec,
+        checkpoint=cfg.train.get("best_response_checkpoint"),
+        missing_message=(
             "best_response requires train.best_response_checkpoint to point at the "
             "saved agent whose exploitability is being measured."
-        )
+        ),
+        not_found_prefix="best_response_checkpoint",
+    )
+
+
+def _checkpoint_opponent_factory(
+        cfg: DictConfig,
+        obs_spec: Composite,
+        action_spec: Categorical,
+        checkpoint: Any,
+        missing_message: str,
+        not_found_prefix: str,
+) -> OpponentFactory:
+    """
+    Validate a config-supplied checkpoint path and build its opponent factory.
+
+    :param cfg: Hydra config used to rebuild the matching architecture.
+    :param obs_spec: Environment observation composite spec.
+    :param action_spec: Environment action spec.
+    :param checkpoint: The config value for the checkpoint path (unset/empty
+        when the required override was not passed).
+    :param missing_message: Error raised when ``checkpoint`` is unset.
+    :param not_found_prefix: Prefix for the error when the path does not
+        resolve to a file, naming which config key it came from.
+    :return: A picklable opponent factory playing the frozen checkpoint.
+    :raises ValueError: If the checkpoint path is missing or does not exist.
+    """
+    if not checkpoint:
+        raise ValueError(missing_message)
     path = Path(to_absolute_path(str(checkpoint)))
     if not path.is_file():
-        raise ValueError(f"best_response_checkpoint {path} does not exist.")
+        raise ValueError(f"{not_found_prefix} {path} does not exist.")
     return partial(
         _make_checkpoint_opponent,
         cfg=cfg,

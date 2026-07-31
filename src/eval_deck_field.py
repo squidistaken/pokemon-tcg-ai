@@ -1,14 +1,13 @@
 from pathlib import Path
 
 import hydra
-import torch
 from dotenv import load_dotenv
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
-from torchrl.data import Categorical
 
-from src.policies.ppo_actor import build_actor_critic, build_ppo_operator
-from src.training import Evaluator, build_eval_opponent_factory, make_env_factories
+from src.policies.greedy_policy_opponent import load_actor_critic
+from src.policies.ppo_actor import build_ppo_operator
+from src.training import build_evaluator, build_probe_specs
 
 load_dotenv(Path(__file__).parents[1] / ".env", override=False)
 
@@ -39,26 +38,12 @@ def main(cfg: DictConfig) -> None:
     if not checkpoint_path.is_file():
         raise ValueError(f"train.eval_opponent_checkpoint {checkpoint_path} does not exist.")
 
-    probe_env = make_env_factories(cfg)[0]()
-    try:
-        obs_spec = probe_env.observation_spec
-        action_spec = probe_env.action_spec
-    finally:
-        probe_env.close()
-    assert isinstance(action_spec, Categorical), "env action spec must be Categorical"
+    obs_spec, action_spec = build_probe_specs(cfg)
 
-    actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
-    state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    actor_critic.load_state_dict(state_dict)
+    actor_critic = load_actor_critic(checkpoint_path, cfg, obs_spec, action_spec, device="cpu")
     policy = build_ppo_operator(actor_critic, action_spec).get_policy_operator()
 
-    opponent_factory = build_eval_opponent_factory(cfg, obs_spec, action_spec)
-    evaluator = Evaluator(
-        env_factory=make_env_factories(cfg, opponent_factory=opponent_factory, deck_split="eval")[0],
-        n_episodes=int(cfg.train.get("eval_episodes", 100)),
-        deterministic=bool(cfg.train.get("eval_deterministic", True)),
-        per_archetype=True,
-    )
+    evaluator = build_evaluator(cfg, obs_spec, action_spec)
     try:
         metrics = evaluator.evaluate(policy)
     finally:
