@@ -68,6 +68,7 @@ src/
   policies/
     random_masked_policy.py     Uniform random policy over the action mask (stand-in for the future PPO actor)
     greedy_policy_opponent.py   Greedy opponent baseline built on a saved ActorCritic checkpoint
+    inference.py                 SamplingPolicyAgent: main.py's submission agent, specs/checkpoint loading for Kaggle
     ppo_actor.py                 build_actor_critic / build_ppo_operator: assemble the ActorValueOperator from Hydra config
   training/
     trainer.py                  Trainer: parallel rollout collection via TorchRL's Collector

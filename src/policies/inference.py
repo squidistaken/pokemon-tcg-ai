@@ -2,10 +2,12 @@ from pathlib import Path
 
 import torch
 from omegaconf import OmegaConf
+from tensordict import TensorDict
 from torchrl.data import Categorical, Composite
 
+from cg.api import Observation
 from src.env.observation_encoder import ObservationEncoder
-from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
+from src.models.actor_critic import ActorCritic
 from src.policies.ppo_actor import build_actor_critic
 from src.training.env_factory import make_encoder
 
@@ -17,11 +19,6 @@ def build_inference_specs(
     """
     Build the observation/action specs :func:`~src.policies.ppo_actor.
     build_actor_critic` needs, without instantiating a live environment.
-
-    :class:`~src.env.tcg_env.TCGEnv` derives both purely from ``max_options``
-    and the encoder (``Composite(observation=encoder.spec(), ...)`` and
-    ``Categorical(max_options + 1)``); reproducing that here lets inference
-    rebuild the architecture without the engine, decks, or a battle handle.
 
     :param max_options: Padded size of the option space (stop action
         excluded) the checkpoint was trained with.
@@ -36,25 +33,126 @@ def build_inference_specs(
     return obs_spec, encoder, action_spec
 
 
+class SamplingPolicyAgent:
+    """
+    Our Kaggle submission agent: wraps a trained actor-critic and samples
+    actions from its learned distribution.
+
+    Answers a whole engine selection in one call: encodes the observation
+    from the acting seat, scores the option slots with the policy head, and
+    samples picks within ``[minCount, maxCount]`` using the learned **stop**
+    logit to decide how many to take.
+    """
+
+    def __init__(
+            self,
+            actor_critic: ActorCritic,
+            encoder: ObservationEncoder,
+            device: torch.device | str = "cpu",
+            generator: torch.Generator | None = None,
+    ) -> None:
+        """
+        :param actor_critic: Trained actor-critic to act with; put into eval
+            mode and never updated here.
+        :param encoder: Observation encoder matching the one used in training.
+        :param device: Device for inference.
+        :param generator: Optional RNG for reproducible sampling (e.g. in
+            tests).
+        """
+        self._device = torch.device(device)
+        self._actor_critic = actor_critic.to(self._device).eval()
+        self._encoder = encoder
+        self._generator = generator
+
+    @torch.inference_mode()
+    def __call__(self, observation: Observation) -> list[int]:
+        """
+        Sample a legal selection for the acting seat.
+
+        :param observation: Current engine observation with a non-None select;
+            ``current.yourIndex`` gives the acting seat used for encoding.
+        :return: Option indices to submit, between ``minCount`` and
+            ``maxCount`` entries with no duplicates.
+        """
+        select = observation.select
+        state = observation.current
+        if select is None or state is None:
+            raise ValueError("SamplingPolicyAgent requires an observation with current state and select.")
+        seat = state.yourIndex
+        # Match TCGEnv, which nests the encoder output under "observation".
+        encoded = TensorDict(
+            {"observation": self._encoder.encode(observation, seat, 0)},
+            batch_size=torch.Size(()),
+        )
+        # Guarded: on CPU .to() would still walk and copy every leaf for
+        # nothing, on every move.
+        if self._device.type != "cpu":
+            encoded = encoded.to(self._device)
+        logits = self._actor_critic.policy_logits(encoded)
+        return self.sample_select(
+            logits,
+            n_options=len(select.option),
+            min_count=select.minCount,
+            max_count=select.maxCount,
+            generator=self._generator,
+        )
+
+    @staticmethod
+    def sample_select(
+            logits: torch.Tensor,
+            n_options: int,
+            min_count: int,
+            max_count: int,
+            generator: torch.Generator | None = None,
+    ) -> list[int]:
+        """
+        Sample option indices from action logits, one pick at a time.
+
+        Options ``0..n_options-1`` map to logits ``0..n_options-1``; the final
+        logit is the synthetic **stop**. At each step, samples from the
+        softmax over the not-yet-picked options (plus stop, once ``minCount``
+        picks have been made), stopping when stop is drawn or ``maxCount`` is
+        reached.
+
+        :param logits: Action logits of shape ``(n_actions,)`` where
+            ``n_actions = max_options + 1``.
+        :param n_options: Number of real options offered by the selection.
+        :param min_count: Minimum number of options to pick.
+        :param max_count: Maximum number of options to pick.
+        :param generator: Optional RNG for reproducible sampling.
+        :return: Chosen option indices (a subset of ``range(n_options)``).
+        """
+        capacity = logits.shape[-1] - 1
+        n_options = min(n_options, capacity)
+        max_count = min(max_count, n_options)
+        stop_index = capacity
+        remaining = list(range(n_options))
+        picks: list[int] = []
+        while len(picks) < max_count:
+            candidates = remaining + ([stop_index] if len(picks) >= min_count else [])
+            probs = torch.softmax(logits[candidates], dim=-1)
+            choice = int(torch.multinomial(probs, 1, generator=generator).item())
+            chosen = candidates[choice]
+            if chosen == stop_index:
+                break
+            picks.append(chosen)
+            remaining.remove(chosen)
+        return picks
+
+
 def load_inference_agent(
         checkpoint_path: str | Path,
         model_config_path: str | Path,
         device: torch.device | str = "cpu",
-        deterministic: bool = False,
         generator: torch.Generator | None = None,
-) -> GreedyPolicyOpponent:
+) -> SamplingPolicyAgent:
     """
     Rebuild the submission agent from a self-contained checkpoint + config
     pair.
 
-    Unlike :func:`~src.policies.greedy_policy_opponent.load_greedy_opponent`
-    (which builds a self-play *opponent* from specs taken off a live training
-    environment), this is for instantiating our own agent for Kaggle
-    submission: it reads ``max_options``/``encoder`` from
-    ``model_config_path`` itself and derives the specs via
-    :func:`build_inference_specs`, so it needs nothing but the two files on
-    disk. This is the loader used by ``main.py`` and by
-    ``scripts/export_inference_checkpoint.py``.
+    Reads ``max_options``/``encoder`` from ``model_config_path`` and derives
+    the specs via :func:`build_inference_specs`, so it needs nothing but the
+    two files on disk.
 
     :param checkpoint_path: Path to a :func:`~src.policies.
         greedy_policy_opponent.save_actor_critic` state_dict.
@@ -62,16 +160,7 @@ def load_inference_agent(
         checkpoint, holding the resolved ``model`` config plus
         ``max_options``/``encoder``.
     :param device: Device for inference.
-    :param deterministic: If True, always take the highest-scoring legal
-        options. Defaults to False (sample from the learned distribution
-        instead): a deterministic policy is a fixed function of the observed
-        state, which an opponent can learn and reliably counter in a
-        competitive match, whereas sampling only exposes it to probabilities.
-        This default is specific to this Kaggle-inference loader; training's
-        :func:`~src.policies.greedy_policy_opponent.load_greedy_opponent`
-        keeps its own, separate default of True.
-    :param generator: Optional RNG for reproducible sampling; ignored when
-        ``deterministic`` is True.
+    :param generator: Optional RNG for reproducible sampling.
     :return: The checkpoint's agent, ready to act.
     """
     model_config = OmegaConf.load(model_config_path)
@@ -82,4 +171,4 @@ def load_inference_agent(
     actor_critic = build_actor_critic(model_config, obs_spec, action_spec)
     state_dict = torch.load(Path(checkpoint_path), map_location=device, weights_only=True)
     actor_critic.load_state_dict(state_dict)
-    return GreedyPolicyOpponent(actor_critic, encoder, device=device, deterministic=deterministic, generator=generator)
+    return SamplingPolicyAgent(actor_critic, encoder, device=device, generator=generator)
