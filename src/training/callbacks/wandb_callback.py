@@ -11,9 +11,6 @@ from src.training.callbacks.base import TrainingCallback
 
 logger = logging.getLogger(__name__)
 
-#: Prefix of the evaluator's per-archetype win-rate entries. These are pulled
-#: out of the flat scalar logging and drawn as one overlaid line chart instead
-#: of a scattered panel per archetype.
 _ARCHETYPE_PREFIX = "archetype_win_rate/"
 
 WandbMode = Literal["online", "offline", "disabled"]

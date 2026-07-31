@@ -17,12 +17,6 @@ def main(cfg: DictConfig) -> None:
     """
     Score one trained checkpoint's per-deck win rate against a varied field.
 
-    Loads ``train.eval_opponent_checkpoint`` as both the agent under test and
-    its opponent, then plays the held-out pool under ``env.deck_matchup=independent``,
-    so the resulting per-archetype win rate reflects deck strength against variety
-    rather than the mirror-matchup piloting-skill signal ``ppo_selfplay_multideck``'s
-    periodic eval reports.
-
     :param cfg: Hydra configuration, composed from conf/eval_deck_field.yaml.
     """
     print(OmegaConf.to_yaml(cfg, resolve=True))

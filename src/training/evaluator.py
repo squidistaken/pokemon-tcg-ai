@@ -20,11 +20,6 @@ def _episode_archetype(env: EnvBase) -> str | None:
     """
     Archetype the agent piloted in the episode the env just finished.
 
-    Reads the deck labels and agent seat off the underlying
-    :class:`~src.env.tcg_env.TCGEnv`, unwrapping any env transforms. Returns
-    None when the env carries no labels (an unlabelled deck pool or the
-    fixed-deck baseline), which leaves the aggregate-only path untouched.
-
     :param env: The evaluation environment, possibly transform-wrapped.
     :return: The agent's deck archetype, or None when unlabelled.
     """
@@ -167,8 +162,6 @@ class Evaluator:
         draws = 0
         unfinished = 0
         total_steps = 0
-        # archetype -> [scored episodes, wins]; populated only when the eval env
-        # exposes a labelled deck pool and per_archetype is on.
         per_archetype: dict[str, list[int]] = {}
         exploration = (
             ExplorationType.DETERMINISTIC if self._deterministic else ExplorationType.RANDOM

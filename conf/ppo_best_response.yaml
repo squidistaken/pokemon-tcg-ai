@@ -1,7 +1,8 @@
 # Best-response exploitability probe: freeze a trained agent and train a fresh
-# learner to beat it across the multi-deck corpus. The learner's eval/win_rate
-# is the frozen agent's exploitability -- how beatable a dedicated best-responder
-# finds it (a Nash-like agent holds it near 0.5, a brittle one far above).
+# learner to beat it across the multi-deck corpus. 
+# 
+# The learner's eval/win_rate is the frozen agent's exploitability, or how 
+# beatable a dedicated best-responder finds it.
 #
 # Usage:
 #   python -m src.train --config-name ppo_best_response \

@@ -173,11 +173,6 @@ def _deck_labels(kept_paths: list[str]) -> list[str]:
     """
     Resolve each deck to its archetype label for per-archetype evaluation.
 
-    Prefers the manifest's ``archetype`` field and falls back to the deck's 
-    parent folder name, which the scraper keeps per-archetype. The fallback
-    keeps unmanifested decks attributable rather than dropping them from the
-    breakdown.
-
     :param kept_paths: Deck CSV paths, aligned with the decks being labelled.
     :return: One archetype label per path.
     """
