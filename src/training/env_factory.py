@@ -7,6 +7,7 @@ from typing import Any
 
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
+from torchrl.data import Categorical, Composite
 from torchrl.envs import EnvBase, TransformedEnv
 from torchrl.envs.transforms import ActionMask
 
@@ -168,6 +169,44 @@ def _record_winrate(record: str | None) -> float | None:
     return wins / decided if decided > 0 else None
 
 
+def _deck_labels(kept_paths: list[str]) -> list[str]:
+    """
+    Resolve each deck to its archetype label for per-archetype evaluation.
+
+    :param kept_paths: Deck CSV paths, aligned with the decks being labelled.
+    :return: One archetype label per path.
+    """
+    manifest = _load_manifest_for(kept_paths)
+    labels: list[str] = []
+    for path in kept_paths:
+        entry = manifest.get(Path(path).stem, {})
+        archetype = entry.get("archetype")
+        labels.append(str(archetype) if archetype else Path(path).parent.name)
+    return labels
+
+
+def _limit_pool_width(
+    idx: list[int], kept_paths: list[str], width: int, seed: int
+) -> list[int]:
+    """
+    Restrict training-deck indices to a deterministic subset of archetypes.
+
+    :param idx: Candidate deck indices (the training split).
+    :param kept_paths: Deck paths aligned with the full pool, indexed by ``idx``.
+    :param width: Number of archetypes to keep.
+    :param seed: Seed for the deterministic archetype choice.
+    :return: The subset of ``idx`` whose decks belong to the chosen archetypes.
+    :raises ValueError: If ``width`` is below 1.
+    """
+    if width < 1:
+        raise ValueError(f"deck_pool_width must be >= 1, got {width}")
+    labels = _deck_labels([kept_paths[i] for i in idx])
+    archetypes = sorted(set(labels))
+    random.Random(seed).shuffle(archetypes)
+    chosen = set(archetypes[:width])
+    return [i for i, label in zip(idx, labels, strict=True) if label in chosen]
+
+
 def _deck_weights(kept_paths: list[str], scheme: str) -> list[float]:
     """
     Compute per-deck sampling weights from manifest metadata.
@@ -232,6 +271,13 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
         holdout_frac=float(cfg.env.get("deck_holdout_frac", 0.0)),
         seed=int(cfg.env.get("deck_split_seed", 0)),
     )
+    width = cfg.env.get("deck_pool_width")
+    if width is not None:
+        # The held-out eval set stays fixed so a width sweep varies training
+        # diversity against a constant yardstick.
+        train_idx = _limit_pool_width(
+            train_idx, kept_paths, int(width), int(cfg.env.get("deck_split_seed", 0))
+        )
     idx = holdout_idx if deck_split == "eval" else train_idx
     matchup = cfg.env.get("deck_matchup", "mirror")
     spec: dict[str, Any] = {
@@ -244,9 +290,17 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
         # Evaluation can/should use a different matchup than training.
         # ex. Training on `independent` (asymmetric) matchups is good for
         # robustness, but it makes the eval win-rate conflate piloting skill with deck luck.
-        # Eval also stays uniform over the held-out pool (no mix/weighting), so
+        # Eval also stays unweighted over the held-out pool (no mix/weighting), so
         # the generalization curve is an unbiased read across unseen decks.
         spec["matchup"] = cfg.env.get("eval_deck_matchup") or matchup
+        # Draw strategy for eval, independent of training's. round_robin gives
+        # deterministic even coverage of the held-out pool, so the per-archetype
+        # breakdown is not at the mercy of which decks a uniform draw happened to
+        # hit that round; null inherits deck_sampling.
+        spec["mode"] = cfg.env.get("eval_deck_sampling") or spec["mode"]
+        # Carry archetype labels so the evaluator can break the held-out win-rate
+        # down per archetype and report generalization variance across them.
+        spec["labels"] = _deck_labels([kept_paths[i] for i in idx])
         return spec
 
     mirror_prob = cfg.env.get("deck_mirror_prob")
@@ -262,6 +316,7 @@ def make_env_factories(
     cfg: DictConfig,
     opponent_factory: OpponentFactory | None = None,
     deck_split: str = "train",
+    sampler_spec: dict[str, Any] | None = None,
 ) -> list[Callable[[], EnvBase]]:
     """
     Build one environment factory per worker from the Hydra config.
@@ -271,9 +326,13 @@ def make_env_factories(
     :param deck_split: ``"train"`` (default) or ``"eval"``. Only affects runs
         with ``env.deck_pool`` set and a non-zero ``env.deck_holdout_frac``,
         where ``"eval"`` draws from the held-out, never-trained decks.
+    :param sampler_spec: Precomputed spec from :func:`_build_sampler_spec`, for
+        a caller that already built one for this exact ``deck_split``.
+        Built fresh when ``None``.
     :return: List of ``cfg.env.num_workers`` picklable environment factories.
     """
-    sampler_spec = _build_sampler_spec(cfg, deck_split)
+    if sampler_spec is None:
+        sampler_spec = _build_sampler_spec(cfg, deck_split)
     encoder = cfg.env.get("encoder", "structured")
     deck_switch_steps = int(cfg.env.get("deck_switch_steps", 0))
     return [
@@ -288,3 +347,20 @@ def make_env_factories(
         )
         for worker in range(cfg.env.num_workers)
     ]
+
+
+def build_probe_specs(cfg: DictConfig) -> tuple[Composite, Categorical]:
+    """
+    Derive the observation/action specs from a throwaway environment instance.
+
+    :param cfg: Hydra configuration with ``seed`` and an ``env`` section.
+    :return: The environment's observation and action specs.
+    """
+    probe_env = make_env_factories(cfg)[0]()
+    try:
+        obs_spec = probe_env.observation_spec
+        action_spec = probe_env.action_spec
+    finally:
+        probe_env.close()
+    assert isinstance(action_spec, Categorical), "env action spec must be Categorical"
+    return obs_spec, action_spec

@@ -25,9 +25,36 @@ eval_episodes: 100
 # Take the policy's argmax (true) or sample from it (false). Deterministic
 # gives a lower-variance curve; stochastic matches collection-time behaviour.
 eval_deterministic: true
+# Break the held-out win-rate down per deck archetype and log its spread across
+# archetypes (eval/archetype_win_rate_{mean,std,min,max} plus one
+# eval/archetype_win_rate/<archetype> series each).
+eval_per_archetype: true
 # Fixed opponent the evaluator scores against, set explicitly rather than
 # inherited from the environment's default. It must not move with the learner,
-# or the eval curve stops being comparable across the run. "random" is the only
-# implemented value. Note that it saturates: once the policy reliably beats
-# random the curve flattens.
+# or the eval curve stops being comparable across the run.
+#   random     -> uniform baseline; saturates once the policy reliably beats it.
+#   checkpoint -> a frozen snapshot at eval_opponent_checkpoint (e.g. a prior
+#                 run's best model), a stronger still-fixed yardstick.
 eval_opponent: random
+# Snapshot path for eval_opponent=checkpoint; a relative path resolves 
+# against the original working directory. Unused for eval_opponent=random.
+eval_opponent_checkpoint: null
+# Cross-play evaluation of the learner against its own frozen checkpoints
+# (needs snapshot_interval > 0). During training it logs the current model vs
+# the latest snapshot; at run end it round-robins every checkpoint into a 
+# win-rate matrix + Bradley-Terry Elo ranking, for picking which checkpoint to submit.
+cross_play: false
+# Games per pairing (per series). Higher is less noisy but costs more at run end.
+cross_play_games: 20
+# Cap on checkpoints entered into the run-end matrix.
+cross_play_max_checkpoints: 8
+# Best-response (exploitability) run: instead of self-play, train this learner
+# against one frozen agent and score it against the same agent. The learner's
+# eval win-rate is that agent's exploitability, or how beatable a best-responder
+# finds it. Overrides self-play and eval_opponent, still honors snapshot_interval 
+# so the best-responder itself is recoverable and ignores cross_play.
+# Set eval_interval > 0 to see the curve.
+best_response: false
+# Saved agent whose exploitability is measured; required when best_response is 
+# true. Relative paths resolve against the original working directory.
+best_response_checkpoint: null
