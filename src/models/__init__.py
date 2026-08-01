@@ -1,6 +1,7 @@
 from .actor_critic import ActorCritic
-from .backbone import Backbone, MLPBackbone, activation_class
+from .backbone import Backbone, activation_class
 from .heads import LinearPolicyHead, ValueHead
+from .mlp import MLPBackbone
 from .structured_obs_adapter import StructuredObsAdapter
 
 __all__ = [

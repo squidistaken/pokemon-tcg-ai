@@ -35,7 +35,7 @@ def checkpoint_config() -> dict:
         "model": {
             "embed_dim": 8,
             "backbone": {
-                "_target_": "src.models.backbone.MLPBackbone",
+                "_target_": "src.models.mlp.MLPBackbone",
                 "num_cells": [8],
                 "activation": "tanh",
             },

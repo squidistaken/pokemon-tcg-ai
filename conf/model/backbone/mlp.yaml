@@ -2,7 +2,7 @@
 # input_dim, out_features and the StructuredObsAdapter (which embeds card
 # IDs, normalizes scalars and pools unordered zones before the MLP; widths
 # in model.adapter) are injected by build_actor_critic from the specs.
-_target_: src.models.backbone.MLPBackbone
+_target_: src.models.mlp.MLPBackbone
 num_cells: [256, 256]
 activation: tanh
 # Observation keys to consume, nested under the env's "observation" key.

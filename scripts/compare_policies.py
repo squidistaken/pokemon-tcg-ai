@@ -26,7 +26,7 @@ def _load_policy(checkpoint_path, device="cpu"):
         "seed": 0,
         "model": {
             "embed_dim": 128,
-            "backbone": {"_target_": "src.models.backbone.MLPBackbone", "num_cells": [256,256],
+            "backbone": {"_target_": "src.models.mlp.MLPBackbone", "num_cells": [256,256],
                          "activation": "tanh", "in_keys": [
                              ["observation","globals"],["observation","select_cats"],
                              ["observation","context_card_ids"],["observation","stadium_id"],
@@ -95,7 +95,7 @@ def main():
     print(f"Loading opponent from {args.opponent}...")
     cfg = OmegaConf.create({
         "seed":0, "model":{"embed_dim":128,
-            "backbone":{"_target_":"src.models.backbone.MLPBackbone","num_cells":[256,256],
+            "backbone":{"_target_":"src.models.mlp.MLPBackbone","num_cells":[256,256],
                          "activation":"tanh","in_keys":[
                              ["observation","globals"],["observation","select_cats"],
                              ["observation","context_card_ids"],["observation","stadium_id"],

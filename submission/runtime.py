@@ -836,7 +836,7 @@ class ActorCritic(nn.Module):
         max_options: int,
     ) -> None:
         super().__init__()
-        if config["backbone"].get("_target_") != "src.models.backbone.MLPBackbone":
+        if config["backbone"].get("_target_") != "src.models.mlp.MLPBackbone":
             raise ValueError("Kaggle runtime supports only MLPBackbone checkpoints")
         if config["head"].get("_target_") != "src.models.heads.LinearPolicyHead":
             raise ValueError(

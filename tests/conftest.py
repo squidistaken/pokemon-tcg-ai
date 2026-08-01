@@ -111,7 +111,7 @@ def structured_model_cfg() -> DictConfig:
             "model": {
                 "embed_dim": 32,
                 "backbone": {
-                    "_target_": "src.models.backbone.MLPBackbone",
+                    "_target_": "src.models.mlp.MLPBackbone",
                     "num_cells": [32],
                     "activation": "tanh",
                     "in_keys": [

@@ -70,7 +70,7 @@ def _input_dim(obs_spec: Composite, in_keys: list[str]) -> int:
     :param obs_spec: Observation composite spec of the environment.
     :param in_keys: Observation keys the backbone consumes; an entry may name
         a leaf field or a composite group (see :func:`_feature_width`).
-    :return: Total input width fed to :class:`~src.models.backbone.MLPBackbone`.
+    :return: Total input width fed to :class:`~src.models.mlp.MLPBackbone`.
     """
     return sum(_feature_width(obs_spec[key]) for key in in_keys)
 
