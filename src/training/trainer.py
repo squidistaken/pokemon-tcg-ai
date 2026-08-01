@@ -5,6 +5,7 @@ from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
 from typing import Any, cast
 
+import torch.multiprocessing as torch_mp
 from tensordict import TensorDict
 from torch import Tensor, nn
 from torchrl.collectors import Collector
@@ -14,6 +15,7 @@ from tqdm import tqdm
 from src.training.base_trainer import BaseTrainer
 from src.training.callbacks import CallbackList, TrainingCallback
 from src.training.evaluator import Evaluator
+from src.training.multi_evaluator import MultiEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +76,7 @@ class Trainer(BaseTrainer):
             serial_for_single: bool = True,
             callbacks: Iterable[TrainingCallback] | None = None,
             run_config: Mapping[str, Any] | None = None,
-            evaluator: Evaluator | None = None,
+            evaluator: Evaluator | MultiEvaluator | None = None,
             eval_interval: int = 0,
     ) -> None:
         """
@@ -90,9 +92,11 @@ class Trainer(BaseTrainer):
             end. None attaches nothing, leaving console logging as the only sink.
         :param run_config: Opaque run metadata (in practice the resolved Hydra
             config) forwarded verbatim to ``on_train_start``; never read here.
-        :param evaluator: Scores the policy against a fixed reference opponent
-            every ``eval_interval`` frames, reporting through ``on_eval_end``.
-            None skips evaluation entirely. Needed under self-play, where the
+        :param evaluator: Scores the policy against one fixed reference opponent
+            (:class:`~src.training.evaluator.Evaluator`) or several
+            (:class:`~src.training.multi_evaluator.MultiEvaluator`) every
+            ``eval_interval`` frames, reporting through ``on_eval_end``. None
+            skips evaluation entirely. Needed under self-play, where the
             collected win-rate is pinned near 0.5 by construction.
         :param eval_interval: Frames between evaluations; ``0`` disables them
             even when an evaluator is supplied.
@@ -285,9 +289,19 @@ class Trainer(BaseTrainer):
         """
         Build the vectorized environment from the injected factories.
 
+        The process-wide start method is forced to match before construction.
+        Importing torchrl sets it to ``spawn``, and ``ParallelEnv`` starts its
+        workers lazily on first use, so the constructor argument alone does not
+        decide how they are ultimately created. Under ``spawn`` anything the
+        factories close over is pickled, which silently gives every worker a
+        private copy of what was meant to be shared memory -- the level
+        curriculum's distribution channel in particular, which then freezes at
+        whatever was published before collection began.
+
         :return: ParallelEnv (fork workers) or SerialEnv over the factories.
         """
         if self._use_parallel_env:
+            torch_mp.set_start_method(self._mp_start_method, force=True)
             return ParallelEnv(
                 num_workers=len(self._env_factories),
                 create_env_fn=self._env_factories,

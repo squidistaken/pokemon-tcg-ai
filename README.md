@@ -78,6 +78,11 @@ src/
     deck.py                     Deck CSV loading
     opponent_pool.py            Self-play opponent pool (samples/holds frozen policy snapshots)
     snapshot_opponent_pool.py   OpponentPool that discovers new learner snapshots from disk (ParallelEnv-safe)
+    pfsp_opponent_pool.py       Prioritized Fictitious Self-Play: weights league members by the learner's win rate against them
+    archetype_index.py          Groups the deck corpus by archetype folder and numbers the resulting matchups
+    level_buffer.py             Prioritized Level Replay buffer over archetype matchups (scores, staleness, win/loss tallies)
+    curriculum_handles.py       Shared-memory channel carrying the level distribution from learner to env workers
+    curriculum_deck_sampler.py  DeckSampler drawing each episode's matchup from that channel
     random_opponent.py          Uniform-random opponent baseline
   models/                     Actor-critic network, independent of the policy/training wiring
     backbone.py                  Backbone ABC + MLPBackbone (DeepSets/SetTransformer/TemporalTransformer/Recurrent planned)
@@ -97,11 +102,17 @@ src/
     env_factory.py               Builds TransformedEnv instances (deck + opponent + ActionMask) for the collector
     self_play.py                 build_opponent_factory: the picklable self-play league factory handed to each env worker
     evaluator.py                 Evaluator: scores the policy against a fixed opponent (readable curve under self-play)
+    multi_evaluator.py           MultiEvaluator: runs several Evaluators, namespacing metrics per reference opponent
+    curriculum.py                Curriculum: owns the level buffer, scores each collected batch, republishes the distribution
+    cross_play.py                Round-robins frozen checkpoints into a win-rate matrix + Bradley-Terry Elo ranking
     callbacks/                  Metric sinks; the trainer emits, these decide where it goes
       base.py                     TrainingCallback hooks + CallbackList (fan-out, propagates failures)
       snapshot_callback.py        SnapshotCallback: freezes the learner into the self-play league at a frame interval
+      curriculum_callback.py      CurriculumStateCallback: dumps the level buffer's win/loss tallies at a frame interval
+      cross_play_callback.py      CrossPlayCallback: scores the learner against its own snapshots, ranks them at run end
       wandb_callback.py           WeightsAndBiases: the only module that imports wandb
   train.py                    Hydra entry point (python -m src.train)
+  eval_deck_field.py          Scores a saved agent per archetype across a deck field (python -m src.eval_deck_field)
 
 conf/                        Hydra configs (config.yaml + env/, agent/, model/, train/, collector/, callbacks/, experiment/ groups)
   paths/default.yaml          Scheduler-independent input and output locations
@@ -129,7 +140,9 @@ submission/
   runtime.py                   Torch-only structured encoder/model/greedy inference implementation
 checkpoint/                  Assets generated for the repository-root inference entry point
 decks/                       Example deck CSVs
-docs/                        Design docs (torchrl_environment.md, game.md)
+docs/                        Design docs (torchrl_environment.md, game.md, research/curriculum-design.md,
+                             training-performance.md: measured throughput and recommended num_workers,
+                             research/curriculum-experiment-01.md: PLR vs uniform results)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
 main.py                      Alternate inference entry point; not used by make_submission.py
 slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts
@@ -163,6 +176,30 @@ backend and DEBUG logging, finishing in a few seconds:
 ```bash
 python -m src.train +experiment=debug
 ```
+
+### Level curriculum
+
+`env=curriculum_v2` replaces uniform deck sampling with Prioritized Level Replay over
+deck-archetype matchups. The learner scores each matchup by how much systematic error the
+critic still carries on it, and republishes a sampling distribution to the environment
+workers after every batch, so training concentrates on the matchups it handles worst:
+
+```bash
+python -m src.train agent=ppo env=curriculum_v2 train=ppo_selfplay
+```
+
+Pair it with `train=ppo_selfplay`, which also enables PFSP over the self-play league. The
+two are complementary: a hard matchup played against an obsolete snapshot is still a
+trivial win, so prioritizing the deck axis while leaving the opponent axis uniform lets
+them cancel.
+
+Requires `env.deck_pool` and `env.mp_start_method=fork` — the distribution reaches the
+workers through shared memory, which `spawn` would copy instead of share. Both are checked
+at startup rather than silently degrading. Curriculum statistics are logged under
+`curriculum/`, and the buffer's win/loss tallies are dumped periodically to the run
+directory for later deck selection.
+
+Design rationale is in [`docs/research/curriculum-design.md`](docs/research/curriculum-design.md).
 
 ### Self-play
 

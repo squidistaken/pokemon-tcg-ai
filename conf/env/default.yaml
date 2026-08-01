@@ -49,6 +49,35 @@ deck_holdout_frac: 0.0
 deck_pool_width: null
 # Seed for the deterministic train/holdout split.
 deck_split_seed: 0
+# Prioritized Level Replay over deck-archetype matchups. When enabled, each
+# episode's matchup is drawn from a distribution the learner maintains, rather
+# than uniformly from the pool, so training concentrates on the matchups the
+# critic still misjudges. Requires deck_pool and mp_start_method=fork.
+curriculum:
+  enabled: false
+  # Maximum matchups scored at once. Must be at least the square of the
+  # archetype count; above it, nothing is ever evicted and the buffer simply
+  # holds the whole level space.
+  capacity: 4000
+  # Rank-distribution temperature; lower is greedier toward top-scoring levels.
+  score_temperature: 0.9
+  # Weight of the staleness term in the sampling mixture. Set above the PLR
+  # paper's 0.25 because self-play moves the league underneath a level and ages
+  # its score for reasons unrelated to learning, and because staleness is the
+  # only thing that recovers a level whose score has gone flat.
+  staleness_coefficient: 0.4
+  # Episodes a matchup needs before its score is trusted or it may be evicted.
+  # A handful of terminal +/-1 outcomes says almost nothing.
+  min_visits: 5
+  # Score only episodes played against the fixed anchor opponent. Off by
+  # default: it removes the drift a strengthening league induces in level
+  # scores, but discards most episodes' scoring signal. Turn on only if the
+  # logged diagnostic shows the drift matters.
+  anchor_only_scoring: false
+  # Frames between dumps of the buffer's win/loss tallies. Deck selection needs
+  # those over a window of training, which a single end-of-run total cannot
+  # provide. Null derives an interval from the batch size.
+  state_interval: null
 # Padded size of the option space (stop action excluded); must exceed the
 # largest option list the engine can offer, or options get truncated.
 max_options: 128
