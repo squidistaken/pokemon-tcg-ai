@@ -259,8 +259,8 @@ uv run python scripts/make_submission.py \
   --yes
 ```
 
-Greedy action selection is the default. To sample from the learned masked
-distribution instead, add `--action-selection sample`.
+Sampling from the learned masked distribution is the default. To use
+deterministic highest-score selection instead, add `--action-selection greedy`.
 
 To rebuild an existing label and upload it through the official CLI in one
 command, add `--force --submit`:
@@ -311,10 +311,10 @@ TorchRL nor the repository's `cg` Python package. The bundle therefore carries
 a pure-Python observation parser and Torch-only inference implementation; it
 contains no TensorDict, Hydra, OmegaConf, or native simulator dependency.
 
-Submission inference defaults to deterministic greedy selection for reproducible
-validation and replays. Pass `--action-selection sample` to draw each legal
-choice from the learned masked distribution instead. Both modes re-encode the
-partial selection before each subsequent choice, matching training behavior.
+Submission inference samples each legal choice from the learned masked
+distribution by default, matching training behavior. Pass
+`--action-selection greedy` for deterministic highest-score selection. Both
+modes re-encode the partial selection before each subsequent choice.
 
 The current portable runtime supports structured-observation checkpoints using
 `MLPBackbone` and `LinearPolicyHead`. The builder strictly reconstructs both the

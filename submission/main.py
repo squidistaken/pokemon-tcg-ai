@@ -22,15 +22,15 @@ if not _IS_PACKAGE and (not sys.path or sys.path[0] != _BUNDLE_PATH):
 
 if _IS_PACKAGE:
     from .cg_api import Observation, to_observation_class
-    from .runtime import InferencePolicy
+    from .runtime import Policy
 else:
     from cg_api import Observation, to_observation_class
-    from runtime import InferencePolicy
+    from runtime import Policy
 
 # Kaggle calls agent() once per engine selection in the same interpreter. Keep
 # the loaded weights and rebuilt network for that process instead of repeating
 # both relatively expensive operations on every decision.
-_CACHED_POLICY: InferencePolicy | None = None
+_CACHED_POLICY: Policy | None = None
 
 
 def read_deck_csv() -> list[int]:
@@ -48,7 +48,7 @@ def read_deck_csv() -> list[int]:
     return cards
 
 
-def _load_policy() -> InferencePolicy:
+def _load_policy() -> Policy:
     """Lazily rebuild and process-cache the bundled trained policy."""
     global _CACHED_POLICY
     if _CACHED_POLICY is not None:
@@ -61,7 +61,7 @@ def _load_policy() -> InferencePolicy:
         )
     except TypeError:  # torch<2.0 does not support weights_only.
         payload = torch.load(_BUNDLE_DIR / "model.pt", map_location="cpu")
-    _CACHED_POLICY = InferencePolicy(payload, config)
+    _CACHED_POLICY = Policy(payload, config)
     return _CACHED_POLICY
 
 

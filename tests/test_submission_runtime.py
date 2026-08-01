@@ -15,7 +15,7 @@ from src.env.structured_observation_encoder import (
 )
 from src.policies.ppo_actor import build_actor_critic
 from submission.cg_api import to_observation_class
-from submission.runtime import InferencePolicy, StructuredObservationEncoder
+from submission.runtime import Policy, StructuredObservationEncoder
 from tests.conftest import DECK_PATH, MAX_OPTIONS
 
 
@@ -33,7 +33,7 @@ def _assert_nested_equal(expected: Any, actual: Any) -> None:
 
 def _portable_config(
     model_config: Any,
-    action_selection: str = "greedy",
+    action_selection: str = "sample",
 ) -> dict[str, Any]:
     return {
         "model": OmegaConf.to_container(model_config.model, resolve=True),
@@ -80,7 +80,7 @@ def test_torch_only_model_matches_training_logits(
         structured_model_cfg, structured_obs_spec, action_spec
     ).eval()
     payload = {"state_dict": actor_critic.state_dict()}
-    policy = InferencePolicy(payload, _portable_config(structured_model_cfg))
+    policy = Policy(payload, _portable_config(structured_model_cfg))
     fixtures = torch.load(
         Path(__file__).parent / "fixtures" / "observations.pt",
         weights_only=False,
@@ -91,6 +91,23 @@ def test_torch_only_model_matches_training_logits(
         expected = actor_critic.policy_logits(case)
         actual = policy.model.policy_logits(case["observation"].to_dict())
         torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
+
+
+def test_policy_defaults_to_sampling_without_inference_config(
+    structured_model_cfg,
+    structured_obs_spec,
+    action_spec,
+) -> None:
+    """Older model configs sample by default when no serving mode is embedded."""
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    config = _portable_config(structured_model_cfg)
+    del config["inference"]
+
+    policy = Policy({"state_dict": actor_critic.state_dict()}, config)
+
+    assert policy.action_selection == "sample"
 
 
 @pytest.mark.parametrize("action_selection", ["greedy", "sample"])
@@ -106,7 +123,7 @@ def test_inference_modes_produce_legal_sequential_selection(
     actor_critic = build_actor_critic(
         structured_model_cfg, structured_obs_spec, action_spec
     ).eval()
-    policy = InferencePolicy(
+    policy = Policy(
         {"state_dict": actor_critic.state_dict()},
         _portable_config(structured_model_cfg, action_selection),
     )
@@ -141,7 +158,7 @@ def test_inference_modes_produce_legal_sequential_selection(
         assert sample_calls > 0
 
 
-def test_inference_policy_rejects_unknown_action_selection(
+def test_policy_rejects_unknown_action_selection(
     structured_model_cfg,
     structured_obs_spec,
     action_spec,
@@ -153,4 +170,4 @@ def test_inference_policy_rejects_unknown_action_selection(
     config = _portable_config(structured_model_cfg, "unknown")
 
     with pytest.raises(ValueError, match="action_selection"):
-        InferencePolicy({"state_dict": actor_critic.state_dict()}, config)
+        Policy({"state_dict": actor_critic.state_dict()}, config)

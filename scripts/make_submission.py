@@ -44,7 +44,7 @@ from src.env.battle_handle import BattleHandle
 from src.env.structured_observation_encoder import StructuredObservationEncoder
 from src.policies.greedy_policy_opponent import checkpoint_state_dict
 from src.policies.ppo_actor import build_actor_critic
-from submission.runtime import InferencePolicy as PortableInferencePolicy
+from submission.runtime import Policy as PortablePolicy
 
 COMPETITION = "pokemon-tcg-ai-battle"
 _HASH_SELECTOR = re.compile(r"[0-9a-fA-F]{8,64}")
@@ -161,7 +161,7 @@ class SubmissionPlan:
     archive: Path
     competition: str
     message: str
-    action_selection: str = "greedy"
+    action_selection: str = "sample"
 
 
 def repo_root() -> Path:
@@ -342,7 +342,7 @@ def _validate_checkpoint_compatibility(
         action_spec = Categorical(max_options + 1, dtype=torch.int64)
         actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
         actor_critic.load_state_dict(checkpoint_state_dict(payload), strict=True)
-        PortableInferencePolicy(payload, config)
+        PortablePolicy(payload, config)
     except Exception as error:
         raise SubmissionError(
             "Checkpoint weights are incompatible with the structured model config: "
@@ -807,10 +807,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--action-selection",
         choices=("greedy", "sample"),
-        default="greedy",
+        default="sample",
         help=(
             "Choose the highest-scoring legal action or sample from the learned "
-            "distribution (default: greedy)."
+            "distribution (default: sample)."
         ),
     )
     parser.add_argument(

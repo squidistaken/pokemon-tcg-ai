@@ -159,7 +159,6 @@ def test_build_submission_has_kaggle_root_shape_and_audited_runtime(tmp_path) ->
         archive=tmp_path / "submissions" / "test-agent.tar.gz",
         competition="pokemon-tcg-ai-battle",
         message="test-agent",
-        action_selection="sample",
     )
 
     archive_digest = build_submission(plan)
@@ -297,7 +296,7 @@ def test_extracted_bundle_strictly_rebuilds_generated_policy(tmp_path) -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "InferencePolicy True True"
+    assert result.stdout.strip() == "Policy True True"
 
 
 def test_registry_staleness_and_malformed_rows_block_latest(tmp_path) -> None:

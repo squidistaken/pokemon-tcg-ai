@@ -818,7 +818,7 @@ class ActorCritic(nn.Module):
         return self.policy_head.linear(self.backbone(observation))
 
 
-class InferencePolicy:
+class Policy:
     """
     Torch-only greedy or sampling policy used by the Kaggle entry point.
 
@@ -837,7 +837,7 @@ class InferencePolicy:
         if not isinstance(inference_config, Mapping):
             raise TypeError("inference config must be a mapping")
         self.action_selection = str(
-            inference_config.get("action_selection", "greedy")
+            inference_config.get("action_selection", "sample")
         )
         if self.action_selection not in {"greedy", "sample"}:
             raise ValueError(
