@@ -1,0 +1,16 @@
+# @package _global_
+# Weights & Biases metric backend. Needs WANDB_API_KEY in .env or `wandb login`.
+# Values live in the top-level `wandb:` block of config.yaml so they override as
+# `wandb.group=...` rather than by position in this list.
+callbacks:
+  - _target_: src.training.callbacks.WeightsAndBiases
+    project: ${wandb.project}
+    entity: ${wandb.entity}
+    name: ${wandb.name}
+    group: ${wandb.group}
+    job_type: ${wandb.job_type}
+    tags: ${wandb.tags}
+    mode: ${wandb.mode}
+    notes: ${wandb.notes}
+    dir: ${wandb.dir}
+    log_checkpoints: ${wandb.log_checkpoints}

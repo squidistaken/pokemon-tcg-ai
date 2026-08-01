@@ -1,0 +1,220 @@
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, cast
+
+import torch
+from omegaconf import DictConfig
+from tensordict import TensorDict
+from torchrl.data import Composite, TensorSpec
+
+from cg.api import Observation
+from src.env.observation_encoder import ObservationEncoder
+from src.models.actor_critic import ActorCritic
+from src.policies.ppo_actor import build_actor_critic
+
+CHECKPOINT_FORMAT_VERSION = 1
+
+
+def save_actor_critic(
+        actor_critic: ActorCritic,
+        path: str | Path,
+        *,
+        config: Mapping[str, Any] | None = None,
+        frames: int | None = None,
+) -> Path:
+    """
+    Snapshot an actor-critic's parameters to disk.
+
+    With ``config=None`` this saves the legacy bare ``state_dict()`` format.
+    Training passes the small inference-time config, producing a versioned
+    checkpoint that can rebuild itself for Kaggle packaging without relying on
+    the Hydra output directory still being present.
+
+    :param actor_critic: Actor-critic to snapshot.
+    :param path: Destination file path.
+    :param config: Resolved inference-time model/environment config to embed.
+    :param frames: Collected-frame counter for this checkpoint.
+    :return: The path written to.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state_dict = actor_critic.state_dict()
+    payload: object = state_dict
+    if config is not None:
+        payload = {
+            "format_version": CHECKPOINT_FORMAT_VERSION,
+            "state_dict": state_dict,
+            "config": dict(config),
+            "frames": frames,
+        }
+    torch.save(payload, path)
+    return path
+
+
+def checkpoint_state_dict(payload: object) -> Mapping[str, torch.Tensor]:
+    """
+    Return model parameters from either the versioned or legacy checkpoint.
+
+    :param payload: Object returned by :func:`torch.load`.
+    :return: Actor-critic state dict.
+    :raises ValueError: If a versioned checkpoint has no mapping state dict.
+    """
+    if isinstance(payload, Mapping) and "state_dict" in payload:
+        state_dict = payload["state_dict"]
+        if not isinstance(state_dict, Mapping):
+            raise ValueError("Checkpoint 'state_dict' must be a mapping.")
+        return cast(Mapping[str, torch.Tensor], state_dict)
+    if not isinstance(payload, Mapping):
+        raise TypeError("Checkpoint must contain a state-dict mapping.")
+    return cast(Mapping[str, torch.Tensor], payload)
+
+
+class GreedyPolicyOpponent:
+    """
+    Deterministic policy opponent wrapping a trained actor-critic.
+
+    This is the self-play snapshot: a frozen network dropped into the opponent
+    seat via the environment's ``opponent`` callable / an
+    :class:`~src.env.opponent_pool.OpponentPool`. Like
+    :class:`~src.env.random_opponent.RandomOpponent`, it answers a whole engine
+    selection in one call (the environment does not decompose the opponent's
+    multi-select), so it mirrors the Kaggle ``main.py`` inference path: encode
+    the observation from the acting seat, score the option slots with the
+    policy head, and greedily take the highest-scoring legal options, using the
+    learned **stop** logit to decide how many to take within
+    ``[minCount, maxCount]``.
+
+    The wrapped :class:`~src.models.actor_critic.ActorCritic` and the encoder
+    are used exactly as in training, keeping train/serve behavior aligned.
+    """
+
+    def __init__(
+            self,
+            actor_critic: ActorCritic,
+            encoder: ObservationEncoder,
+            device: torch.device | str = "cpu",
+    ) -> None:
+        """
+        :param actor_critic: Trained actor-critic to act greedily with; put
+            into eval mode and never updated here.
+        :param encoder: Observation encoder matching the one used in training
+            (the flat encoder for the Phase-1 baseline).
+        :param device: Device for inference.
+        """
+        self._device = torch.device(device)
+        self._actor_critic = actor_critic.to(self._device).eval()
+        self._encoder = encoder
+
+    @torch.inference_mode()
+    def __call__(self, observation: Observation) -> list[int]:
+        """
+        Choose a greedy legal selection for the acting seat.
+
+        :param observation: Current engine observation with a non-None select;
+            ``current.yourIndex`` gives the acting seat used for encoding.
+        :return: Option indices to submit, between ``minCount`` and
+            ``maxCount`` entries with no duplicates.
+        """
+        select = observation.select
+        state = observation.current
+        if select is None or state is None:
+            raise ValueError("GreedyPolicyOpponent requires an observation with current state and select.")
+        seat = state.yourIndex
+        # Match TCGEnv, which nests the encoder output under "observation".
+        encoded = TensorDict(
+            {"observation": self._encoder.encode(observation, seat, 0)},
+            batch_size=torch.Size(()),
+        )
+        # Guarded: on CPU .to() would still walk and copy
+        # every leaf for nothing, on every opponent move.
+        if self._device.type != "cpu":
+            encoded = encoded.to(self._device)
+        logits = self._actor_critic.policy_logits(encoded)
+        return self.greedy_select(
+            logits,
+            n_options=len(select.option),
+            min_count=select.minCount,
+            max_count=select.maxCount,
+        )
+
+    @staticmethod
+    def greedy_select(
+            logits: torch.Tensor,
+            n_options: int,
+            min_count: int,
+            max_count: int,
+    ) -> list[int]:
+        """
+        Greedily pick option indices from action logits.
+
+        Options ``0..n_options-1`` map to logits ``0..n_options-1``; the final
+        logit is the synthetic **stop**. Options are taken in descending logit
+        order until ``max_count`` is reached, or until ``min_count`` is met and
+        the next-best option scores no higher than stop.
+
+        :param logits: Action logits of shape ``(n_actions,)`` where
+            ``n_actions = max_options + 1``.
+        :param n_options: Number of real options offered by the selection.
+        :param min_count: Minimum number of options to pick.
+        :param max_count: Maximum number of options to pick.
+        :return: Chosen option indices (a subset of ``range(n_options)``).
+        """
+        capacity = logits.shape[-1] - 1
+        n_options = min(n_options, capacity)
+        max_count = min(max_count, n_options)
+        stop_logit = logits[capacity]
+        order = torch.argsort(logits[:n_options], descending=True).tolist()
+        picks: list[int] = []
+        for index in order:
+            if len(picks) >= max_count:
+                break
+            if len(picks) >= min_count and logits[index] <= stop_logit:
+                break
+            picks.append(int(index))
+        return picks
+
+
+def load_actor_critic(
+        checkpoint_path: str | Path,
+        cfg: DictConfig,
+        obs_spec: Composite,
+        action_spec: TensorSpec,
+        device: torch.device | str = "cpu",
+) -> ActorCritic:
+    """
+    Rebuild an actor-critic from config and load a snapshot's weights.
+
+    :param checkpoint_path: Path to a :func:`save_actor_critic` snapshot.
+    :param cfg: Hydra config used to build the matching architecture.
+    :param obs_spec: Environment observation composite spec.
+    :param action_spec: Environment action spec.
+    :param device: Device to load the weights onto.
+    :return: The reconstructed actor-critic with the checkpoint's weights.
+    """
+    actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
+    payload = torch.load(Path(checkpoint_path), map_location=device, weights_only=True)
+    actor_critic.load_state_dict(checkpoint_state_dict(payload))
+    return actor_critic
+
+
+def load_greedy_opponent(
+        checkpoint_path: str | Path,
+        cfg: DictConfig,
+        obs_spec: Composite,
+        action_spec: TensorSpec,
+        encoder: ObservationEncoder,
+        device: torch.device | str = "cpu",
+) -> GreedyPolicyOpponent:
+    """
+    Load a snapshot and wrap it as a greedy opponent.
+
+    :param checkpoint_path: Path to a :func:`save_actor_critic` snapshot.
+    :param cfg: Hydra config used to build the matching architecture.
+    :param obs_spec: Environment observation composite spec.
+    :param action_spec: Environment action spec.
+    :param encoder: Observation encoder matching training.
+    :param device: Device for inference.
+    :return: A greedy opponent playing the snapshot.
+    """
+    actor_critic = load_actor_critic(checkpoint_path, cfg, obs_spec, action_spec, device)
+    return GreedyPolicyOpponent(actor_critic, encoder, device=device)

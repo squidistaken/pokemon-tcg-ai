@@ -1,0 +1,49 @@
+# Hydra docs: https://hydra.cc/docs/intro/
+# Random baseline (default):  python -m src.train
+# PPO/MLP baseline:           python -m src.train agent=ppo
+# PPO/MLP self-play:          python -m src.train agent=ppo train=ppo_selfplay
+# No W&B run:                 python -m src.train callbacks=none
+# Label a run:                python -m src.train agent=ppo wandb.group=ablation-lr
+defaults:
+  - paths: default
+  - agent: dummy
+  - env: default
+  - collector: default
+  - model: default
+  - train: fixed_opponent
+  - callbacks: wandb
+  - _self_
+
+seed: 42
+set_seed: false
+
+# W&B run settings, read by conf/callbacks/wandb.yaml. Kept at the top level so
+# a run is labelled with `wandb.group=...` regardless of which callbacks group
+# is selected; under `callbacks=none` these are simply unused.
+wandb:
+  project: pokemon-tcg-ai
+  # null sends each teammate's runs to their own default entity.
+  entity: pokemon-tcg-ai
+  # e.g. ppo-mlp-linear-s42; null gives W&B's random names instead.
+  name: ${hydra:runtime.choices.agent}-${hydra:runtime.choices.model/backbone}-${hydra:runtime.choices.model/head}-s${seed}
+  # Keeps related runs (a sweep, a seed set) together in the UI.
+  group: null
+  job_type: train
+  tags: []
+  # online requires working credentials/network; offline is an explicit choice.
+  mode: online
+  notes: null
+  # Keep W&B's local files beside this Hydra run, including on scratch.
+  dir: ${hydra:runtime.output_dir}
+  # Mirror the final PPO checkpoint as a W&B model artifact.
+  log_checkpoints: true
+
+# Keep Hydra's own logs and multirun artifacts under the configured output
+# location as well. The default expands to Hydra's usual outputs/date/time
+# layout; Slurm profiles can redirect the root to scratch storage.
+hydra:
+  run:
+    dir: ${paths.output_dir}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ${paths.output_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

@@ -1,0 +1,93 @@
+# Keys shared by every training variant in this group. The variants
+# (fixed_opponent.yaml, ppo_selfplay.yaml) include this file and override only
+# what actually differs between them, so a key lives in exactly one place.
+# Defaults here are the "off" settings: no self-play league, no periodic eval.
+
+# Opponent faced before the first learner snapshot exists, and a permanent
+# league member afterwards, so the agent keeps a fixed reference point instead
+# of drifting against copies of itself. "random" is the only implemented value.
+warmup_opponent: random
+# Freeze the learner into the self-play pool every N collected frames
+# (0 disables periodic self-play snapshots -> train against the warmup
+# opponent only). Every PPO run still writes one final submission checkpoint.
+snapshot_interval: 0
+# Directory learner snapshots are written to and reloaded from (ParallelEnv
+# workers reload from disk; no shared Python object across processes).
+# Relative paths resolve inside the Hydra run directory, so each run gets a
+# fresh league and cannot inherit a previous run's snapshots.
+checkpoint_dir: checkpoints
+# Number of most-recent snapshots kept in the opponent pool.
+pool_size: 5
+
+# How the league draws the opponent for each episode:
+#   uniform -> every member equally likely (plain fictitious self-play).
+#   pfsp    -> weight members by the learner's win rate against them, so the
+#              budget concentrates on members that still contest the game
+#              instead of on ones already beaten. Win rates are tracked per
+#              worker from terminal rewards; no extra inter-process traffic.
+opponent_sampling: uniform
+# PFSP weighting scheme (ignored under uniform sampling):
+#   hard -> (1 - p)^pfsp_exponent, favours members that beat the learner.
+#   even -> p * (1 - p), favours members the learner is level with.
+pfsp_weighting: hard
+# Exponent of the `hard` scheme; larger concentrates harder. Unused by `even`.
+pfsp_exponent: 2.0
+# Floor added to every member's weight so none becomes unreachable: a member
+# the learner always beats still needs occasional games, or its win rate stops
+# tracking the current policy.
+pfsp_min_weight: 0.05
+# Strength of the p = 0.5 prior, in games. Keeps the first episodes against a
+# fresh snapshot from pinning its weight to an extreme.
+pfsp_prior_games: 2.0
+
+# Periodic evaluation against a fixed opponent, logged to W&B under "eval/"
+# every N collected frames (0 disables it).
+eval_interval: 0
+eval_episodes: 100
+# Take the policy's argmax (true) or sample from it (false). Deterministic
+# gives a lower-variance curve; stochastic matches collection-time behaviour.
+eval_deterministic: true
+# Break the held-out win-rate down per deck archetype and log its spread across
+# archetypes (eval/archetype_win_rate_{mean,std,min,max} plus one
+# eval/archetype_win_rate/<archetype> series each).
+eval_per_archetype: true
+# Fixed opponent the evaluator scores against, set explicitly rather than
+# inherited from the environment's default. It must not move with the learner,
+# or the eval curve stops being comparable across the run.
+#
+#   random           -> uniform baseline; saturates once the policy reliably
+#                       beats it, but stays comparable across runs.
+#   first_snapshot   -> oldest snapshot from checkpoint_dir as a greedy
+#                       opponent; falls back to random when none exist yet.
+#   checkpoint       -> the frozen snapshot at eval_opponent_checkpoint (e.g. a
+#                       prior run's best model), a stronger still-fixed yardstick.
+#   /path/to/ckpt.pt -> that same reference named inline, which is what lets
+#                       eval_opponents list several distinct checkpoints.
+eval_opponent: random
+# Snapshot path for eval_opponent=checkpoint; a relative path resolves
+# against the original working directory. Unused for eval_opponent=random.
+eval_opponent_checkpoint: null
+# Score against several references at once (overrides eval_opponent when set).
+# Each entry is an eval_opponent value; metrics are namespaced per opponent
+# ("random/win_rate", "first_snapshot/win_rate"). Evaluation cost is the sum
+# over entries, so each costs a full eval_episodes run.
+eval_opponents: null
+# Cross-play evaluation of the learner against its own frozen checkpoints
+# (needs snapshot_interval > 0). During training it logs the current model vs
+# the latest snapshot; at run end it round-robins every checkpoint into a 
+# win-rate matrix + Bradley-Terry Elo ranking, for picking which checkpoint to submit.
+cross_play: false
+# Games per pairing (per series). Higher is less noisy but costs more at run end.
+cross_play_games: 20
+# Cap on checkpoints entered into the run-end matrix.
+cross_play_max_checkpoints: 8
+# Best-response (exploitability) run: instead of self-play, train this learner
+# against one frozen agent and score it against the same agent. The learner's
+# eval win-rate is that agent's exploitability, or how beatable a best-responder
+# finds it. Overrides self-play and eval_opponent, still honors snapshot_interval 
+# so the best-responder itself is recoverable and ignores cross_play.
+# Set eval_interval > 0 to see the curve.
+best_response: false
+# Saved agent whose exploitability is measured; required when best_response is 
+# true. Relative paths resolve against the original working directory.
+best_response_checkpoint: null

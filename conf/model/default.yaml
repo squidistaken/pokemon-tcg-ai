@@ -1,0 +1,21 @@
+# Model composition: pick one backbone + one head (independent config groups)
+# and hold the shared dims both depend on. Override either group on the CLI, e.g.
+#   python -m src.train agent=ppo model/head=linear
+defaults:
+  - backbone: mlp        # default backbone; override on the CLI
+  - head: linear         # default head;     override on the CLI
+  - _self_
+
+# Shared token/hidden width; backbones read it as out_features.
+embed_dim: 128
+# Value (critic) head hidden widths.
+value_head:
+  num_cells: [256, 256]
+# Model-side treatment of the structured observation (StructuredObsAdapter):
+# learned card/attack/category embedding widths. Built by build_actor_critic
+# whenever the backbone's in_keys name structured groups; ignored on the
+# legacy flat-encoder path.
+adapter:
+  card_embed_dim: 8
+  attack_embed_dim: 8
+  category_embed_dim: 4

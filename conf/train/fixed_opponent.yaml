@@ -1,0 +1,13 @@
+# Fixed-opponent training: the agent faces the built-in RandomOpponent for the
+# whole run. This is the honest control that self-play runs are compared against.
+# Everything not listed below comes from default.yaml.
+defaults:
+  - default
+  - _self_
+
+# No snapshotting -> no self-play league is built and the environments take
+# their default random opponent.
+snapshot_interval: 0
+# Periodic evaluation is off: training already runs against the evaluation
+# opponent, so the collected win_rate is the identical signal for free.
+eval_interval: 0
