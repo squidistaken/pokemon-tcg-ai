@@ -133,8 +133,7 @@ def _build_ppo_trainer(
 
     snapshot_interval = int(cfg.train.get("snapshot_interval", 0))
     cross_play_enabled = (
-        not is_best_response
-        and opponent_factory is not None
+        not is_best_response and opponent_factory is not None
         and bool(cfg.train.get("cross_play", False))
     )
     eval_interval = int(cfg.train.get("eval_interval", 0))

@@ -217,6 +217,47 @@ def test_snapshot_callback_does_not_rewrite_final_snapshot(tmp_path, structured_
     assert len(read_checkpoint_records(registry)) == 1
 
 
+def test_registry_failure_does_not_block_checkpoint_loggers(
+    tmp_path,
+    structured_model_cfg,
+    structured_obs_spec,
+    action_spec,
+    monkeypatch,
+    caplog,
+) -> None:
+    """A local registry failure does not prevent later publication callbacks."""
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    logged: list[tuple[Path, str, int]] = []
+    callback = SnapshotCallback(
+        actor_critic,
+        tmp_path / "checkpoints",
+        interval=0,
+        checkpoint_loggers=[
+            lambda path, digest, frames: logged.append((path, digest, frames))
+        ],
+        registry_path=tmp_path / "logs" / "checkpoint_keys.csv",
+        repo_root=tmp_path,
+    )
+
+    def fail_registry_append(*args, **kwargs) -> None:  # noqa: ARG001
+        raise OSError("registry unavailable")
+
+    monkeypatch.setattr(
+        "src.training.callbacks.snapshot_callback.append_checkpoint_record",
+        fail_registry_append,
+    )
+
+    with caplog.at_level("ERROR"):
+        callback.on_train_end({"frames": 123})
+
+    assert len(logged) == 1
+    assert logged[0][0].name == "snapshot_000000000123.pt"
+    assert logged[0][2] == 123
+    assert "continuing with remaining callbacks" in caplog.text
+
+
 def test_final_checkpoint_embeds_config_and_emits_hash_key(
     tmp_path,
     structured_model_cfg,

@@ -1,7 +1,7 @@
 # Deck field-performance probe: which held-out deck to submit to Kaggle.
 #
 # This entry point deals the agent and its opponent independent decks from the
-# held-out pool, with both sides piloted by the same trained checkpoint, so the
+# held-out pool, with both sides piloted by the same trained checkpoint, so the 
 # resulting per-archetype win rate isolates deck strength as a field-performance proxy.
 #
 # Usage:

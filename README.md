@@ -300,13 +300,18 @@ deck.csv
 submission_manifest.json
 ```
 
-The builder copies `submission/main.py`, not the repository-root random starter
-`main.py`. Kaggle executes that entryfile with an empty globals mapping and
-selects its final callable, so `agent` must remain the last callable defined in
-the file. The validator supplies `torch`, but neither TorchRL nor the
-repository's `cg` Python package. The bundle therefore carries a pure-Python
-observation parser and Torch-only inference implementation; it contains no
-TensorDict, Hydra, OmegaConf, or native simulator dependency.
+The builder copies `submission/main.py`, not the repository-root TorchRL-based
+inference entrypoint. Kaggle executes the bundled entryfile with an empty
+globals mapping and selects its final callable, so `agent` must remain the last
+callable defined in the file. The validator supplies `torch`, but neither
+TorchRL nor the repository's `cg` Python package. The bundle therefore carries
+a pure-Python observation parser and Torch-only inference implementation; it
+contains no TensorDict, Hydra, OmegaConf, or native simulator dependency.
+
+Submission inference is deliberately greedy and deterministic: it chooses the
+highest-scoring legal options until the learned stop logit wins. Training still
+samples for exploration, while deterministic serving keeps validation and
+replays reproducible.
 
 The current portable runtime supports structured-observation checkpoints using
 `MLPBackbone` and `LinearPolicyHead`. The builder strictly reconstructs both the

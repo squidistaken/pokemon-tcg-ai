@@ -371,6 +371,12 @@ def inspect_checkpoint(
             frames = raw_frames
 
     config_path = explicit_config
+    if config is not None and config_path is not None:
+        print(
+            f"warning: config override {config_path} was ignored because the "
+            "checkpoint contains an embedded configuration.",
+            file=sys.stderr,
+        )
     if config is None and config_path is None:
         config_path = _legacy_config_path(path)
     if config is None and config_path is not None:

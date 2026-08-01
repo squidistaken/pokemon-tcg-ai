@@ -21,8 +21,8 @@ deck_switch_steps: 0
 #   uniform     -> each deck equally likely, i.i.d. per episode.
 #   round_robin -> deterministic rotation covering every deck evenly.
 deck_sampling: uniform
-# Draw strategy for the periodic evaluator only. "null" falls back to deck_sampling.
-# Set this to "round_robin" so eval deterministically and evenly covers the held-out pool:
+# Draw strategy for the periodic evaluator only. "null" falls back to deck_sampling. 
+# Set this to "round_robin" so eval deterministically and evenly covers the held-out pool: 
 # the per-archetype breakdown then reflects the policy, not the luck of which held-out decks
 # a uniform draw sampled that round.
 eval_deck_sampling: null

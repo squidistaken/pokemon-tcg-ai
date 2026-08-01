@@ -819,7 +819,13 @@ class ActorCritic(nn.Module):
 
 
 class GreedyPolicy:
-    """End-to-end torch-only policy used by the Kaggle entry point."""
+    """
+    Deterministic torch-only deployment policy used by the Kaggle entry point.
+
+    Training samples from the learned distribution for exploration. Submission
+    deliberately chooses the highest-scoring legal options until the learned
+    stop logit wins, making validation and replay behavior reproducible.
+    """
 
     def __init__(self, payload: object, config: Mapping[str, Any]) -> None:
         env_config = config["env"]

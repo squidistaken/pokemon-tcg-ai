@@ -148,7 +148,7 @@ class WeightsAndBiases(TrainingCallback):
     def log_table(self, key: str, columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
         """
         Log a one-shot table to the run.
-
+        
         :param key: W&B key the table is logged under.
         :param columns: Column names.
         :param rows: Table rows, one sequence of cell values per row.

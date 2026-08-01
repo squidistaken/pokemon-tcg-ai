@@ -27,7 +27,10 @@ else:
     from cg_api import Observation, to_observation_class
     from runtime import GreedyPolicy
 
-_POLICY: GreedyPolicy | None = None
+# Kaggle calls agent() once per engine selection in the same interpreter. Keep
+# the loaded weights and rebuilt network for that process instead of repeating
+# both relatively expensive operations on every decision.
+_CACHED_POLICY: GreedyPolicy | None = None
 
 
 def read_deck_csv() -> list[int]:
@@ -46,10 +49,10 @@ def read_deck_csv() -> list[int]:
 
 
 def _load_policy() -> GreedyPolicy:
-    """Lazily rebuild the trained policy from the bundled config and weights."""
-    global _POLICY
-    if _POLICY is not None:
-        return _POLICY
+    """Lazily rebuild and process-cache the bundled trained policy."""
+    global _CACHED_POLICY
+    if _CACHED_POLICY is not None:
+        return _CACHED_POLICY
 
     config = json.loads((_BUNDLE_DIR / "model_config.json").read_text(encoding="utf-8"))
     try:
@@ -58,8 +61,8 @@ def _load_policy() -> GreedyPolicy:
         )
     except TypeError:  # torch<2.0 does not support weights_only.
         payload = torch.load(_BUNDLE_DIR / "model.pt", map_location="cpu")
-    _POLICY = GreedyPolicy(payload, config)
-    return _POLICY
+    _CACHED_POLICY = GreedyPolicy(payload, config)
+    return _CACHED_POLICY
 
 
 def agent(obs_dict: dict) -> list[int]:

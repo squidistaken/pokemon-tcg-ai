@@ -123,6 +123,26 @@ def test_explicit_unregistered_path_name_and_hash_remain_supported(tmp_path) -> 
         resolve_checkpoint(None, [tmp_path], tmp_path)
 
 
+def test_embedded_config_warns_that_explicit_override_is_ignored(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Self-describing checkpoints retain precedence over legacy overrides."""
+    checkpoint = write_checkpoint(tmp_path / "checkpoint.pt", 2)
+    override = tmp_path / "override.yaml"
+    override.write_text("invalid: legacy-only\n", encoding="utf-8")
+
+    info = inspect_checkpoint(checkpoint, override)
+
+    assert info.config_source == "embedded checkpoint config"
+    assert info.config == checkpoint_config()
+    assert (
+        f"warning: config override {override} was ignored because the checkpoint "
+        "contains an embedded configuration."
+        in capsys.readouterr().err
+    )
+
+
 def test_build_submission_has_kaggle_root_shape_and_audited_runtime(tmp_path) -> None:
     """The tarball exposes main.py/deck.csv at root and excludes local binaries."""
     root = Path(__file__).parents[1]
@@ -260,7 +280,10 @@ def test_extracted_bundle_strictly_rebuilds_generated_policy(tmp_path) -> None:
                 "builtins.__import__ = lambda name, *a, **k: "
                 "(_ for _ in ()).throw(ImportError(name)) "
                 "if name.split('.')[0] in blocked else original(name, *a, **k); "
-                "import main; print(type(main._load_policy()).__name__)"
+                "import main; first = main._load_policy(); "
+                "second = main._load_policy(); "
+                "print(type(first).__name__, first is second, "
+                "main._CACHED_POLICY is first)"
             ),
         ],
         cwd=extracted,
@@ -270,7 +293,7 @@ def test_extracted_bundle_strictly_rebuilds_generated_policy(tmp_path) -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "GreedyPolicy"
+    assert result.stdout.strip() == "GreedyPolicy True True"
 
 
 def test_registry_staleness_and_malformed_rows_block_latest(tmp_path) -> None:

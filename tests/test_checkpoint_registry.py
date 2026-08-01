@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import multiprocessing
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -22,6 +23,7 @@ from src.checkpoint_registry import (
 
 
 def _append_in_process(
+    start_barrier: Any,
     registry_value: str,
     checkpoint_value: str,
     repo_root_value: str,
@@ -30,6 +32,7 @@ def _append_in_process(
     """Append from a child process to exercise the POSIX file lock."""
     registry = Path(registry_value)
     checkpoint = Path(checkpoint_value)
+    start_barrier.wait(timeout=20)
     append_checkpoint_record(
         registry,
         checkpoint,
@@ -209,10 +212,17 @@ def test_concurrent_processes_write_complete_rows_and_one_header(
         for index in range(8)
     ]
     context = multiprocessing.get_context("spawn")
+    start_barrier = context.Barrier(len(checkpoints))
     processes = [
         context.Process(
             target=_append_in_process,
-            args=(str(registry), str(checkpoint), str(tmp_path), index),
+            args=(
+                start_barrier,
+                str(registry),
+                str(checkpoint),
+                str(tmp_path),
+                index,
+            ),
         )
         for index, checkpoint in enumerate(checkpoints)
     ]

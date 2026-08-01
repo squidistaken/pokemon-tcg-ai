@@ -136,13 +136,21 @@ class SnapshotCallback(TrainingCallback):
             if self._last_published_frames != frames:
                 if self._registry_path is not None:
                     assert self._repo_root is not None
-                    append_checkpoint_record(
-                        self._registry_path,
-                        self._last_checkpoint,
-                        digest=self._last_digest,
-                        frames=frames,
-                        repo_root=self._repo_root,
-                    )
+                    try:
+                        append_checkpoint_record(
+                            self._registry_path,
+                            self._last_checkpoint,
+                            digest=self._last_digest,
+                            frames=frames,
+                            repo_root=self._repo_root,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Could not append final checkpoint %s to registry %s; "
+                            "continuing with remaining callbacks",
+                            self._last_checkpoint,
+                            self._registry_path,
+                        )
                 for checkpoint_logger in self._checkpoint_loggers:
                     checkpoint_logger(self._last_checkpoint, self._last_digest, frames)
                 self._last_published_frames = frames
