@@ -149,6 +149,7 @@ class FakeRun:
         self.url = "https://wandb.test/fake-run-id"
         self.summary: dict[str, Any] = {}
         self.logged: list[tuple[dict[str, float], int | None]] = []
+        self.artifacts: list[tuple[str, str | None, str | None, list[str] | None]] = []
         self.finished = False
 
     def log(self, data: dict[str, float], step: int | None = None) -> None:
@@ -165,6 +166,16 @@ class FakeRun:
         Mark the run as closed.
         """
         self.finished = True
+
+    def log_artifact(
+        self,
+        path: str,
+        name: str | None = None,
+        type: str | None = None,
+        aliases: list[str] | None = None,
+    ) -> None:
+        """Capture one model artifact logged by the callback."""
+        self.artifacts.append((path, name, type, aliases))
 
 
 class BrokenWandbModule(ModuleType):
@@ -409,6 +420,29 @@ def test_wandb_callback_requires_online_logging(
     assert module.init_kwargs is not None
     assert module.init_kwargs["mode"] == "online"
     assert module.init_kwargs["force"] is True
+
+
+def test_wandb_callback_logs_checkpoint_as_model_artifact(
+    fake_wandb: tuple[FakeWandbModule, FakeRun],
+    tmp_path,
+) -> None:
+    """Checkpoint keys become W&B aliases on a run-specific model artifact."""
+    _, run = fake_wandb
+    checkpoint = tmp_path / "snapshot.pt"
+    checkpoint.write_bytes(b"weights")
+    callback = WeightsAndBiases(project="pokemon-tcg-ai", mode="offline")
+    callback.on_train_start({})
+
+    callback.log_checkpoint(checkpoint, "a" * 64, 123)
+
+    assert run.artifacts == [
+        (
+            str(checkpoint),
+            "checkpoint-fake-run-id",
+            "model",
+            ["latest", "sha-aaaaaaaaaaaa", "frames-123"],
+        )
+    ]
 
 
 def test_wandb_callback_honours_explicit_offline_mode(

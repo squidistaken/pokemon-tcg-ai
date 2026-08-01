@@ -1,9 +1,12 @@
+import json
 import pickle
 from pathlib import Path
 
 import pytest
+import torch
 from omegaconf import OmegaConf
 
+from src.checkpoint_registry import read_checkpoint_records
 from src.env.random_opponent import RandomOpponent
 from src.env.snapshot_opponent_pool import SnapshotOpponentPool
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent, save_actor_critic
@@ -188,13 +191,119 @@ def test_snapshot_callback_does_not_rewrite_final_snapshot(tmp_path, structured_
     twice; a run ending between boundaries still persists its final policy.
     """
     actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
-    callback = SnapshotCallback(actor_critic, tmp_path, interval=100)
+    registry = tmp_path / "logs" / "checkpoint_keys.csv"
+    logged: list[tuple[Path, str, int]] = []
+    callback = SnapshotCallback(
+        actor_critic,
+        tmp_path / "checkpoints",
+        interval=100,
+        checkpoint_loggers=[lambda path, digest, frames: logged.append((path, digest, frames))],
+        registry_path=registry,
+        repo_root=tmp_path,
+    )
     callback.on_rollout_end(100, {})
-    callback.on_train_end({"frames": 100})
-    assert len(list(tmp_path.glob("*.pt"))) == 1
+    assert logged == []
+    assert not registry.exists()
 
-    callback.on_train_end({"frames": 150})
-    assert len(list(tmp_path.glob("*.pt"))) == 2
+    callback.on_train_end({"frames": 100})
+    assert len(list((tmp_path / "checkpoints").glob("*.pt"))) == 1
+    assert len(logged) == 1
+    records = read_checkpoint_records(registry)
+    assert len(records) == 1
+    assert records[0].frames == 100
+
+    callback.on_train_end({"frames": 100})
+    assert len(logged) == 1
+    assert len(read_checkpoint_records(registry)) == 1
+
+
+def test_registry_failure_does_not_block_checkpoint_loggers(
+    tmp_path,
+    structured_model_cfg,
+    structured_obs_spec,
+    action_spec,
+    monkeypatch,
+    caplog,
+) -> None:
+    """A local registry failure does not prevent later publication callbacks."""
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    logged: list[tuple[Path, str, int]] = []
+    callback = SnapshotCallback(
+        actor_critic,
+        tmp_path / "checkpoints",
+        interval=0,
+        checkpoint_loggers=[
+            lambda path, digest, frames: logged.append((path, digest, frames))
+        ],
+        registry_path=tmp_path / "logs" / "checkpoint_keys.csv",
+        repo_root=tmp_path,
+    )
+
+    def fail_registry_append(*args, **kwargs) -> None:  # noqa: ARG001
+        raise OSError("registry unavailable")
+
+    monkeypatch.setattr(
+        "src.training.callbacks.snapshot_callback.append_checkpoint_record",
+        fail_registry_append,
+    )
+
+    with caplog.at_level("ERROR"):
+        callback.on_train_end({"frames": 123})
+
+    assert len(logged) == 1
+    assert logged[0][0].name == "snapshot_000000000123.pt"
+    assert logged[0][2] == 123
+    assert "continuing with remaining callbacks" in caplog.text
+
+
+def test_final_checkpoint_embeds_config_and_emits_hash_key(
+    tmp_path,
+    structured_model_cfg,
+    structured_obs_spec,
+    action_spec,
+    capsys,
+) -> None:
+    """Even interval=0 writes a self-describing final checkpoint and short key."""
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    logged: list[tuple[Path, str, int]] = []
+    callback = SnapshotCallback(
+        actor_critic,
+        tmp_path / "checkpoints",
+        interval=0,
+        checkpoint_loggers=[lambda path, digest, frames: logged.append((path, digest, frames))],
+        registry_path=tmp_path / "logs" / "checkpoint_keys.csv",
+        repo_root=tmp_path,
+    )
+    run_config = OmegaConf.to_container(structured_model_cfg, resolve=True)
+    assert isinstance(run_config, dict)
+    run_config["env"] = {
+        "encoder": "structured",
+        "max_options": 96,
+        "deck0": "decks/example.csv",
+    }
+    callback.on_train_start(run_config)
+    callback.on_train_end({"frames": 123})
+
+    checkpoint = tmp_path / "checkpoints" / "snapshot_000000000123.pt"
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    assert payload["format_version"] == 1
+    assert payload["frames"] == 123
+    assert payload["config"]["env"]["max_options"] == 96
+    metadata = json.loads(checkpoint.with_suffix(".json").read_text())
+    assert metadata["sha256"] == logged[0][1]
+    assert metadata["key"] == logged[0][1][:12]
+    assert logged[0][0] == checkpoint
+    assert logged[0][2] == 123
+    record = read_checkpoint_records(tmp_path / "logs" / "checkpoint_keys.csv")[-1]
+    assert record.frames == 123
+    assert record.checkpoint_path == "checkpoints/snapshot_000000000123.pt"
+    assert record.sha256 == metadata["sha256"]
+    assert record.source == "training"
+    output = capsys.readouterr().out
+    assert f"checkpoint: {checkpoint}" in output
+    assert f"checkpoint-key: {metadata['key']}" in output
 
 
 def test_disabled_snapshotting_yields_no_opponent_factory(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
