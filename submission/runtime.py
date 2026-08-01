@@ -601,6 +601,31 @@ class StructuredObsAdapter(nn.Module):
         self._category_embedding = nn.Embedding(
             6 * self.CATEGORY_VOCAB_SIZE, category_embed_dim
         )
+        # Per-entity projection + masked-mean pooling, detected from the saved
+        # weights rather than the config: checkpoints trained before the pooling
+        # path carry no projection tensors, and must keep loading as the flat
+        # padded encoding they were trained with. Widths come from the weights
+        # for the same reason -- the Kaggle sandbox has no obs_spec to size them.
+        card_proj_weight = state_dict.get("backbone.adapter._card_proj.weight")
+        self._pool = card_proj_weight is not None
+        if self._pool:
+            assert card_proj_weight is not None
+            option_weight = state_dict["backbone.adapter._option_encoder.weight"]
+            pokemon_weight = state_dict["backbone.adapter._pokemon_encoder.weight"]
+            entity_dim = card_proj_weight.shape[0]
+            self._card_proj: nn.Module = nn.Linear(
+                card_proj_weight.shape[1], entity_dim
+            )
+            self._option_encoder: nn.Module = nn.Linear(
+                option_weight.shape[1], entity_dim
+            )
+            self._pokemon_encoder: nn.Module = nn.Linear(
+                pokemon_weight.shape[1], entity_dim
+            )
+        else:
+            self._card_proj = nn.Identity()
+            self._option_encoder = nn.Identity()
+            self._pokemon_encoder = nn.Identity()
 
     def forward(
         self, observation: Mapping[str, Any], group_names: Sequence[str]
@@ -617,7 +642,7 @@ class StructuredObsAdapter(nn.Module):
                     )
                 )
             elif name in ("context_card_ids", "stadium_id"):
-                parts.append(self._flatten_rows(self._card_repr(value)))
+                parts.append(self._encode_card_ids(value))
             elif name == "options":
                 parts.append(self._encode_options(value))
             elif name == "pokemon":
@@ -646,6 +671,9 @@ class StructuredObsAdapter(nn.Module):
         weights = mask.to(torch.float32).unsqueeze(-1)
         return (reprs * weights).sum(dim=-2) / weights.sum(dim=-2).clamp(min=1.0)
 
+    def _encode_card_ids(self, card_ids: torch.Tensor) -> torch.Tensor:
+        return self._flatten_rows(self._card_proj(self._card_repr(card_ids)))
+
     def _encode_options(self, options: Mapping[str, torch.Tensor]) -> torch.Tensor:
         scalars = options["scalars"]
         scaled = torch.where(
@@ -668,6 +696,10 @@ class StructuredObsAdapter(nn.Module):
             ],
             dim=-1,
         )
+        if self._pool:
+            return self._masked_mean(
+                self._option_encoder(rows), options["card_id"] != 0
+            )
         return self._flatten_rows(rows)
 
     def _encode_pokemon(self, pokemon: Mapping[str, torch.Tensor]) -> torch.Tensor:
@@ -684,6 +716,8 @@ class StructuredObsAdapter(nn.Module):
             ],
             dim=-1,
         )
+        if self._pool:
+            return self._masked_mean(self._pokemon_encoder(rows), pokemon["mask"])
         return self._flatten_rows(rows)
 
     def _encode_zone_group(
@@ -693,7 +727,8 @@ class StructuredObsAdapter(nn.Module):
         for ids_name, mask_name in self.ZONE_PAIRS[name]:
             mask = zones[mask_name]
             capacity = mask.shape[-1]
-            parts.append(self._masked_mean(self._card_repr(zones[ids_name]), mask))
+            reprs = self._card_proj(self._card_repr(zones[ids_name]))
+            parts.append(self._masked_mean(reprs, mask))
             parts.append(mask.to(torch.float32).sum(dim=-1, keepdim=True) / capacity)
         return torch.cat(parts, dim=-1)
 
