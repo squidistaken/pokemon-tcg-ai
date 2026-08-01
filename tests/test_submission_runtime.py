@@ -3,6 +3,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+import pytest
 import torch
 from omegaconf import OmegaConf
 
@@ -14,7 +15,7 @@ from src.env.structured_observation_encoder import (
 )
 from src.policies.ppo_actor import build_actor_critic
 from submission.cg_api import to_observation_class
-from submission.runtime import GreedyPolicy, StructuredObservationEncoder
+from submission.runtime import InferencePolicy, StructuredObservationEncoder
 from tests.conftest import DECK_PATH, MAX_OPTIONS
 
 
@@ -30,10 +31,14 @@ def _assert_nested_equal(expected: Any, actual: Any) -> None:
     torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
 
 
-def _portable_config(model_config: Any) -> dict[str, Any]:
+def _portable_config(
+    model_config: Any,
+    action_selection: str = "greedy",
+) -> dict[str, Any]:
     return {
         "model": OmegaConf.to_container(model_config.model, resolve=True),
         "env": {"encoder": "structured", "max_options": MAX_OPTIONS},
+        "inference": {"action_selection": action_selection},
     }
 
 
@@ -75,7 +80,7 @@ def test_torch_only_model_matches_training_logits(
         structured_model_cfg, structured_obs_spec, action_spec
     ).eval()
     payload = {"state_dict": actor_critic.state_dict()}
-    policy = GreedyPolicy(payload, _portable_config(structured_model_cfg))
+    policy = InferencePolicy(payload, _portable_config(structured_model_cfg))
     fixtures = torch.load(
         Path(__file__).parent / "fixtures" / "observations.pt",
         weights_only=False,
@@ -86,3 +91,66 @@ def test_torch_only_model_matches_training_logits(
         expected = actor_critic.policy_logits(case)
         actual = policy.model.policy_logits(case["observation"].to_dict())
         torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
+
+
+@pytest.mark.parametrize("action_selection", ["greedy", "sample"])
+def test_inference_modes_produce_legal_sequential_selection(
+    action_selection: str,
+    structured_model_cfg,
+    structured_obs_spec,
+    action_spec,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both serving modes respect bounds, masks, and sampling implementation."""
+    torch.manual_seed(29)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    ).eval()
+    policy = InferencePolicy(
+        {"state_dict": actor_critic.state_dict()},
+        _portable_config(structured_model_cfg, action_selection),
+    )
+    sample_calls = 0
+    original_multinomial = torch.multinomial
+
+    def recorded_multinomial(
+        probabilities: torch.Tensor,
+        num_samples: int,
+    ) -> torch.Tensor:
+        nonlocal sample_calls
+        sample_calls += 1
+        return original_multinomial(probabilities, num_samples)
+
+    monkeypatch.setattr(torch, "multinomial", recorded_multinomial)
+    deck = load_deck(DECK_PATH)
+    handle = BattleHandle()
+    try:
+        observation = handle.start(deck, deck)
+        portable_observation = to_observation_class(asdict(observation))
+        picks = policy(portable_observation)
+    finally:
+        handle.finish()
+
+    assert observation.select is not None
+    assert observation.select.minCount <= len(picks) <= observation.select.maxCount
+    assert len(picks) == len(set(picks))
+    assert all(0 <= pick < len(observation.select.option) for pick in picks)
+    if action_selection == "greedy":
+        assert sample_calls == 0
+    else:
+        assert sample_calls > 0
+
+
+def test_inference_policy_rejects_unknown_action_selection(
+    structured_model_cfg,
+    structured_obs_spec,
+    action_spec,
+) -> None:
+    """Malformed bundled selection modes fail while loading, before a match."""
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    config = _portable_config(structured_model_cfg, "unknown")
+
+    with pytest.raises(ValueError, match="action_selection"):
+        InferencePolicy({"state_dict": actor_critic.state_dict()}, config)

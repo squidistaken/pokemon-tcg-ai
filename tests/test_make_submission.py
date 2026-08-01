@@ -159,6 +159,7 @@ def test_build_submission_has_kaggle_root_shape_and_audited_runtime(tmp_path) ->
         archive=tmp_path / "submissions" / "test-agent.tar.gz",
         competition="pokemon-tcg-ai-battle",
         message="test-agent",
+        action_selection="sample",
     )
 
     archive_digest = build_submission(plan)
@@ -180,6 +181,9 @@ def test_build_submission_has_kaggle_root_shape_and_audited_runtime(tmp_path) ->
     assert manifest["checkpoint"]["sha256"] == checkpoint.sha256
     assert manifest["checkpoint"]["key"] == checkpoint.key
     assert manifest["checkpoint"]["frames"] == 456
+    assert manifest["inference"] == {"action_selection": "sample"}
+    model_config = json.loads((plan.staging_dir / "model_config.json").read_text())
+    assert model_config["inference"] == {"action_selection": "sample"}
     assert manifest["bundled_files"] == [
         "cg_api.py",
         "deck.csv",
@@ -293,7 +297,7 @@ def test_extracted_bundle_strictly_rebuilds_generated_policy(tmp_path) -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "GreedyPolicy True True"
+    assert result.stdout.strip() == "InferencePolicy True True"
 
 
 def test_registry_staleness_and_malformed_rows_block_latest(tmp_path) -> None:

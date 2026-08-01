@@ -818,23 +818,36 @@ class ActorCritic(nn.Module):
         return self.policy_head.linear(self.backbone(observation))
 
 
-class GreedyPolicy:
+class InferencePolicy:
     """
-    Deterministic torch-only deployment policy used by the Kaggle entry point.
+    Torch-only greedy or sampling policy used by the Kaggle entry point.
 
-    Training samples from the learned distribution for exploration. Submission
-    deliberately chooses the highest-scoring legal options until the learned
-    stop logit wins, making validation and replay behavior reproducible.
+    Both modes score one legal action at a time and re-encode the partial-pick
+    count before the next choice, matching the selection sequence seen during
+    training. Greedy mode is deterministic; sample mode draws without
+    replacement from the masked learned distribution.
     """
 
     def __init__(self, payload: object, config: Mapping[str, Any]) -> None:
         env_config = config["env"]
         if env_config.get("encoder", "structured") != "structured":
             raise ValueError("Kaggle runtime supports only the structured encoder")
-        max_options = int(env_config["max_options"])
+        self.max_options = int(env_config["max_options"])
+        inference_config = config.get("inference", {})
+        if not isinstance(inference_config, Mapping):
+            raise TypeError("inference config must be a mapping")
+        self.action_selection = str(
+            inference_config.get("action_selection", "greedy")
+        )
+        if self.action_selection not in {"greedy", "sample"}:
+            raise ValueError(
+                "inference.action_selection must be either 'greedy' or 'sample'"
+            )
         state_dict = checkpoint_state_dict(payload)
-        self.encoder = StructuredObservationEncoder(max_options=max_options)
-        self.model = ActorCritic(state_dict, config["model"], max_options=max_options)
+        self.encoder = StructuredObservationEncoder(max_options=self.max_options)
+        self.model = ActorCritic(
+            state_dict, config["model"], max_options=self.max_options
+        )
         self.model.load_state_dict(state_dict, strict=True)
         self.model.eval()
 
@@ -844,32 +857,50 @@ class GreedyPolicy:
         state = observation.current
         if select is None or state is None:
             raise ValueError("Policy requires a current selection and game state")
-        encoded = self.encoder.encode(observation, state.yourIndex, 0)
-        logits = self.model.policy_logits(encoded)
-        return self.greedy_select(
-            logits,
-            n_options=len(select.option),
-            min_count=select.minCount,
-            max_count=select.maxCount,
-        )
+        n_options = len(select.option)
+        min_count = select.minCount
+        max_count = select.maxCount
+        if not 0 <= min_count <= max_count <= n_options:
+            raise ValueError(
+                "Invalid selection bounds: expected "
+                f"0 <= minCount ({min_count}) <= maxCount ({max_count}) "
+                f"<= option count ({n_options})."
+            )
+        if n_options > self.max_options:
+            raise ValueError(
+                f"Selection offers {n_options} options but the checkpoint supports "
+                f"only {self.max_options}."
+            )
+        if max_count == 0:
+            return []
 
-    @staticmethod
-    def greedy_select(
-        logits: torch.Tensor,
-        n_options: int,
-        min_count: int,
-        max_count: int,
-    ) -> list[int]:
-        capacity = logits.shape[-1] - 1
-        n_options = min(n_options, capacity)
-        max_count = min(max_count, n_options)
-        stop_logit = logits[capacity]
-        order = torch.argsort(logits[:n_options], descending=True).tolist()
         picks: list[int] = []
-        for index in order:
-            if len(picks) >= max_count:
+        stop_index = self.max_options
+        mask = torch.zeros(self.max_options + 1, dtype=torch.bool)
+        mask[:n_options] = True
+        while len(picks) < max_count:
+            if len(picks) >= min_count:
+                mask[stop_index] = True
+            encoded = self.encoder.encode(observation, state.yourIndex, len(picks))
+            logits = self.model.policy_logits(encoded)
+            chosen = self._select_action(logits, mask)
+            if chosen == stop_index:
                 break
-            if len(picks) >= min_count and logits[index] <= stop_logit:
-                break
-            picks.append(int(index))
+            picks.append(chosen)
+            mask[chosen] = False
         return picks
+
+    def _select_action(self, logits: torch.Tensor, mask: torch.Tensor) -> int:
+        """Choose one legal action according to the configured serving mode."""
+        if logits.ndim != 1 or logits.shape != mask.shape:
+            raise ValueError(
+                "Expected matching one-dimensional logits/mask, got "
+                f"{tuple(logits.shape)} and {tuple(mask.shape)}."
+            )
+        if not bool(mask.any()):
+            raise ValueError("Cannot select an action from an empty mask.")
+        masked_logits = logits.masked_fill(~mask, -torch.inf)
+        if self.action_selection == "greedy":
+            return int(torch.argmax(masked_logits).item())
+        probabilities = torch.softmax(masked_logits, dim=0)
+        return int(torch.multinomial(probabilities, 1).item())

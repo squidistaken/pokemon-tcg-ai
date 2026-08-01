@@ -44,7 +44,7 @@ from src.env.battle_handle import BattleHandle
 from src.env.structured_observation_encoder import StructuredObservationEncoder
 from src.policies.greedy_policy_opponent import checkpoint_state_dict
 from src.policies.ppo_actor import build_actor_critic
-from submission.runtime import GreedyPolicy as PortableGreedyPolicy
+from submission.runtime import InferencePolicy as PortableInferencePolicy
 
 COMPETITION = "pokemon-tcg-ai-battle"
 _HASH_SELECTOR = re.compile(r"[0-9a-fA-F]{8,64}")
@@ -161,6 +161,7 @@ class SubmissionPlan:
     archive: Path
     competition: str
     message: str
+    action_selection: str = "greedy"
 
 
 def repo_root() -> Path:
@@ -341,7 +342,7 @@ def _validate_checkpoint_compatibility(
         action_spec = Categorical(max_options + 1, dtype=torch.int64)
         actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
         actor_critic.load_state_dict(checkpoint_state_dict(payload), strict=True)
-        PortableGreedyPolicy(payload, config)
+        PortableInferencePolicy(payload, config)
     except Exception as error:
         raise SubmissionError(
             "Checkpoint weights are incompatible with the structured model config: "
@@ -591,8 +592,10 @@ def _write_stage(plan: SubmissionPlan, destination: Path) -> None:
         shutil.copy2(root / "submission" / filename, destination / filename)
     shutil.copy2(plan.checkpoint.path, destination / "model.pt")
     shutil.copy2(plan.deck, destination / "deck.csv")
+    runtime_config = dict(plan.checkpoint.config)
+    runtime_config["inference"] = {"action_selection": plan.action_selection}
     (destination / "model_config.json").write_text(
-        json.dumps(plan.checkpoint.config, indent=2, sort_keys=True) + "\n",
+        json.dumps(runtime_config, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
@@ -600,6 +603,7 @@ def _write_stage(plan: SubmissionPlan, destination: Path) -> None:
         "format_version": 1,
         "competition": plan.competition,
         "label": plan.label,
+        "inference": {"action_selection": plan.action_selection},
         "created_at": datetime.now(UTC).isoformat(),
         "source_commit": _git_commit(root),
         "checkpoint": {
@@ -769,6 +773,7 @@ def _print_summary(plan: SubmissionPlan, submit: bool) -> None:
     print(f"- Checkpoint: {plan.checkpoint.path}")
     print(f"- Checkpoint key: {plan.checkpoint.key}")
     print(f"- Deck: {plan.deck}")
+    print(f"- Action selection: {plan.action_selection}")
     print(f"- Output dir: {plan.staging_dir}")
     print(f"- Archive: {plan.archive}")
     print("- Bundle contents:")
@@ -799,6 +804,15 @@ def _parser() -> argparse.ArgumentParser:
         "--config", help="Hydra config.yaml for a legacy bare state-dict checkpoint."
     )
     parser.add_argument("--deck", help="Deck CSV (default: checkpoint env.deck0).")
+    parser.add_argument(
+        "--action-selection",
+        choices=("greedy", "sample"),
+        default="greedy",
+        help=(
+            "Choose the highest-scoring legal action or sample from the learned "
+            "distribution (default: greedy)."
+        ),
+    )
     parser.add_argument(
         "--label", help="Submission label (default: checkpoint-<hash key>)."
     )
@@ -910,6 +924,7 @@ def make_plan(args: argparse.Namespace, root: Path) -> SubmissionPlan:
         archive=archive,
         competition=competition,
         message=message,
+        action_selection=args.action_selection,
     )
 
 
