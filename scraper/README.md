@@ -30,8 +30,11 @@ python -m scraper --source bulbapedia --pages "Abyss (TCG),Aurora Blast (TCG)"
 # Import a decklist you pasted into a file
 python -m scraper --source text --input mylist.txt --name my-deck
 
-# Run every source
+# Run every network source (local text imports still require --source text --input ...)
 python -m scraper --source all --limit 20
+
+# Fetch once and write isolated mapping/heuristic corpora with separate manifests
+python -m scraper --source all --card-swap-strategy all --out decks
 ```
 
 ### How much a run can find

@@ -28,9 +28,11 @@ class RunSummary:
     written_slugs: list[str] = field(default_factory=list)
     drops: list[str] = field(default_factory=list)  # human-readable reasons
     warnings: list[str] = field(default_factory=list)  # non-fatal, e.g. impossible evolutions
-    #: Written/re-observed decks that only resolved because of a hardcoded card
-    #: swap (see :mod:`scraper.card_swapper`) — a subset of ``written`` + ``reobserved``.
+    #: Written/re-observed decks containing a same-name printing selected from
+    #: gameplay similarity — a subset of ``written`` + ``reobserved``.
     swapped_decks: int = 0
+    variant_swaps: int = 0
+    swap_guard_failures: int = 0
 
     def format(self) -> str:
         """
@@ -45,6 +47,8 @@ class RunSummary:
             f"  dropped invalid:    {self.dropped_invalid}",
             f"  warnings:           {len(self.warnings)}",
             f"  swapped decks:      {self.swapped_decks}",
+            f"  variant swaps:      {self.variant_swaps}",
+            f"  swap guard failures:{self.swap_guard_failures:>7}",
         ]
         if self.written_slugs:
             lines.append("  decks: " + ", ".join(self.written_slugs))
@@ -85,9 +89,8 @@ def process_deck(
     :param warn_impossible_evolutions: Non-fatally flag Stage 1/2 Pokémon with no
         copy of their previous stage in the deck (legal, but can never evolve).
         Warnings are recorded in ``summary`` and the deck's manifest entry.
-    :param swapper: Optional hardcoded-substitute table consulted for cards that
-        would otherwise be unresolved (see :mod:`scraper.card_swapper`). Swaps
-        applied are recorded on the deck's manifest entry, like validator warnings.
+    :param swapper: Optional same-name gameplay-profile matcher. Decisions are
+        recorded on the deck's manifest entry, like validator warnings.
     """
     summary.fetched += 1
     resolved = resolve_deck(raw, index, swapper)
@@ -96,9 +99,17 @@ def process_deck(
         for scraped, matched, score in resolved.fuzzy_matches:
             print(f"  fuzzy: {scraped!r} -> {matched!r} ({score})")
 
+    summary.swap_guard_failures += len(resolved.swap_failures)
+
     if verbose and resolved.swaps:
-        for scraped, substitute in resolved.swaps:
-            print(f"  swap: {scraped!r} -> {substitute!r}")
+        for swap in resolved.swaps:
+            print(
+                f"  {swap.kind}: {swap.source_name!r} -> {swap.target_name!r} "
+                f"(ID {swap.target_id}, confidence {swap.confidence:.2f})"
+            )
+    if verbose and resolved.swap_failures:
+        for failure in resolved.swap_failures:
+            print(f"  swap rejected: {failure}")
 
     if not resolved.ok:
         summary.dropped_unresolved += 1
@@ -138,15 +149,12 @@ def process_deck(
             if verbose:
                 print("WARN:", reason)
 
-    deck_warnings = [
-        *result.warnings,
-        *(f"swapped {orig!r} -> {sub!r}" for orig, sub in resolved.swaps),
-    ]
+    summary.variant_swaps += sum(swap.kind == "variant" for swap in resolved.swaps)
 
     if dry_run:
         outcome = writer.classify(resolved, date=date)
     else:
-        outcome = writer.write(resolved, date=date, warnings=deck_warnings)
+        outcome = writer.write(resolved, date=date, warnings=result.warnings)
 
     if resolved.swaps and (outcome.new_deck or outcome.new_observation):
         summary.swapped_decks += 1

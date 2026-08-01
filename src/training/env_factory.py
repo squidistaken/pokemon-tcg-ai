@@ -146,7 +146,10 @@ def _load_manifest_for(paths: list[str]) -> dict[str, dict]:
             seen.add(candidate)
             if candidate.exists():
                 try:
-                    manifest.update(json.loads(candidate.read_text()))
+                    data = json.loads(candidate.read_text())
+                    decks = data.get("decks", data)
+                    if isinstance(decks, dict):
+                        manifest.update(decks)
                 except (OSError, json.JSONDecodeError):
                     continue
     return manifest

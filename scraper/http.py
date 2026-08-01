@@ -68,3 +68,7 @@ class HttpClient:
         :return: The decoded JSON payload.
         """
         return self._get(url, **kwargs).json()
+
+    def get_text(self, url: str, **kwargs) -> str:
+        """GET a URL and return its decoded response body."""
+        return self._get(url, **kwargs).text

@@ -3,12 +3,29 @@ from __future__ import annotations
 import argparse
 import datetime
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 
 from .card_index import CardIndex
-from .card_swapper import CardSwapper
+from .card_swapper import CardSwapper, HeuristicCardSwapper, MappingCardSwapper
 from .pipeline import RunSummary, process_deck
-from .sources import SOURCES
+from .sources import NETWORK_SOURCES, SOURCES
 from .writer import DEFAULT_DECKS_DIR, DeckWriter
+
+STRATEGY_DIRS = {
+    "mapping": "mapping-resolved",
+    "heuristic": "heuristic-resolved",
+}
+
+
+@dataclass
+class ResolutionRun:
+    """One independent resolution strategy and its isolated output corpus."""
+
+    name: str
+    swapper: CardSwapper | None
+    writer: DeckWriter
+    summary: RunSummary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,8 +84,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--disable-card-swap",
         action="store_true",
-        help="Don't substitute hardcoded staples missing from the card pool "
-        "(see scraper.card_swapper); swapping is on by default",
+        help="Disable the selected fallback card resolver(s)",
+    )
+    p.add_argument(
+        "--card-swap-strategy",
+        choices=("heuristic", "mapping", "all"),
+        default="heuristic",
+        help="Fallback resolver(s); 'all' writes isolated strategy subfolders",
     )
     return p
 
@@ -97,6 +119,47 @@ def _source_kwargs(args) -> dict:
     }
 
 
+def _resolution_runs(args, index: CardIndex) -> list[ResolutionRun]:
+    names = (
+        ("mapping", "heuristic")
+        if args.card_swap_strategy == "all"
+        else (args.card_swap_strategy,)
+    )
+    swappers: dict[str, CardSwapper] = {
+        "mapping": MappingCardSwapper(index),
+        "heuristic": HeuristicCardSwapper(index),
+    }
+    return [
+        ResolutionRun(
+            name=name,
+            swapper=None if args.disable_card_swap else swappers[name],
+            writer=DeckWriter(
+                str(Path(args.out) / STRATEGY_DIRS[name])
+                if len(names) > 1
+                else args.out
+            ),
+            summary=RunSummary(),
+        )
+        for name in names
+    ]
+
+
+def _print_summary(run: ResolutionRun, *, verbose: bool, labelled: bool) -> None:
+    heading = f"Summary ({STRATEGY_DIRS[run.name]}):" if labelled else "Summary:"
+    print(f"\n{heading}")
+    print(run.summary.format())
+    if run.summary.drops and not verbose:
+        print(
+            f"  ({len(run.summary.drops)} decks dropped; "
+            "re-run with --verbose for reasons)"
+        )
+    if run.summary.warnings and not verbose:
+        print(
+            f"  ({len(run.summary.warnings)} warnings; "
+            "re-run with --verbose for details)"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     """
     Run the scraper CLI: scrape the selected source(s) and write legal decks.
@@ -106,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = build_parser().parse_args(argv)
 
-    source_names = list(SOURCES) if args.source == "all" else [args.source]
+    source_names = list(NETWORK_SOURCES) if args.source == "all" else [args.source]
     for s in source_names:
         if s not in SOURCES:
             print(
@@ -116,9 +179,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     index = CardIndex()
-    swapper = None if args.disable_card_swap else CardSwapper(index)
-    writer = DeckWriter(args.out)
-    summary = RunSummary()
+    runs = _resolution_runs(args, index)
     today = datetime.date.today().isoformat()  # noqa: DTZ011 - local run date is fine for a scrape label
     kwargs = _source_kwargs(args)
 
@@ -127,30 +188,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"== source: {name} ==")
         try:
             for raw in source.iter_decks(**kwargs):
-                process_deck(
-                    raw,
-                    index,
-                    writer,
-                    summary,
-                    dry_run=args.dry_run,
-                    verbose=args.verbose,
-                    date=today,
-                    warn_impossible_evolutions=args.warn_impossible_evolutions,
-                    swapper=swapper,
-                )
+                for run in runs:
+                    process_deck(
+                        raw,
+                        index,
+                        run.writer,
+                        run.summary,
+                        dry_run=args.dry_run,
+                        verbose=args.verbose,
+                        date=today,
+                        warn_impossible_evolutions=args.warn_impossible_evolutions,
+                        swapper=run.swapper,
+                    )
         except Exception as e:  # noqa: BLE001 - report and continue with what we have
             print(f"  source {name!r} error: {e}", file=sys.stderr)
 
-    print("\nSummary:")
-    print(summary.format())
-    if summary.drops and not args.verbose:
-        print(
-            f"  ({len(summary.drops)} decks dropped; re-run with --verbose for reasons)"
-        )
-    if summary.warnings and not args.verbose:
-        print(
-            f"  ({len(summary.warnings)} warnings; re-run with --verbose for details)"
-        )
+    if not args.dry_run:
+        for run in runs:
+            run.writer.ensure_manifest()
+    for run in runs:
+        _print_summary(run, verbose=args.verbose, labelled=len(runs) > 1)
     return 0
 
 

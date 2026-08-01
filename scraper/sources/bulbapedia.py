@@ -11,6 +11,7 @@ from .base import DeckSource
 
 API = "https://bulbapedia.bulbagarden.net/w/api.php"
 _QTY_RE = re.compile(r"(\d+)")
+_PRINTING_RE = re.compile(r"^.+ \((?P<set>.+) (?P<number>[A-Za-z]*\d+[A-Za-z]*)\)$")
 
 
 class BulbapediaSource(DeckSource):
@@ -68,7 +69,7 @@ class BulbapediaSource(DeckSource):
         Extract decklists from a page's ``Quantity | Card`` tables.
 
         :param html: Rendered wiki page HTML.
-        :return: One RawCard list per decklist table found (by name only).
+        :return: One RawCard list per decklist table found.
         """
         soup = BeautifulSoup(html, "lxml")
         decks: list[list[RawCard]] = []
@@ -86,14 +87,29 @@ class BulbapediaSource(DeckSource):
             card_i = header.index("card")
             cards: list[RawCard] = []
             for tr in rows[1:]:
-                cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
+                cell_nodes = tr.find_all(["td", "th"])
+                cells = [cell.get_text(" ", strip=True) for cell in cell_nodes]
                 if len(cells) <= max(qty_i, card_i):
                     continue
                 m = _QTY_RE.search(cells[qty_i])
                 name = cells[card_i].strip()
                 if not m or not name:
                     continue
-                cards.append(RawCard(count=int(m.group(1)), name=name))
+                set_name: str | None = None
+                number: str | None = None
+                link = cell_nodes[card_i].find("a", title=True)
+                printing = _PRINTING_RE.match(str(link.get("title"))) if link else None
+                if printing:
+                    set_name = printing.group("set")
+                    number = printing.group("number")
+                cards.append(
+                    RawCard(
+                        count=int(m.group(1)),
+                        name=name,
+                        set_code=set_name,
+                        number=number,
+                    )
+                )
             if cards:
                 decks.append(cards)
         return decks

@@ -45,6 +45,35 @@ class RawDeck:
         return sum(c.count for c in self.cards)
 
 
+@dataclass(frozen=True)
+class CardSwap:
+    """One auditable source-printing to competition-card substitution."""
+
+    source_name: str
+    source_set: str | None
+    source_number: str | None
+    count: int
+    target_id: int
+    target_name: str
+    kind: str  # "variant"
+    confidence: float
+    rationale: str
+
+    def to_json(self) -> dict[str, str | int | float | None]:
+        """Return the stable representation stored on a manifest observation."""
+        return {
+            "source_name": self.source_name,
+            "source_set": self.source_set,
+            "source_number": self.source_number,
+            "count": self.count,
+            "target_id": self.target_id,
+            "target_name": self.target_name,
+            "kind": self.kind,
+            "confidence": self.confidence,
+            "rationale": self.rationale,
+        }
+
+
 @dataclass
 class ResolvedDeck:
     """The result of resolving a RawDeck against the card index."""
@@ -54,8 +83,10 @@ class ResolvedDeck:
     unresolved_cards: list[RawCard] = field(default_factory=list)
     # Fuzzy substitutions applied, for auditing: (scraped name -> matched name, score).
     fuzzy_matches: list[tuple[str, str, float]] = field(default_factory=list)
-    # Hardcoded swaps applied, for auditing: (scraped name -> substitute name).
-    swaps: list[tuple[str, str]] = field(default_factory=list)
+    # Structured swaps applied, retained per source observation in the manifest.
+    swaps: list[CardSwap] = field(default_factory=list)
+    # Candidates rejected by post-resolution copy-count or ACE SPEC guards.
+    swap_failures: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:

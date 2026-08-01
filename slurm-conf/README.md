@@ -53,3 +53,29 @@ requires `WANDB_API_KEY` in `.env` or a verified `wandb login`.
 append their final checkpoint to the repository-local
 `logs/checkpoint_keys.csv`; `run_job.sh` exports and prints its absolute path,
 and the normal Python training callback performs the locked CSV append.
+
+## Deck scraping
+
+`scrape_all.sh` submits a 48-hour job to the regular CPU partition and runs every
+network-backed deck source via `--source all` (Limitless and Bulbapedia). Each
+source deck is resolved through both strategies in the same fetch pass, producing
+`decks/mapping-resolved/manifest.json` and
+`decks/heuristic-resolved/manifest.json`:
+
+```bash
+./slurm-conf/scrape_all.sh
+```
+
+The defaults fetch Limitless events since 2026-01-01 and Bulbapedia's
+`Deck archetypes` category. Bounds can be changed through `SCRAPER_LIMIT`,
+`SCRAPER_MAX_PAGES`, `SCRAPER_MAX_DECKS`, `SCRAPER_PER_TOURNAMENT`,
+`SCRAPER_SINCE`, `BULBAPEDIA_CATEGORY`, and `SCRAPER_OUT`. Additional arguments
+are appended to the scraper command.
+
+Multi-deck training and evaluation use the heuristic corpus by default. Select the
+mapping corpus with the top-level Hydra override:
+
+```bash
+./slurm-conf/train.sh --config ppo_selfplay_multideck \
+  --slurm-config train_cpu deck_corpus=mapping-resolved
+```
