@@ -10,6 +10,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SUBMIT_PATH = PROJECT_ROOT / "slurm-conf" / "submit.py"
+RUN_JOB_PATH = PROJECT_ROOT / "slurm-conf" / "run_job.sh"
 SPEC = importlib.util.spec_from_file_location("slurm_submit", SUBMIT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 submit = importlib.util.module_from_spec(SPEC)
@@ -134,3 +135,14 @@ def test_config_argument_order(
     submit.main()
 
     assert capsys.readouterr().out.strip() == "sbatch worker"
+
+
+def test_run_job_targets_repository_registry_without_shell_append() -> None:
+    """Slurm exports the shared path; Python owns the single locked append."""
+    script = RUN_JOB_PATH.read_text(encoding="utf-8")
+
+    assert 'CHECKPOINT_KEYS_FILE="$PROJECT_ROOT/logs/checkpoint_keys.csv"' in script
+    assert 'echo "Checkpoint registry: $CHECKPOINT_KEYS_FILE"' in script
+    assert "checkpoint_keys.csv" not in "\n".join(
+        line for line in script.splitlines() if ">>" in line
+    )

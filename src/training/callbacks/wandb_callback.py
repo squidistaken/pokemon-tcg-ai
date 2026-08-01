@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 if TYPE_CHECKING:
@@ -10,6 +11,8 @@ if TYPE_CHECKING:
 from src.training.callbacks.base import TrainingCallback
 
 logger = logging.getLogger(__name__)
+
+_ARCHETYPE_PREFIX = "archetype_win_rate/"
 
 WandbMode = Literal["online", "offline", "disabled"]
 _VALID_MODES: tuple[str, ...] = get_args(WandbMode)
@@ -40,6 +43,7 @@ class WeightsAndBiases(TrainingCallback):
             mode: str = "online",
             notes: str | None = None,
             dir: str | None = None,
+            log_checkpoints: bool = True,
     ) -> None:
         """
         :param project: W&B project to log the run under.
@@ -52,6 +56,8 @@ class WeightsAndBiases(TrainingCallback):
             or ``disabled`` (drop everything).
         :param notes: Free-text note attached to the run.
         :param dir: Parent directory for W&B's local run files.
+        :param log_checkpoints: Mirror written model checkpoints as versioned
+            W&B model artifacts.
         :raises ValueError: If ``mode`` is not a mode W&B accepts. Checked here so
             a config typo fails before the environments are built.
         """
@@ -68,7 +74,9 @@ class WeightsAndBiases(TrainingCallback):
         self._mode: WandbMode = cast(WandbMode, mode)
         self._notes = notes
         self._dir = dir
+        self._log_checkpoints = log_checkpoints
         self._run: Run | None = None
+        self._latest_archetype_rates: dict[str, float] = {}
 
     def on_train_start(self, run_config: Mapping[str, Any]) -> None:
         """
@@ -125,7 +133,55 @@ class WeightsAndBiases(TrainingCallback):
         :param step: Frames collected at the time of the evaluation.
         :param metrics: Evaluation metrics.
         """
-        self._log("eval", step, metrics)
+        archetype_rates = {
+            key[len(_ARCHETYPE_PREFIX):]: value
+            for key, value in metrics.items()
+            if key.startswith(_ARCHETYPE_PREFIX)
+        }
+        if archetype_rates:
+            self._latest_archetype_rates = archetype_rates
+        summary = {
+            key: value for key, value in metrics.items() if not key.startswith(_ARCHETYPE_PREFIX)
+        }
+        self._log("eval", step, summary)
+
+    def log_table(self, key: str, columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
+        """
+        Log a one-shot table to the run.
+        
+        :param key: W&B key the table is logged under.
+        :param columns: Column names.
+        :param rows: Table rows, one sequence of cell values per row.
+        """
+        if self._run is None:
+            return
+        import wandb
+
+        table = wandb.Table(columns=list(columns), data=[list(row) for row in rows])
+        self._run.log({key: table})
+
+    def log_checkpoint(self, path: Path, digest: str, frames: int) -> None:
+        """
+        Log a local checkpoint as a version of this run's model artifact.
+
+        The stable artifact collection is keyed by W&B run ID. ``latest`` and
+        the short SHA-256 key make either the newest or an exact checkpoint
+        easy to retrieve from W&B without changing the local submission flow.
+
+        :param path: Local checkpoint path.
+        :param digest: Full SHA-256 digest of the checkpoint.
+        :param frames: Collected-frame counter captured by the checkpoint.
+        """
+        if self._run is None or not self._log_checkpoints:
+            return
+        key = digest[:12]
+        self._run.log_artifact(
+            str(path),
+            name=f"checkpoint-{self._run.id}",
+            type="model",
+            aliases=["latest", f"sha-{key}", f"frames-{frames}"],
+        )
+        logger.info("W&B checkpoint artifact logged: sha-%s", key)
 
     def _log(self, prefix: str, step: int, metrics: Mapping[str, float]) -> None:
         """
@@ -153,6 +209,12 @@ class WeightsAndBiases(TrainingCallback):
         """
         if self._run is None:
             return
+        if self._latest_archetype_rates:
+            self.log_table(
+                "eval/archetype_win_rate_table",
+                ["archetype", "win_rate"],
+                sorted(self._latest_archetype_rates.items()),
+            )
         for key, value in summary.items():
             self._run.summary[f"summary/{key}"] = value
         self._run.finish()

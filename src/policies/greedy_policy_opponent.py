@@ -1,4 +1,6 @@
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, cast
 
 import torch
 from omegaconf import DictConfig
@@ -10,24 +12,61 @@ from src.env.observation_encoder import ObservationEncoder
 from src.models.actor_critic import ActorCritic
 from src.policies.ppo_actor import build_actor_critic
 
+CHECKPOINT_FORMAT_VERSION = 1
 
-def save_actor_critic(actor_critic: ActorCritic, path: str | Path) -> Path:
+
+def save_actor_critic(
+        actor_critic: ActorCritic,
+        path: str | Path,
+        *,
+        config: Mapping[str, Any] | None = None,
+        frames: int | None = None,
+) -> Path:
     """
     Snapshot an actor-critic's parameters to disk.
 
-    Saves ``state_dict()`` (stable ``backbone.* / policy_head.* /
-    value_head.*`` keys) so it reloads into a fresh
-    :func:`~src.policies.ppo_actor.build_actor_critic` regardless of the
-    torchrl operator wiring used for training.
+    With ``config=None`` this saves the legacy bare ``state_dict()`` format.
+    Training passes the small inference-time config, producing a versioned
+    checkpoint that can rebuild itself for Kaggle packaging without relying on
+    the Hydra output directory still being present.
 
     :param actor_critic: Actor-critic to snapshot.
     :param path: Destination file path.
+    :param config: Resolved inference-time model/environment config to embed.
+    :param frames: Collected-frame counter for this checkpoint.
     :return: The path written to.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(actor_critic.state_dict(), path)
+    state_dict = actor_critic.state_dict()
+    payload: object = state_dict
+    if config is not None:
+        payload = {
+            "format_version": CHECKPOINT_FORMAT_VERSION,
+            "state_dict": state_dict,
+            "config": dict(config),
+            "frames": frames,
+        }
+    torch.save(payload, path)
     return path
+
+
+def checkpoint_state_dict(payload: object) -> Mapping[str, torch.Tensor]:
+    """
+    Return model parameters from either the versioned or legacy checkpoint.
+
+    :param payload: Object returned by :func:`torch.load`.
+    :return: Actor-critic state dict.
+    :raises ValueError: If a versioned checkpoint has no mapping state dict.
+    """
+    if isinstance(payload, Mapping) and "state_dict" in payload:
+        state_dict = payload["state_dict"]
+        if not isinstance(state_dict, Mapping):
+            raise ValueError("Checkpoint 'state_dict' must be a mapping.")
+        return cast(Mapping[str, torch.Tensor], state_dict)
+    if not isinstance(payload, Mapping):
+        raise TypeError("Checkpoint must contain a state-dict mapping.")
+    return cast(Mapping[str, torch.Tensor], payload)
 
 
 class GreedyPolicyOpponent:
@@ -135,6 +174,29 @@ class GreedyPolicyOpponent:
         return picks
 
 
+def load_actor_critic(
+        checkpoint_path: str | Path,
+        cfg: DictConfig,
+        obs_spec: Composite,
+        action_spec: TensorSpec,
+        device: torch.device | str = "cpu",
+) -> ActorCritic:
+    """
+    Rebuild an actor-critic from config and load a snapshot's weights.
+
+    :param checkpoint_path: Path to a :func:`save_actor_critic` snapshot.
+    :param cfg: Hydra config used to build the matching architecture.
+    :param obs_spec: Environment observation composite spec.
+    :param action_spec: Environment action spec.
+    :param device: Device to load the weights onto.
+    :return: The reconstructed actor-critic with the checkpoint's weights.
+    """
+    actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
+    payload = torch.load(Path(checkpoint_path), map_location=device, weights_only=True)
+    actor_critic.load_state_dict(checkpoint_state_dict(payload))
+    return actor_critic
+
+
 def load_greedy_opponent(
         checkpoint_path: str | Path,
         cfg: DictConfig,
@@ -144,14 +206,7 @@ def load_greedy_opponent(
         device: torch.device | str = "cpu",
 ) -> GreedyPolicyOpponent:
     """
-    Rebuild an actor-critic from config and load a snapshot as an opponent.
-
-    Reconstructs the network with :func:`~src.policies.ppo_actor.
-    build_actor_critic` (so it matches the trained architecture), loads the
-    checkpoint written by :func:`save_actor_critic`, and wraps it as a
-    :class:`GreedyPolicyOpponent`. Per the ``ParallelEnv`` worker-isolation
-    caveat, opponents load the network from disk in each worker rather than
-    sharing a Python object across processes.
+    Load a snapshot and wrap it as a greedy opponent.
 
     :param checkpoint_path: Path to a :func:`save_actor_critic` snapshot.
     :param cfg: Hydra config used to build the matching architecture.
@@ -161,7 +216,5 @@ def load_greedy_opponent(
     :param device: Device for inference.
     :return: A greedy opponent playing the snapshot.
     """
-    actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
-    state_dict = torch.load(Path(checkpoint_path), map_location=device, weights_only=True)
-    actor_critic.load_state_dict(state_dict)
+    actor_critic = load_actor_critic(checkpoint_path, cfg, obs_spec, action_spec, device)
     return GreedyPolicyOpponent(actor_critic, encoder, device=device)

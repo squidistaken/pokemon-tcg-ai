@@ -106,7 +106,12 @@ def test_snapshot_roundtrip_plays(tmp_path, structured_model_cfg, structured_obs
     (the documented self-play checkpoint cycle).
     """
     actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
-    checkpoint = save_actor_critic(actor_critic, tmp_path / "snapshot.pt")
+    checkpoint = save_actor_critic(
+        actor_critic,
+        tmp_path / "snapshot.pt",
+        config={"format": "versioned-test"},
+        frames=100,
+    )
     assert checkpoint.exists()
 
     opponent = load_greedy_opponent(

@@ -27,6 +27,7 @@ module load "$UV_MODULE"
 
 cd "$PROJECT_ROOT"
 export UV_PROJECT_ENVIRONMENT="$PROJECT_ROOT/$UV_ENVIRONMENT"
+export CHECKPOINT_KEYS_FILE="$PROJECT_ROOT/logs/checkpoint_keys.csv"
 if [ ! -x "$UV_PROJECT_ENVIRONMENT/bin/python" ]; then
   echo "ERROR: uv environment is missing: $UV_PROJECT_ENVIRONMENT" >&2
   exit 1
@@ -46,6 +47,7 @@ export NUMEXPR_NUM_THREADS=1
 echo "Profile: $PROFILE_PATH"
 echo "Hydra config: conf/$CONFIG_NAME.yaml"
 echo "uv environment: $UV_ENVIRONMENT"
+echo "Checkpoint registry: $CHECKPOINT_KEYS_FILE"
 echo "Job: ${SLURM_JOB_ID:-not-running-under-slurm}"
 echo "Node: $(hostname)"
 echo "CPUs: ${SLURM_CPUS_PER_TASK:-unknown}"
