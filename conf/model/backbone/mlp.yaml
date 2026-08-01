@@ -1,0 +1,21 @@
+# The proven PPO baseline trunk: an MLP over one flat feature vector.
+# input_dim, out_features and the StructuredObsAdapter (which embeds card
+# IDs, normalizes scalars and pools unordered zones before the MLP; widths
+# in model.adapter) are injected by build_actor_critic from the specs.
+_target_: src.models.backbone.MLPBackbone
+num_cells: [256, 256]
+activation: tanh
+# Observation keys to consume, nested under the env's "observation" key.
+# These are StructuredObservationEncoder's top-level groups (see its .spec()),
+# each handled by the adapter.
+in_keys:
+  - [observation, globals]
+  - [observation, select_cats]
+  - [observation, context_card_ids]
+  - [observation, stadium_id]
+  - [observation, options]
+  - [observation, pokemon]
+  - [observation, my]
+  - [observation, opp]
+  - [observation, select_deck]
+  - [observation, looking]

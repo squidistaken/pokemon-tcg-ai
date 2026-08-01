@@ -1,0 +1,13 @@
+# Scheduler resources for a CPU-only node.
+slurm:
+  job_name: pokemon-tcg-train-cpu
+  time: "24:00:00"
+  nodes: 1 # Multi-node training is not supported.
+  ntasks: 1 # One training process.
+  cpus_per_task: 16 # Matches the default 16 collector workers.
+  mem: 32G # Memory requested for the node.
+  partition: regular
+  gpu_type: none
+  gpus_per_node: 0
+  output: slurm-conf/logs/%x_%j.out
+  error: slurm-conf/logs/%x_%j.err

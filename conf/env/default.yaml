@@ -1,0 +1,95 @@
+# Deck CSVs are defined in the scheduler-independent paths config so storage
+# can be redirected without changing env settings.
+deck0: ${paths.deck0}
+deck1: ${paths.deck1}
+# Multi-deck training curriculum. When deck_pool is null the env uses the fixed deck0/deck1 pair
+# above. When set to a directory, glob, or list of deck CSVs, each episode instead samples a matchup
+# from the pool, so the policy trains across archetypes instead of overfitting one card pool.
+# NOTE: The multi-deck training curriculum weighting and probabilities may need tweaks over time.
+deck_pool: null
+# How the two seats relate when sampling from a pool:
+#   mirror      -> both seats get the same deck (isolates skill from matchup).
+#   independent -> each seat drawn separately (cross-archetype matchups).
+deck_matchup: mirror
+# Matchup used for the periodic evaluator only (deck_split="eval"); null falls
+# back to deck_matchup. Set this to "mirror" while training on "independent" so
+# the eval win-rate reflects piloting skill rather than deck-vs-deck luck.
+eval_deck_matchup: null
+# Timesteps between sampling new decks from the pool. 0 samples on every reset.
+deck_switch_steps: 0
+# Draw strategy over the pool:
+#   uniform     -> each deck equally likely, i.i.d. per episode.
+#   round_robin -> deterministic rotation covering every deck evenly.
+deck_sampling: uniform
+# Draw strategy for the periodic evaluator only. "null" falls back to deck_sampling. 
+# Set this to "round_robin" so eval deterministically and evenly covers the held-out pool: 
+# the per-archetype breakdown then reflects the policy, not the luck of which held-out decks
+# a uniform draw sampled that round.
+eval_deck_sampling: null
+# Probability that a training episode is a mirror match (both seats the same
+# deck); the rest are independent draws. null derives it from deck_matchup
+# (mirror -> 1.0, independent -> 0.0). Set e.g. 0.5 to mix the two, or sweep it
+# across runs to interpolate between them. Training only; eval uses its matchup.
+deck_mirror_prob: null
+# Bias the training deck draw toward stronger decks via manifest.json, so the
+# policy faces a meta-realistic field instead of every list equally often:
+#   null     -> uniform (every deck equally likely).
+#   winrate  -> weight by tournament record W/(W+L).
+#   placing  -> weight by 1/placing (better finishes sampled more).
+# Training only; evaluation always samples the held-out pool uniformly.
+deck_weighting: null
+# Fraction of the pool held out from training and used only for evaluation, so
+# eval measures generalization to unseen decks. 0.0 trains on the whole pool.
+deck_holdout_frac: 0.0
+# Cap the training pool to this many archetypes (the held-out eval set is left
+# untouched). null uses every training archetype. Sweep it across runs
+# (--multirun env.deck_pool_width=4,8,16,32) to measure how held-out
+# generalization scales with training deck diversity. The chosen archetypes are
+# deterministic given deck_split_seed.
+deck_pool_width: null
+# Seed for the deterministic train/holdout split.
+deck_split_seed: 0
+# Prioritized Level Replay over deck-archetype matchups. When enabled, each
+# episode's matchup is drawn from a distribution the learner maintains, rather
+# than uniformly from the pool, so training concentrates on the matchups the
+# critic still misjudges. Requires deck_pool and mp_start_method=fork.
+curriculum:
+  enabled: false
+  # Maximum matchups scored at once. Must be at least the square of the
+  # archetype count; above it, nothing is ever evicted and the buffer simply
+  # holds the whole level space.
+  capacity: 4000
+  # Rank-distribution temperature; lower is greedier toward top-scoring levels.
+  score_temperature: 0.9
+  # Weight of the staleness term in the sampling mixture. Set above the PLR
+  # paper's 0.25 because self-play moves the league underneath a level and ages
+  # its score for reasons unrelated to learning, and because staleness is the
+  # only thing that recovers a level whose score has gone flat.
+  staleness_coefficient: 0.4
+  # Episodes a matchup needs before its score is trusted or it may be evicted.
+  # A handful of terminal +/-1 outcomes says almost nothing.
+  min_visits: 5
+  # Score only episodes played against the fixed anchor opponent. Off by
+  # default: it removes the drift a strengthening league induces in level
+  # scores, but discards most episodes' scoring signal. Turn on only if the
+  # logged diagnostic shows the drift matters.
+  anchor_only_scoring: false
+  # Frames between dumps of the buffer's win/loss tallies. Deck selection needs
+  # those over a window of training, which a single end-of-run total cannot
+  # provide. Null derives an interval from the batch size.
+  state_interval: null
+# Padded size of the option space (stop action excluded); must exceed the
+# largest option list the engine can offer, or options get truncated.
+max_options: 128
+# Observation encoder: "structured" (card-ID/option/board tensors, consumed
+# model-side via StructuredObsAdapter) is the only supported encoder.
+encoder: structured
+# Number of environment instances to run, each with its own battle handle.
+num_workers: 16
+# Collect with a multiprocess ParallelEnv (true) or a single-process SerialEnv (false).
+parallel: true
+# Multiprocessing start method for ParallelEnv workers (e.g. fork, spawn).
+mp_start_method: fork
+# When parallel is true but num_workers is 1, fall back to a single-process env
+# instead of paying multiprocessing overhead for one worker.
+serial_for_single: true

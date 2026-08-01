@@ -1,0 +1,65 @@
+# @package _global_
+# Fast, fully-reproducible, single-process run for debugging the training loop.
+#   python -m src.train +experiment=debug
+# Everything here is chosen so a crash surfaces in seconds with a readable
+# stack trace, not after minutes of collection inside a worker process. Runs
+# self-play, so snapshotting, league rotation and fixed-opponent eval are all
+# exercised rather than skipped.
+defaults:
+  - override /agent: ppo
+  - override /callbacks: none
+  - override /train: ppo_selfplay
+
+# Deterministic, so a bug reproduces on the next run.
+set_seed: true
+seed: 0
+
+env:
+  # One env in-process: exceptions raise in the main interpreter instead of
+  # being re-raised across a pipe, and breakpoints actually hit.
+  num_workers: 1
+  parallel: false
+
+collector:
+  # Two collector iterations total, so the full loop (collect -> update ->
+  # snapshot -> eval -> shutdown) runs end to end without a long wait.
+  frames_per_batch: 256
+  total_frames: 512
+
+agent:
+  frames_per_batch: 256
+  sub_batch_size: 64
+  # Two epochs still exercises the multi-epoch path; more is wasted time.
+  num_epochs: 2
+  # Compilation and AMP hide errors behind graph breaks and cast failures.
+  compile_loss: false
+  compile_policy: false
+  use_amp: false
+  device: cpu
+
+model:
+  # A small trunk keeps shape errors legible and the step fast on CPU.
+  embed_dim: 32
+  backbone:
+    num_cells: [64, 64]
+  value_head:
+    num_cells: [64, 64]
+
+train:
+  # Snapshot every batch, so the league is populated and rotated within the
+  # 512-frame budget instead of the run ending before the first snapshot.
+  snapshot_interval: 256
+  pool_size: 2
+  # Exercise the eval path once, with a handful of episodes.
+  eval_interval: 256
+  eval_episodes: 4
+
+hydra:
+  # Debug runs stay out of the dated outputs/ tree, but keep a per-run
+  # subdirectory: checkpoint_dir is relative, so a shared directory would let
+  # one debug run inherit the previous run's opponent snapshots.
+  run:
+    dir: outputs/debug/${now:%Y-%m-%d_%H-%M-%S}
+  job_logging:
+    root:
+      level: DEBUG

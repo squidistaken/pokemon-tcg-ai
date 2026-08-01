@@ -1,0 +1,5 @@
+# PPO against the fixed random opponent.
+defaults:
+  - config
+  - override /agent: ppo
+  - _self_

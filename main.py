@@ -1,17 +1,40 @@
 import os
-import random
 
 from cg.api import Observation, to_observation_class
+from src.policies.inference import InferenceAgent, load_inference_agent
+
+# Overridable via env var rather than hardcoded: main.py has no CLI args or
+# config file of its own (Kaggle just calls agent(obs_dict) directly), so this
+# is the only lever to redirect these without editing the code -- e.g. once
+# the actual submission bundling (a separate issue) settles on its own layout.
+KAGGLE_AGENT_DIR = os.environ.get("PTCG_KAGGLE_AGENT_DIR", "/kaggle_simulations/agent/")
+CHECKPOINT_PATH = os.environ.get("PTCG_CHECKPOINT_PATH", "checkpoint/model.pt")
+MODEL_CONFIG_PATH = os.environ.get("PTCG_MODEL_CONFIG_PATH", "checkpoint/model_config.yaml")
+
+_agent: InferenceAgent | None = None
+
+
+def _resolve_path(file_path: str) -> str:
+    """
+    Resolve a submission-bundle-relative path, local run or Kaggle sandbox.
+
+    :param file_path: Path relative to the submission bundle's root.
+    :return: ``file_path`` unchanged if it exists in the current working
+        directory, otherwise the same path under the Kaggle agent directory.
+    """
+    if not os.path.exists(file_path):
+        file_path = KAGGLE_AGENT_DIR + file_path
+    return file_path
+
 
 def read_deck_csv() -> list[int]:
-    """Read deck.csv.
-    
+    """
+    Read deck.csv.
+
     Returns:
         list[int]: A list of card IDs in the deck.
     """
-    file_path = "deck.csv"
-    if not os.path.exists(file_path):
-        file_path = "/kaggle_simulations/agent/" + file_path
+    file_path = _resolve_path("deck.csv")
     with open(file_path, "r") as file:
         csv = file.read().split("\n")
     deck = []
@@ -19,12 +42,45 @@ def read_deck_csv() -> list[int]:
         deck.append(int(csv[i]))
     return deck
 
+
+def _load_agent() -> InferenceAgent:
+    """
+    Build (once) and return the checkpointed agent used for inference.
+
+    Lazily constructed on first use and cached in ``_agent``: ``agent()``
+    is called once per selection for the whole match, so rebuilding the
+    network and reloading weights on every call would be pure overhead.
+
+    Returns:
+        InferenceAgent: Our submission agent, wrapping the loaded
+            checkpoint and sampling from its learned distribution.
+
+    Raises:
+        FileNotFoundError: If the checkpoint or its config is missing. A
+            submission without a trained model is a packaging mistake, not a
+            state to silently degrade from; run
+            ``scripts/export_inference_checkpoint.py`` first.
+    """
+    global _agent
+    if _agent is None:
+        checkpoint_path = _resolve_path(CHECKPOINT_PATH)
+        model_config_path = _resolve_path(MODEL_CONFIG_PATH)
+        if not os.path.exists(checkpoint_path) or not os.path.exists(model_config_path):
+            raise FileNotFoundError(
+                f"Missing checkpoint ({checkpoint_path!r}) or model config ({model_config_path!r}). "
+                "Run scripts/export_inference_checkpoint.py before submitting."
+            )
+        _agent = load_inference_agent(checkpoint_path, model_config_path)
+    return _agent
+
+
 def agent(obs_dict: dict) -> list[int]:
-    """Implement Your Pokémon Trading Card Game Agent.
+    """
+    Implement Your Pokémon Trading Card Game Agent.
 
     Each element in the returned list must be >= 0 and < len(obs.select.option).
     The list length must be between obs.select.minCount and obs.select.maxCount (inclusive), with no duplicate elements.
-    
+
     Returns:
         list[int]: A list of option index.
     """
@@ -34,5 +90,5 @@ def agent(obs_dict: dict) -> list[int]:
         # The deck is a list of 60 card IDs.
         # The deck must comply with the Pokémon Trading Card Game rules.
         return read_deck_csv()
-    
-    return random.sample(list(range(len(obs.select.option))), obs.select.maxCount)  # select randomly
+
+    return _load_agent()(obs)

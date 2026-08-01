@@ -1,0 +1,4 @@
+# Random-policy collection baseline.
+defaults:
+  - config
+  - _self_
