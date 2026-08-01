@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 import torch
 from tensordict import TensorDictBase
 from torch import nn
-from torchrl.modules import MLP
 
 _ACTIVATIONS: dict[str, type[nn.Module]] = {
     "tanh": nn.Tanh,

@@ -61,15 +61,25 @@ matches standard PPO / ByteRL). Outputs `logits` (shape `(..., (max_options + 1)
 
 One `Backbone` ABC → `forward(obs_td, deck_ctx) -> (state_repr, option_repr)`. Heads and
 TorchRL assembly are identical across all implementations, so backbones are swappable via
-`conf/model/`.
+`conf/model/`. Concrete backbones live in their own modules beside the ABC
+(`src/models/mlp.py`, `src/models/transformer.py`).
 
-- **`MLPBackbone`** — the literature's **dominant, proven** network: flattens every observation
-  field (including the structured encoder's nested per-option/per-Pokemon/zone tables — card and
-  attack IDs go in as raw floats, no embedding lookup) and concatenates them →
+- **`MLPBackbone`** (`src/models/mlp.py`) — the literature's **dominant, proven** network: flattens
+  every observation field (including the structured encoder's nested per-option/per-Pokemon/zone
+  tables — card and attack IDs go in as raw floats, no embedding lookup) and concatenates them →
   `torchrl.modules.MLP`. **Implemented and trains against the default `structured` encoder today**
   (as well as the legacy flat 36-dim obs, kept for regression testing) — this naive-flatten
   pairing is the baseline every richer, permutation-invariant backbone below must beat (Vieira et
   al.), not a placeholder blocked on Phase 2.
+- **`TransformerBackbone`** (`src/models/transformer.py`) — **implemented** (Issue #45). Attention
+  over the *feature groups within one observation*, not over time. Each `StructuredObsAdapter`
+  group (`globals`, `options`, `pokemon`, the zone tables, …) becomes one token via its own linear
+  projection plus a learned per-group type embedding; `nn.TransformerEncoder` attends across the
+  ~10 tokens; mean-pooling the result gives `state_repr`. Deliberately shallow (default 1 layer,
+  4 heads) — the sequence is short and the MLP is still the control to beat. Emits no
+  `option_repr`, so it pairs with the same `LinearPolicyHead`/`ValueHead` as the MLP. This is the
+  intermediate step to the per-option-token backbones below, which is why the adapter grew
+  `encode_groups()`/`group_feature_widths` (per-group vectors instead of one concatenation).
 - **`DeepSetsBackbone`** — permutation-**invariant** pooling (shared per-token MLP → sum/mean pool)
   over entity/hand/option tokens. The lightweight permutation-equivariant option named alongside
   Set Transformers in the literature; far cheaper than attention, order-invariant over cards.
@@ -279,9 +289,17 @@ value_head:
 
 ```yaml
 # mlp.yaml — the proven baseline
-_target_: src.models.backbone.MLPBackbone
+_target_: src.models.mlp.MLPBackbone
 num_cells: [256, 256]
 activation: tanh
+
+# transformer.yaml — attention across the observation's feature groups
+_target_: src.models.transformer.TransformerBackbone
+num_heads: 4
+num_layers: 1
+ff_dim: 256
+dropout: 0.0
+activation: gelu
 
 # deepsets.yaml
 _target_: src.models.backbone.DeepSetsBackbone
@@ -346,6 +364,9 @@ max_grad_norm: 1.0
 ```bash
 # Phase-1 baseline (defaults)
 python -m src.train
+
+# Attention over the observation's feature groups (Issue #45), linear head
+python -m src.train agent=ppo model/backbone=transformer
 
 # Phase-2 primary: Set Transformer trunk + pointer head
 python -m src.train model/backbone=set_transformer model/head=pointer

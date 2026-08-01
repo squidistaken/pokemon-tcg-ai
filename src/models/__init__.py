@@ -3,6 +3,7 @@ from .backbone import Backbone, activation_class
 from .heads import LinearPolicyHead, ValueHead
 from .mlp import MLPBackbone
 from .structured_obs_adapter import StructuredObsAdapter
+from .transformer import TransformerBackbone
 
 __all__ = [
     "ActorCritic",
@@ -10,6 +11,7 @@ __all__ = [
     "LinearPolicyHead",
     "MLPBackbone",
     "StructuredObsAdapter",
+    "TransformerBackbone",
     "ValueHead",
     "activation_class",
 ]

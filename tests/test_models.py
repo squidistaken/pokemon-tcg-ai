@@ -5,7 +5,7 @@ import torch
 from tensordict import TensorDict
 from torchrl.data import Composite
 
-from src.models import LinearPolicyHead, MLPBackbone, ValueHead
+from src.models import LinearPolicyHead, MLPBackbone, TransformerBackbone, ValueHead
 from src.models.backbone import activation_class
 from src.models.structured_obs_adapter import StructuredObsAdapter
 from src.policies.ppo_actor import build_actor_critic
@@ -103,6 +103,69 @@ def test_value_head_scalar_output() -> None:
     """
     head = ValueHead(in_features=8, num_cells=[8])
     assert head(torch.randn(6, 8)).shape == (6, 1)
+
+
+def test_transformer_actor_critic_forward_shapes(
+        transformer_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    The transformer backbone slots into the same actor-critic assembly as the
+    MLP backbone and produces the same output shapes.
+    """
+    actor_critic = build_actor_critic(transformer_model_cfg, structured_obs_spec, action_spec)
+    out = actor_critic(_dummy_obs(structured_obs_spec, 5))
+    assert out["logits"].shape == (5, N_ACTIONS)
+    assert out["state_value"].shape == (5, 1)
+
+
+def test_transformer_gradients_reach_trunk_and_both_heads(
+        transformer_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    Backprop from both outputs reaches the transformer trunk (including the
+    adapter's card embedding) and both heads.
+    """
+    actor_critic = build_actor_critic(transformer_model_cfg, structured_obs_spec, action_spec)
+    out = actor_critic(_dummy_obs(structured_obs_spec, 4))
+    (out["logits"].sum() + out["state_value"].sum()).backward()
+
+    backbone = cast(TransformerBackbone, actor_critic.backbone)
+    adapter = cast(StructuredObsAdapter, backbone.adapter)
+    trunk = next(backbone.encoder.parameters())
+    embedding = adapter._card_embedding.weight  # noqa: SLF001
+    policy = next(actor_critic.policy_head.parameters())
+    value = next(actor_critic.value_head.parameters())
+    assert trunk.grad is not None and torch.any(trunk.grad != 0)
+    assert embedding.grad is not None and torch.any(embedding.grad != 0)
+    assert policy.grad is not None and torch.any(policy.grad != 0)
+    assert value.grad is not None and torch.any(value.grad != 0)
+
+
+def test_transformer_backbone_requires_adapter() -> None:
+    """
+    The transformer backbone has no naive-flatten fallback: it needs the
+    adapter's per-group widths and encodings.
+    """
+    with pytest.raises(ValueError, match="requires a StructuredObsAdapter"):
+        TransformerBackbone(input_dim=16, out_features=8, adapter=None, num_heads=2)
+
+
+def test_transformer_backbone_rejects_indivisible_heads(structured_obs_spec) -> None:
+    """
+    ``out_features`` must be divisible by ``num_heads`` (attention head width).
+    """
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec,
+        in_keys=[("observation", "globals")],
+    )
+    with pytest.raises(ValueError, match="divisible by num_heads"):
+        TransformerBackbone(
+            input_dim=adapter.out_features,
+            out_features=8,
+            adapter=adapter,
+            num_heads=3,
+            in_keys=[("observation", "globals")],
+        )
 
 
 def test_incompatible_head_backbone_raises(

@@ -1,0 +1,28 @@
+# Self-attention trunk: one token per observation group (see
+# src/models/transformer.py), attending across groups instead of flattening
+# them into one vector like model/backbone/mlp.yaml. input_dim, out_features
+# and the StructuredObsAdapter (widths in model.adapter) are injected by
+# build_actor_critic from the specs, same as the MLP backbone.
+_target_: src.models.transformer.TransformerBackbone
+# Deliberately shallow: the MLP is still the proven baseline and the
+# per-observation feature sequence is short (~10 groups), so this is not a
+# deep stack.
+num_heads: 4
+num_layers: 1
+ff_dim: 256
+dropout: 0.0
+activation: gelu
+# Observation keys to consume, nested under the env's "observation" key.
+# These are StructuredObservationEncoder's top-level groups (see its .spec()),
+# each handled by the adapter and kept as its own token (not flattened).
+in_keys:
+  - [observation, globals]
+  - [observation, select_cats]
+  - [observation, context_card_ids]
+  - [observation, stadium_id]
+  - [observation, options]
+  - [observation, pokemon]
+  - [observation, my]
+  - [observation, opp]
+  - [observation, select_deck]
+  - [observation, looking]

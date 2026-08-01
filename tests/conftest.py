@@ -135,6 +135,45 @@ def structured_model_cfg() -> DictConfig:
 
 
 @pytest.fixture
+def transformer_model_cfg() -> DictConfig:
+    """
+    Minimal ``model`` config selecting the transformer backbone over the
+    structured observation's top-level groups, with a tiny embed dim so unit
+    tests stay fast.
+
+    :return: OmegaConf config with a ``model`` section.
+    """
+    return OmegaConf.create(
+        {
+            "model": {
+                "embed_dim": 32,
+                "backbone": {
+                    "_target_": "src.models.transformer.TransformerBackbone",
+                    "num_heads": 4,
+                    "num_layers": 1,
+                    "ff_dim": 32,
+                    "activation": "gelu",
+                    "in_keys": [
+                        ["observation", "globals"],
+                        ["observation", "select_cats"],
+                        ["observation", "context_card_ids"],
+                        ["observation", "stadium_id"],
+                        ["observation", "options"],
+                        ["observation", "pokemon"],
+                        ["observation", "my"],
+                        ["observation", "opp"],
+                        ["observation", "select_deck"],
+                        ["observation", "looking"],
+                    ],
+                },
+                "head": {"_target_": "src.models.heads.LinearPolicyHead"},
+                "value_head": {"num_cells": [32]},
+            }
+        }
+    )
+
+
+@pytest.fixture
 def action_spec() -> Categorical:
     """
     Discrete action spec over the option slots plus the stop action.

@@ -195,10 +195,17 @@ class StructuredObsAdapter(nn.Module):
         self._group_names: list[str] = []
         self._zone_pairs: dict[str, list[tuple[str, str]]] = {}
         self.out_features = 0
+        #: Feature width each group contributes, in :attr:`_group_names` order.
+        #: Lets a token-per-group backbone (e.g. a transformer trunk) size its
+        #: per-group input projections without re-deriving the arithmetic in
+        #: :meth:`_register_group`.
+        self.group_feature_widths: list[int] = []
         for key in in_keys:
             name = key[-1] if isinstance(key, tuple) else key
             self._group_names.append(name)
-            self.out_features += self._register_group(name, obs_spec[key])
+            width = self._register_group(name, obs_spec[key])
+            self.group_feature_widths.append(width)
+            self.out_features += width
 
     def _option_row_width(self, spec: Composite) -> int:
         """Flattened width of one option table row (card+target+attack+cats+scalars)."""
@@ -274,11 +281,14 @@ class StructuredObsAdapter(nn.Module):
             return len(pairs) * zw
         raise ValueError(f"Unknown structured observation group '{name}'.")
 
-    def forward(self, *inputs: torch.Tensor | TensorDictBase) -> torch.Tensor:
+    def encode_groups(self, *inputs: torch.Tensor | TensorDictBase) -> list[torch.Tensor]:
         """
-        Encode the structured observation groups.
+        Encode each structured observation group separately.
 
-        :return: ``(*batch, out_features)`` flat vector.
+        :return: One ``(*batch, group_feature_widths[i])`` tensor per group, in
+            :attr:`group_feature_widths` order (before concatenation). A
+            token-per-group backbone (e.g. a transformer trunk) uses this
+            directly instead of :meth:`forward`'s single flat vector.
         """
         if len(inputs) != len(self._group_names):
             raise ValueError(
@@ -299,7 +309,15 @@ class StructuredObsAdapter(nn.Module):
                 parts.append(self._encode_pokemon(value))
             else:
                 parts.append(self._encode_zone_group(name, value))
-        return torch.cat(parts, dim=-1)
+        return parts
+
+    def forward(self, *inputs: torch.Tensor | TensorDictBase) -> torch.Tensor:
+        """
+        Encode the structured observation groups.
+
+        :return: ``(*batch, out_features)`` flat vector.
+        """
+        return torch.cat(self.encode_groups(*inputs), dim=-1)
 
     # ── Card / attack / category helpers ──────────────────────────────
 

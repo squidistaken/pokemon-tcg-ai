@@ -2,7 +2,9 @@ import torch
 from tensordict import TensorDictBase
 from torch import nn
 from torchrl.modules import MLP
+
 from src.models.backbone import Backbone, activation_class
+
 
 class MLPBackbone(Backbone):
     """
