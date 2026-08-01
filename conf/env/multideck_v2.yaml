@@ -1,0 +1,43 @@
+# Archetype-filtered slice of the tournament deck corpus under decks/,
+# restricted to archetypes with at least 8 lists: 15 archetypes, 242 of the
+# corpus's 329 decks.
+#
+# Why the filter: the curriculum's level space is archetype *pairs*, so it grows
+# with the square of the archetype count while the episode budget stays fixed.
+# All 53 archetypes give 2809 matchups, or ~5 episodes each at 2M frames -- too
+# few for a level's mean-residual score to mean anything, and under the
+# curriculum's min_visits floor. The threshold trades the long tail of
+# rarely-played archetypes (keeping 242 of 329 decks) for 225 matchups at ~67
+# episodes each, where scores are averages over enough games to rank on. It also
+# keeps the 20% holdout meaningful -- the split is global rather than stratified,
+# so with only a handful of lists per archetype the thinner ones would often
+# contribute nothing at all to the evaluator. At >=8 the split lands 194 decks in
+# train and 48 across 13 of the 15 archetypes in eval.
+#
+# Usage:
+#   python -m src.train agent=ppo env=multideck_v2 train=ppo_selfplay
+defaults:
+  - default
+  - _self_
+
+deck_matchup: independent
+eval_deck_matchup: mirror
+deck_sampling: uniform
+deck_holdout_frac: 0.2
+
+deck_pool:
+  - decks/alakazam-dudunsparce
+  - decks/cynthias-garchomp
+  - decks/dragapult
+  - decks/dragapult-dusknoir
+  - decks/festival-lead
+  - decks/flareon-noctowl
+  - decks/grimmsnarl-froslass
+  - decks/lucario-hariyama
+  - decks/mega-lucario
+  - decks/ns-zoroark
+  - decks/ogerpon-meganium
+  - decks/other
+  - decks/rockets-honchkrow
+  - decks/rockets-mewtwo
+  - decks/rockets-porygon-z

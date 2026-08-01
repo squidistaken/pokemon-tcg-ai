@@ -19,6 +19,27 @@ checkpoint_dir: checkpoints
 # Number of most-recent snapshots kept in the opponent pool.
 pool_size: 5
 
+# How the league draws the opponent for each episode:
+#   uniform -> every member equally likely (plain fictitious self-play).
+#   pfsp    -> weight members by the learner's win rate against them, so the
+#              budget concentrates on members that still contest the game
+#              instead of on ones already beaten. Win rates are tracked per
+#              worker from terminal rewards; no extra inter-process traffic.
+opponent_sampling: uniform
+# PFSP weighting scheme (ignored under uniform sampling):
+#   hard -> (1 - p)^pfsp_exponent, favours members that beat the learner.
+#   even -> p * (1 - p), favours members the learner is level with.
+pfsp_weighting: hard
+# Exponent of the `hard` scheme; larger concentrates harder. Unused by `even`.
+pfsp_exponent: 2.0
+# Floor added to every member's weight so none becomes unreachable: a member
+# the learner always beats still needs occasional games, or its win rate stops
+# tracking the current policy.
+pfsp_min_weight: 0.05
+# Strength of the p = 0.5 prior, in games. Keeps the first episodes against a
+# fresh snapshot from pinning its weight to an extreme.
+pfsp_prior_games: 2.0
+
 # Periodic evaluation against a fixed opponent, logged to W&B under "eval/"
 # every N collected frames (0 disables it).
 eval_interval: 0
@@ -33,13 +54,24 @@ eval_per_archetype: true
 # Fixed opponent the evaluator scores against, set explicitly rather than
 # inherited from the environment's default. It must not move with the learner,
 # or the eval curve stops being comparable across the run.
-#   random     -> uniform baseline; saturates once the policy reliably beats it.
-#   checkpoint -> a frozen snapshot at eval_opponent_checkpoint (e.g. a prior
-#                 run's best model), a stronger still-fixed yardstick.
+#
+#   random           -> uniform baseline; saturates once the policy reliably
+#                       beats it, but stays comparable across runs.
+#   first_snapshot   -> oldest snapshot from checkpoint_dir as a greedy
+#                       opponent; falls back to random when none exist yet.
+#   checkpoint       -> the frozen snapshot at eval_opponent_checkpoint (e.g. a
+#                       prior run's best model), a stronger still-fixed yardstick.
+#   /path/to/ckpt.pt -> that same reference named inline, which is what lets
+#                       eval_opponents list several distinct checkpoints.
 eval_opponent: random
-# Snapshot path for eval_opponent=checkpoint; a relative path resolves 
+# Snapshot path for eval_opponent=checkpoint; a relative path resolves
 # against the original working directory. Unused for eval_opponent=random.
 eval_opponent_checkpoint: null
+# Score against several references at once (overrides eval_opponent when set).
+# Each entry is an eval_opponent value; metrics are namespaced per opponent
+# ("random/win_rate", "first_snapshot/win_rate"). Evaluation cost is the sum
+# over entries, so each costs a full eval_episodes run.
+eval_opponents: null
 # Cross-play evaluation of the learner against its own frozen checkpoints
 # (needs snapshot_interval > 0). During training it logs the current model vs
 # the latest snapshot; at run end it round-robins every checkpoint into a 

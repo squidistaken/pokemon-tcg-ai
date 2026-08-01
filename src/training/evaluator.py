@@ -1,6 +1,7 @@
 import logging
 import statistics
 from collections.abc import Callable
+from pathlib import Path
 
 import torch
 from omegaconf import DictConfig
@@ -102,6 +103,7 @@ class Evaluator:
             max_steps: int = 2000,
             device: torch.device | str = "cpu",
             deterministic: bool = True,
+            name: str = "eval",
             per_archetype: bool = True,
     ) -> None:
         """
@@ -117,6 +119,9 @@ class Evaluator:
             on CPU, so observations are moved across per step.
         :param deterministic: Take the distribution's mode instead of sampling
             from it. Defaults to True for a low-variance progress signal.
+        :param name: Label identifying which reference opponent this evaluator
+            scores against, used in its log line so several evaluators running
+            side by side stay distinguishable.
         :param per_archetype: Break the win-rate down by the agent's deck
             archetype and report its spread across archetypes.
         """
@@ -125,8 +130,16 @@ class Evaluator:
         self._max_steps = max_steps
         self._device = torch.device(device)
         self._deterministic = deterministic
+        self._name = name
         self._per_archetype = per_archetype
         self._env: EnvBase | None = None
+
+    @property
+    def name(self) -> str:
+        """
+        :return: Label identifying this evaluator's reference opponent.
+        """
+        return self._name
 
     def _get_env(self) -> EnvBase:
         """
@@ -205,7 +218,8 @@ class Evaluator:
                 self._n_episodes,
             )
         logger.info(
-            "Evaluation over %d terminated episodes: win_rate=%.3f draw_rate=%.3f",
+            "Evaluation [%s] over %d terminated episodes: win_rate=%.3f draw_rate=%.3f",
+            self._name,
             episodes,
             metrics["win_rate"],
             metrics["draw_rate"],
@@ -269,6 +283,8 @@ def build_evaluator(
     action_spec: Categorical,
     opponent_factory: OpponentFactory | None = None,
     sampler_spec: dict[str, object] | None = None,
+    opponent: str | None = None,
+    checkpoint_dir: str | Path | None = None,
 ) -> Evaluator:
     """
     Build the fixed-opponent evaluator.
@@ -284,10 +300,17 @@ def build_evaluator(
         already parsed the held-out deck pool (e.g. to share it with
         ``CrossPlayCallback`` instead of each re-parsing it). Built fresh when
         ``None``.
+    :param opponent: Reference opponent to score against, overriding
+        ``cfg.train.eval_opponent``. Set by a caller building one evaluator per
+        entry of ``cfg.train.eval_opponents``; it also labels the metrics.
+    :param checkpoint_dir: Snapshot directory, forwarded for a
+        ``first_snapshot`` reference.
     :return: A configured evaluator.
     """
     if opponent_factory is None:
-        opponent_factory = build_eval_opponent_factory(cfg, obs_spec, action_spec)
+        opponent_factory = build_eval_opponent_factory(
+            cfg, obs_spec, action_spec, checkpoint_dir, opponent=opponent
+        )
     return Evaluator(
         env_factory=make_env_factories(
             cfg,
@@ -298,5 +321,18 @@ def build_evaluator(
         n_episodes=int(cfg.train.get("eval_episodes", 100)),
         device=cfg.agent.get("device", "cpu"),
         deterministic=bool(cfg.train.get("eval_deterministic", True)),
+        name=_eval_label(opponent) if opponent is not None else "eval",
         per_archetype=bool(cfg.train.get("eval_per_archetype", True)),
     )
+
+
+def _eval_label(opponent: str) -> str:
+    """
+    Shorten an opponent spec into a metric-key-friendly label.
+
+    :param opponent: Opponent name or checkpoint path.
+    :return: Label used to namespace this evaluator's metrics.
+    """
+    if opponent.endswith(".pt"):
+        return Path(opponent).stem
+    return opponent

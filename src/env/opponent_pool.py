@@ -39,6 +39,25 @@ class OpponentPool:
         """
         return self._active
 
+    @property
+    def opponents(self) -> tuple[Callable[[Observation], list[int]], ...]:
+        """
+        The pool's current members, in sampling order.
+
+        :return: The members as an immutable view; use :meth:`set_opponents`
+            or :meth:`add` to change them.
+        """
+        return tuple(self._opponents)
+
+    @property
+    def weights(self) -> tuple[float, ...]:
+        """
+        Sampling weight of each member, aligned with :attr:`opponents`.
+
+        :return: The weights as an immutable view.
+        """
+        return tuple(self._weights)
+
     def set_opponents(
             self,
             opponents: list[Callable[[Observation], list[int]]],

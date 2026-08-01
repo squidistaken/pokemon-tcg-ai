@@ -18,8 +18,10 @@ from torchrl.objectives.value import GAE
 from src.models.actor_critic import ActorCritic
 from src.policies.ppo_actor import build_ppo_operator
 from src.training.callbacks import TrainingCallback
+from src.training.curriculum import Curriculum
 from src.training.evaluator import Evaluator
 from src.training.loss._helpers import _sum_loss_keys
+from src.training.multi_evaluator import MultiEvaluator
 from src.training.trainer import Trainer
 
 logger = logging.getLogger(__name__)
@@ -80,8 +82,9 @@ class PPOTrainer(Trainer):
             reward_scaling: float = 1.0,
             callbacks: Iterable[TrainingCallback] | None = None,
             run_config: Mapping[str, Any] | None = None,
-            evaluator: Evaluator | None = None,
+            evaluator: Evaluator | MultiEvaluator | None = None,
             eval_interval: int = 0,
+            curriculum: Curriculum | None = None,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -143,8 +146,12 @@ class PPOTrainer(Trainer):
             :class:`~src.training.trainer.Trainer`; required for a readable
             learning curve under self-play.
         :param eval_interval: Frames between evaluation rounds; ``0`` disables.
+        :param curriculum: Level curriculum scored from each collected batch and
+            republished to the environment workers. None trains on whatever
+            distribution the deck sampler already provides.
         """
         self._actor_critic = actor_critic
+        self._curriculum = curriculum
 
         self._operator = cast(
             ActorValueOperator,
@@ -338,6 +345,12 @@ class PPOTrainer(Trainer):
         # GAE once per batch (not per epoch): the more common PPO formulation.
         with torch.no_grad():
             self._advantage(data)
+            # Before the reshape: the curriculum attributes residuals to
+            # episodes, which needs the (workers, time) layout to find episode
+            # boundaries within each collector row.
+            if self._curriculum is not None:
+                self._curriculum.observe(data)
+                self._curriculum.publish()
             data_flat = data.reshape(-1)
 
         batch = data_flat.batch_size[0]
@@ -429,5 +442,7 @@ class PPOTrainer(Trainer):
             return None
         result = {key: value / loss_counts for key, value in loss_accum.items()}
         result["grad_norm"] = grad_norm_accum / loss_counts
+        if self._curriculum is not None:
+            result.update(self._curriculum.metrics())
         logger.debug("Update %d finished: %s", self._updates_done, result)
         return result

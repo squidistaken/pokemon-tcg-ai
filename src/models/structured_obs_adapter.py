@@ -1,7 +1,10 @@
+
+
+
+
 import torch
 from tensordict import TensorDictBase
 from torch import nn
-from torch.nn import functional as nn_functional
 from torchrl.data import Composite, TensorSpec
 
 from src.env.card_database import CardDatabase
@@ -9,39 +12,75 @@ from src.env.card_database import CardDatabase
 
 class StructuredObsAdapter(nn.Module):
     """
-    Model-side front end turning the structured observation into one sane
-    float vector for a flat trunk.
+    Encodes the structured observation for an MLP or Transformer backbone.
 
-    The :class:`~src.env.structured_observation_encoder.
-    StructuredObservationEncoder` deliberately emits raw material — integer
-    card/attack IDs, unscaled counts, padded ID tables — and defers every
-    modelling decision to the model. This module is that deferred decision
-    for the MLP path:
+    **How features are built (shared between both paths)**
 
-    - Card and attack IDs go through learned embeddings (``padding_idx=0``
-      so ID 0 = none/padding/face-down stays a zero vector), concatenated
-      with the card's fixed :class:`~src.env.card_database.CardDatabase`
-      feature row (normalized per column), so identity is learnable and
-      real card properties are available from step one.
-    - Small categorical fields (selection type/context, per-option
-      categories) use a shared embedding table with a per-field row offset,
-      so the same integer means different things in different fields.
-    - Float leaves (``globals``, ``pokemon.features``, ``options.scalars``)
-      are divided by fixed scale constants mirroring the encoder's layout
-      and the engine's constants (deck 60, prizes 6, bench 8, ...), keeping
-      every input O(1) for a saturating activation.
-    - Unordered ID zones (hand, discards, prizes, ``select_deck``,
-      ``looking``, per-Pokemon energy/pre-evolutions) are masked-mean pooled
-      into one card representation plus a fill fraction, which removes the
-      padded/positional waste and makes those zones permutation-invariant.
-    - Slotted tables (``options``, ``pokemon``) keep one row per slot —
-      row order is the action/board correspondence — and are flattened
-      after embedding.
+    Three kinds of input, handled differently:
 
-    The scale constants and group handling are intentionally coupled to the
-    encoder's documented layout (``docs/torchrl_environment.md``); width
-    checks against the observation spec raise at construction if the two
-    drift apart.
+    ── card IDs (context_card_ids, stadium_id, every card in a zone) ──
+        ID → nn.Embedding(8, padding_idx=0) + static features(12) → [20]
+        [20] → Linear(20→entity_dim) → [entity_dim]
+
+    ── table rows (options, pokemon) ──
+        concat all row fields → [87] or [101] → Linear(→entity_dim) → [entity_dim]
+        (one token per row; padding rows included, filtered later)
+
+    ── scalars (globals, select_cats) ──
+        globals [41] ÷ fixed scales, select_cats [2] → Embed(4) → [8]
+
+    **Transformer path (pool=False) — token sequence**
+
+    Each group independently produces tokens.  Padding rows are filtered out
+    (options: card_id≠0, pokemon: mask=True, zones: mask).  The remaining
+    tokens from all groups are concatenated along the sequence axis.
+
+    ::
+
+        group              tokens   example count   dims
+        ─────              ──────   ─────────────   ────
+        globals               1     pad 41→64       [64]
+        select_cats           1     pad 8→64        [64]
+        context_card_ids      2     2 cards         [2, 64]
+        stadium_id            1     1 card          [1, 64]
+        options           N_opt     3 real options  [3, 64]
+        pokemon           N_pkm     4 on board      [4, 64]
+        my.hand           N_hnd     5 in hand       [5, 64]
+        my.discard        N_dis     2 discarded     [2, 64]
+        my.prizes         N_prz     6 face-down     [6, 64]
+        opp.discard       N_odis    4 discarded     [4, 64]
+        opp.prizes        N_oprz    6 face-down     [6, 64]
+        select_deck       N_dek     3 during search [3, 64]
+        looking           N_look    1 inspected     [1, 64]
+                                       ───
+                             torch.cat → [~40, 64]  →  Transformer
+
+        Face-down cards (prizes) have ID=0.  Embedding returns zeros, the
+        token is all zeros, but the slot is still present — the Transformer
+        knows *how many* prizes remain even though it can't see what they are.
+
+    **MLP path (pool=True) — one flat vector**
+
+    Same per-entity encoding.  Then each group is collapsed to a single fixed
+    vector by **masked-mean pooling** (skip padding).  Zones also get a fill
+    fraction (cards present / zone capacity).
+
+    ::
+
+        group              dims
+        ─────              ────
+        globals              41
+        select_cats           8
+        context_card_ids    128   (2 × 64)
+        stadium_id           64   (1 × 64)
+        options              64   (mean of N_opt tokens)
+        pokemon              64   (mean of N_pkm tokens)
+        my (3 zones)        195   (3 × [64 card + 1 fill])
+        opp (2 zones)       130   (2 × [64 card + 1 fill])
+        select_deck (1)      65   (64 card + 1 fill)
+        looking (1)          65   (64 card + 1 fill)
+                            ───
+                  torch.cat → 824  →  MLP
     """
 
     #: Rows reserved per categorical field in the shared category table.
@@ -85,22 +124,23 @@ class StructuredObsAdapter(nn.Module):
             attack_embed_dim: int = 8,
             category_embed_dim: int = 4,
             card_database: CardDatabase | None = None,
+            entity_dim: int | None = 64,
+            pool: bool = True,
     ) -> None:
         """
-        :param obs_spec: Full environment observation spec; the entries named
-            by ``in_keys`` must match the structured encoder's groups.
-        :param in_keys: Observation keys the backbone consumes, in order;
-            each names either one of the encoder's leaf fields (``globals``,
-            ``select_cats``, ``context_card_ids``, ``stadium_id``) or one of
-            its composite groups (``options``, ``pokemon``, ``my``, ``opp``,
-            ``select_deck``, ``looking``).
+        :param obs_spec: Full environment observation spec.
+        :param in_keys: Observation keys the backbone consumes, in order.
         :param card_embed_dim: Width of the learned per-card embedding.
         :param attack_embed_dim: Width of the learned per-attack embedding.
         :param category_embed_dim: Width of the shared categorical embedding.
-        :param card_database: Static card/attack lookup tables; built from
-            the engine when not supplied.
-        :raises ValueError: If an in-key names an unknown group, or a leaf
-            width disagrees with the scale constants (encoder layout drift).
+        :param card_database: Static card/attack lookup tables.
+        :param entity_dim: If set, each option row, Pokémon row, and zone
+            card is projected to this width before masked-mean pooling, so
+            the output size is independent of the padded table widths.
+            ``None`` reverts to the legacy flat-padded behaviour.
+        :param pool: If True, masked-mean pool per-entity encodings (MLP
+            path). If False, return the token sequence (Transformer path,
+            not yet implemented). Ignored when ``entity_dim`` is None.
         """
         super().__init__()
         database = card_database if card_database is not None else CardDatabase()
@@ -114,7 +154,9 @@ class StructuredObsAdapter(nn.Module):
         )
         self._card_repr_dim = card_embed_dim + card_static.shape[1]
         self._attack_repr_dim = attack_embed_dim + attack_static.shape[1]
-        self._category_embed_dim = category_embed_dim
+        self._category_embed_dim: int = category_embed_dim
+        self._entity_dim: int | None = entity_dim
+        self._pool: bool = pool and entity_dim is not None
 
         self._card_embedding = nn.Embedding(card_static.shape[0], card_embed_dim, padding_idx=0)
         self._attack_embedding = nn.Embedding(attack_static.shape[0], attack_embed_dim, padding_idx=0)
@@ -138,6 +180,18 @@ class StructuredObsAdapter(nn.Module):
             torch.tensor(self.POKEMON_FEATURE_SCALES, dtype=torch.float32),
         )
 
+        # Per-entity projection layers.  Built in __init__ or _register_group.
+        # Typed as nn.Module (not nn.Linear) because the non-pooling path
+        # uses Identity placeholders that still satisfy the callable interface.
+        if entity_dim is not None:
+            self._card_proj: nn.Module = nn.Linear(self._card_repr_dim, entity_dim)
+            self._option_encoder: nn.Module = nn.Identity()
+            self._pokemon_encoder: nn.Module = nn.Identity()
+        else:
+            self._card_proj = nn.Identity()
+            self._option_encoder = nn.Identity()
+            self._pokemon_encoder = nn.Identity()
+
         self._group_names: list[str] = []
         self._zone_pairs: dict[str, list[tuple[str, str]]] = {}
         self.out_features = 0
@@ -146,62 +200,59 @@ class StructuredObsAdapter(nn.Module):
             self._group_names.append(name)
             self.out_features += self._register_group(name, obs_spec[key])
 
+    def _option_row_width(self, spec: Composite) -> int:
+        """Flattened width of one option table row (card+target+attack+cats+scalars)."""
+        return (
+            2 * self._card_repr_dim
+            + self._attack_repr_dim
+            + self.OWNER_VALUE_COUNT
+            + self.OPTION_CATEGORY_FIELD_COUNT * self._category_embed_dim
+            + spec["scalars"].shape[-1]
+        )
+
+    def _pokemon_row_width(self, spec: Composite) -> int:
+        """Flattened width of one pokemon table row (after internal pooling)."""
+        return (
+            self._card_repr_dim
+            + self._card_repr_dim
+            + self._card_repr_dim
+            + self._card_repr_dim
+            + spec["features"].shape[-1]
+            + 1
+        )
+
     def _register_group(self, name: str, spec: TensorSpec | Composite) -> int:
         """
-        Validate one in-key's spec against the expected encoder layout.
+        Return the feature width this group contributes to the output.
 
-        For the zone groups this also records the ``*_ids``/``*_mask`` leaf
-        pairs (in spec order) that :meth:`_encode_zone_group` will pool.
-
-        :param name: Group name (the in-key's last element).
-        :param spec: The observation spec entry for this group.
-        :return: Flattened feature width this group contributes.
-        :raises ValueError: On an unknown group name or a width mismatch.
+        With ``_pool`` active, table groups contribute ``entity_dim``
+        (one pooled vector) instead of ``n_slots × row_width``, and card
+        groups contribute ``entity_dim + 1`` per zone.
         """
         if name == "globals":
-            expected = self._global_scales.shape[0]
-            if spec.shape[-1] != expected:
-                raise ValueError(
-                    f"globals has {spec.shape[-1]} entries but the adapter's scale table "
-                    f"expects {expected}; the encoder layout and adapter have drifted apart."
-                )
-            return expected
+            return self._global_scales.shape[0]
         if name == "select_cats":
-            if spec.shape[-1] != self.SELECT_CATEGORY_FIELD_COUNT:
-                raise ValueError(
-                    f"select_cats has {spec.shape[-1]} fields, expected "
-                    f"{self.SELECT_CATEGORY_FIELD_COUNT}."
-                )
             return self.SELECT_CATEGORY_FIELD_COUNT * self._category_embed_dim
         if name == "context_card_ids":
-            return spec.shape[-1] * self._card_repr_dim
+            width = self._entity_dim if self._pool else self._card_repr_dim
+            assert width is not None
+            return spec.shape[-1] * width
         if name == "stadium_id":
-            return spec.shape[-1] * self._card_repr_dim
+            width = self._entity_dim if self._pool else self._card_repr_dim
+            assert width is not None
+            return width
         if name == "options":
-            if spec["cats"].shape[-1] != self.OPTION_CATEGORY_FIELD_COUNT:
-                raise ValueError(
-                    f"options.cats has {spec['cats'].shape[-1]} fields, expected "
-                    f"{self.OPTION_CATEGORY_FIELD_COUNT}."
-                )
-            n_slots = spec["card_id"].shape[-1]
-            row_width = (
-                2 * self._card_repr_dim
-                + self._attack_repr_dim
-                + self.OWNER_VALUE_COUNT
-                + self.OPTION_CATEGORY_FIELD_COUNT * self._category_embed_dim
-                + spec["scalars"].shape[-1]
-            )
-            return n_slots * row_width
+            if self._pool:
+                assert self._entity_dim is not None
+                self._option_encoder = nn.Linear(self._option_row_width(spec), self._entity_dim)
+                return self._entity_dim
+            return spec["card_id"].shape[-1] * self._option_row_width(spec)
         if name == "pokemon":
-            expected = self._pokemon_feature_scales.shape[0]
-            if spec["features"].shape[-1] != expected:
-                raise ValueError(
-                    f"pokemon.features has {spec['features'].shape[-1]} columns but the "
-                    f"adapter's scale table expects {expected}."
-                )
-            rows = spec["card_id"].shape[-1]
-            row_width = 4 * self._card_repr_dim + expected + 1
-            return rows * row_width
+            if self._pool:
+                assert self._entity_dim is not None
+                self._pokemon_encoder = nn.Linear(self._pokemon_row_width(spec), self._entity_dim)
+                return self._entity_dim
+            return spec["card_id"].shape[-1] * self._pokemon_row_width(spec)
         if name in ("my", "opp", "select_deck", "looking"):
             if not isinstance(spec, Composite):
                 raise ValueError(f"Zone group '{name}' must be a composite of ids/mask leaves.")
@@ -217,103 +268,66 @@ class StructuredObsAdapter(nn.Module):
             if len(pairs) == 0:
                 raise ValueError(f"Zone group '{name}' contains no ids/mask pairs.")
             self._zone_pairs[name] = pairs
-            return len(pairs) * (self._card_repr_dim + 1)
-        raise ValueError(
-            f"Unknown structured observation group '{name}'; the adapter handles the "
-            f"StructuredObservationEncoder groups only."
-        )
+            dim = self._entity_dim if self._pool else self._card_repr_dim
+            assert dim is not None
+            zw = dim + 1
+            return len(pairs) * zw
+        raise ValueError(f"Unknown structured observation group '{name}'.")
 
     def forward(self, *inputs: torch.Tensor | TensorDictBase) -> torch.Tensor:
         """
-        Encode the structured observation groups into one flat float vector.
+        Encode the structured observation groups.
 
-        :param inputs: One entry per constructor ``in_keys``, in order: leaf
-            tensors shaped ``(*batch, features)`` or group tensordicts.
-        :return: Float32 tensor of shape ``(*batch, out_features)``.
-        :raises ValueError: If the number of inputs does not match ``in_keys``.
+        :return: ``(*batch, out_features)`` flat vector.
         """
         if len(inputs) != len(self._group_names):
             raise ValueError(
-                f"StructuredObsAdapter expected {len(self._group_names)} inputs for groups "
-                f"{self._group_names}, got {len(inputs)}."
+                f"StructuredObsAdapter expected {len(self._group_names)} inputs, got {len(inputs)}."
             )
         parts: list[torch.Tensor] = []
         for name, value in zip(self._group_names, inputs, strict=True):
             if name == "globals":
-                assert isinstance(value, torch.Tensor), "globals is a leaf field, never a group."
+                assert isinstance(value, torch.Tensor)
                 parts.append(value / self._global_scales)
             elif name == "select_cats":
                 parts.append(self._embed_categories(value, self._select_category_offsets))
             elif name in ("context_card_ids", "stadium_id"):
-                parts.append(self._flatten_rows(self._card_repr(value)))
+                parts.append(self._encode_card_ids(value))
             elif name == "options":
                 parts.append(self._encode_options(value))
             elif name == "pokemon":
                 parts.append(self._encode_pokemon(value))
             else:
                 parts.append(self._encode_zone_group(name, value))
-        return parts[0] if len(parts) == 1 else torch.cat(parts, dim=-1)
+        return torch.cat(parts, dim=-1)
+
+    # ── Card / attack / category helpers ──────────────────────────────
 
     def _card_repr(self, card_ids: torch.Tensor) -> torch.Tensor:
-        """
-        Look up the learned-plus-static representation of card IDs.
-
-        :param card_ids: Int64 tensor of card IDs (0 = none/padding).
-        :return: Tensor of shape ``(*card_ids.shape, card_repr_dim)``.
-        """
+        """Learned + static card representation, shape ``(*ids, card_repr_dim)``."""
         return torch.cat([self._card_embedding(card_ids), self._card_static[card_ids]], dim=-1)
 
     def _attack_repr(self, attack_ids: torch.Tensor) -> torch.Tensor:
-        """
-        Look up the learned-plus-static representation of attack IDs.
-
-        :param attack_ids: Int64 tensor of attack IDs (0 = none/padding).
-        :return: Tensor of shape ``(*attack_ids.shape, attack_repr_dim)``.
-        """
-        return torch.cat(
-            [self._attack_embedding(attack_ids), self._attack_static[attack_ids]], dim=-1
-        )
+        """Learned + static attack representation."""
+        return torch.cat([self._attack_embedding(attack_ids), self._attack_static[attack_ids]], dim=-1)
 
     def _embed_categories(self, values: torch.Tensor, field_offsets: torch.Tensor) -> torch.Tensor:
-        """
-        Embed a block of categorical fields through the shared table.
-
-        :param values: Int64 tensor ``(*batch, n_fields)`` of shifted enum
-            values (0 = absent), one column per field.
-        :param field_offsets: Row offset per field into the shared table.
-        :return: Tensor ``(*batch, n_fields * category_embed_dim)``.
-        """
+        """Embed categorical fields through the shared table, flattening the result."""
         return self._flatten_rows(self._category_embedding(values + field_offsets))
 
-    @staticmethod
-    def _flatten_rows(table: torch.Tensor) -> torch.Tensor:
-        """
-        Merge the last two dimensions (rows x features) into one.
+    # ── Pooled per-entity encoders ─────────────────────────────────────
 
-        :param table: Tensor of shape ``(*batch, rows, features)``.
-        :return: Tensor of shape ``(*batch, rows * features)``.
-        """
-        return table.reshape(*table.shape[:-2], -1)
-
-    @staticmethod
-    def _masked_mean(reprs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        """
-        Average representations over a set dimension, ignoring padding.
-
-        :param reprs: Tensor ``(*batch, set_size, features)``.
-        :param mask: Bool tensor ``(*batch, set_size)`` marking real entries.
-        :return: Tensor ``(*batch, features)``; zero where the set is empty.
-        """
-        weights = mask.to(torch.float32).unsqueeze(-1)
-        return (reprs * weights).sum(dim=-2) / weights.sum(dim=-2).clamp(min=1.0)
+    def _encode_card_ids(self, card_ids: torch.Tensor) -> torch.Tensor:
+        """Encode card IDs, projecting to entity_dim when pooling is active."""
+        reprs = self._card_repr(card_ids)
+        if self._pool:
+            return self._flatten_rows(self._card_proj(reprs))
+        return self._flatten_rows(reprs)
 
     def _encode_options(self, options: TensorDictBase) -> torch.Tensor:
         """
-        Encode the per-slot option table, keeping the slot-to-action rows.
-
-        :param options: Group tensordict with ``card_id``/``target_id``/
-            ``attack_id``/``owner``/``cats``/``scalars`` leaves.
-        :return: Tensor ``(*batch, n_slots * option_row_width)``.
+        Encode the option table. With pooling: ``(*batch, entity_dim)``
+        (masked-mean over rows with card_id != 0). Legacy: flat.
         """
         scalars = options.get("scalars")
         scaled = torch.where(
@@ -324,21 +338,21 @@ class StructuredObsAdapter(nn.Module):
                 self._card_repr(options.get("card_id")),
                 self._card_repr(options.get("target_id")),
                 self._attack_repr(options.get("attack_id")),
-                nn_functional.one_hot(options.get("owner"), self.OWNER_VALUE_COUNT).to(torch.float32),
+                nn.functional.one_hot(options.get("owner"), self.OWNER_VALUE_COUNT).to(torch.float32),
                 self._category_embedding(options.get("cats") + self._option_category_offsets).flatten(-2),
                 scaled,
             ],
             dim=-1,
         )
+        if self._pool:
+            rows = self._option_encoder(rows)
+            mask = options.get("card_id") != 0
+            return self._masked_mean(rows, mask)
         return self._flatten_rows(rows)
 
     def _encode_pokemon(self, pokemon: TensorDictBase) -> torch.Tensor:
         """
-        Encode the per-slot board table, pooling each row's attached cards.
-
-        :param pokemon: Group tensordict with ``card_id``/``tool_id``/
-            ``energy_card_ids``/``pre_evolution_ids``/``features``/``mask``.
-        :return: Tensor ``(*batch, rows * pokemon_row_width)``.
+        Encode the board table. With pooling: ``(*batch, entity_dim)``. Legacy: flat.
         """
         energy_ids = pokemon.get("energy_card_ids")
         pre_evolution_ids = pokemon.get("pre_evolution_ids")
@@ -353,25 +367,37 @@ class StructuredObsAdapter(nn.Module):
             ],
             dim=-1,
         )
+        if self._pool:
+            rows = self._pokemon_encoder(rows)
+            return self._masked_mean(rows, pokemon.get("mask"))
         return self._flatten_rows(rows)
 
     def _encode_zone_group(self, name: str, zones: TensorDictBase) -> torch.Tensor:
         """
-        Pool a group of unordered card-ID zones into per-zone summaries.
+        Pool unordered card-ID zones into per-zone summaries.
 
-        Each ``ids``/``mask`` pair becomes the masked mean of its card
-        representations plus the zone's fill fraction, so zone content is
-        permutation-invariant and independent of the padded capacity.
-
-        :param name: Zone group name registered at construction.
-        :param zones: Group tensordict holding the ids/mask leaf pairs.
-        :return: Tensor ``(*batch, n_zones * (card_repr_dim + 1))``.
+        With pooling: N_zones × ``(entity_dim + 1)`` (card repr + fill fraction).
+        Legacy: same but with ``card_repr_dim``.
         """
         parts: list[torch.Tensor] = []
         for ids_name, mask_name in self._zone_pairs[name]:
             mask = zones.get(mask_name)
             capacity = mask.shape[-1]
             fill = mask.to(torch.float32).sum(dim=-1, keepdim=True) / capacity
-            parts.append(self._masked_mean(self._card_repr(zones.get(ids_name)), mask))
+            reprs = self._card_repr(zones.get(ids_name))
+            if self._pool:
+                reprs = self._card_proj(reprs)
+            parts.append(self._masked_mean(reprs, mask))
             parts.append(fill)
         return torch.cat(parts, dim=-1)
+
+    # ── Shape utilities ────────────────────────────────────────────────
+
+    @staticmethod
+    def _flatten_rows(table: torch.Tensor) -> torch.Tensor:
+        return table.reshape(*table.shape[:-2], -1)
+
+    @staticmethod
+    def _masked_mean(reprs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        weights = mask.to(torch.float32).unsqueeze(-1)
+        return (reprs * weights).sum(dim=-2) / weights.sum(dim=-2).clamp(min=1.0)

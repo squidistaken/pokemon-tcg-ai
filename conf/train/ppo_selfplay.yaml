@@ -6,6 +6,10 @@ defaults:
   - _self_
 
 snapshot_interval: 50000
+# Prioritized sampling of the league. Non-transitivity is the norm in card
+# games (archetype matchups are rock-paper-scissors), so a uniform league keeps
+# paying full price for episodes whose result is decided at reset.
+opponent_sampling: pfsp
 # Periodic evaluation is essential here: under self-play the collected win_rate
 # is pinned near 0.5 by construction, so it says nothing about whether the agent
 # improved. The evaluator faces the fixed `eval_opponent` instead.
@@ -13,5 +17,19 @@ eval_interval: 50000  # every X timesteps
 # Fewer episodes than the default: this runs repeatedly during a run, and each
 # evaluation episode is time not spent collecting.
 eval_episodes: 15
-# On by default here: cross-play needs snapshot_interval > 0.
-cross_play: true
+# Sample from the policy distribution instead of taking the argmax, so eval
+# matches collection-time stochastic behaviour. Noisier but more honest.
+eval_deterministic: false
+# Score against both references every round. The snapshot keeps discriminating
+# late in training (random saturates once the policy reliably beats it), while
+# random stays comparable across runs and does not depend on which snapshot
+# happened to be frozen. Metrics land under "first_snapshot/" and "random/".
+eval_opponents:
+  - first_snapshot
+  - random
+# Opt-in: cross-play needs snapshot_interval > 0, which this config provides,
+# but it costs a series against the latest snapshot every eval round plus a
+# full round-robin at run end. It ranks checkpoints *within* one run to pick
+# which to submit, so turn it on (train.cross_play=true) for a submission run
+# rather than paying for it on every experiment.
+cross_play: false
