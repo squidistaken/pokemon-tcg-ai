@@ -237,6 +237,53 @@ def _deck_weights(kept_paths: list[str], scheme: str) -> list[float]:
     return weights
 
 
+def load_deck_pool(
+    cfg: DictConfig, deck_split: str | None = None
+) -> tuple[list[list[int]], list[str]]:
+    """
+    Resolve and load the configured deck pool, optionally one split of it.
+
+    Shared by the environment factories and by the curriculum, which needs the
+    same paths to derive archetypes from their folders. Both must ask for the
+    same split and receive it in the same order, since the curriculum indexes
+    decks by position.
+
+    :param cfg: Hydra configuration with an ``env.deck_pool`` entry.
+    :param deck_split: ``"train"`` or ``"eval"`` to apply the holdout split,
+        or None for the whole pool.
+    :return: ``(decks, paths)``, aligned, with unreadable files dropped.
+    :raises ValueError: If no pool is configured, it resolves to under two
+        decks, or ``deck_split`` is unknown.
+    """
+    if deck_split not in (None, "train", "eval"):
+        raise ValueError(
+            f"unknown deck_split {deck_split!r}; expected 'train', 'eval' or None"
+        )
+    pool_spec = cfg.env.get("deck_pool")
+    if not pool_spec:
+        raise ValueError(
+            "env.deck_pool must be set to load a deck pool; the fixed deck0/deck1 "
+            "pair has no pool to resolve."
+        )
+    entries = [pool_spec] if isinstance(pool_spec, str) else list(pool_spec)
+    paths = resolve_deck_paths([to_absolute_path(entry) for entry in entries])
+    if len(paths) < 2:
+        raise ValueError(
+            f"deck_pool {pool_spec!r} resolved to {len(paths)} deck(s); expected a "
+            f"multi-deck corpus. Run ./scripts/fetch_decks.sh to install it."
+        )
+    decks, kept_paths = _load_pool_with_paths(paths)
+    if deck_split is None:
+        return decks, kept_paths
+    train_idx, holdout_idx = _split_indices(
+        len(decks),
+        holdout_frac=float(cfg.env.get("deck_holdout_frac", 0.0)),
+        seed=int(cfg.env.get("deck_split_seed", 0)),
+    )
+    chosen = holdout_idx if deck_split == "eval" else train_idx
+    return [decks[i] for i in chosen], [kept_paths[i] for i in chosen]
+
+
 def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
     """
     Build the picklable deck-sampler spec for the given split from the config.
@@ -258,14 +305,7 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
             "deck1": load_deck(to_absolute_path(cfg.env.deck1)),
         }
 
-    entries = [pool_spec] if isinstance(pool_spec, str) else list(pool_spec)
-    paths = resolve_deck_paths([to_absolute_path(entry) for entry in entries])
-    if len(paths) < 2:
-        raise ValueError(
-            f"deck_pool {pool_spec!r} resolved to {len(paths)} deck(s); expected a "
-            f"multi-deck corpus. Run ./scripts/fetch_decks.sh to install it."
-        )
-    decks, kept_paths = _load_pool_with_paths(paths)
+    decks, kept_paths = load_deck_pool(cfg)
     train_idx, holdout_idx = _split_indices(
         len(decks),
         holdout_frac=float(cfg.env.get("deck_holdout_frac", 0.0)),
@@ -316,6 +356,7 @@ def make_env_factories(
     cfg: DictConfig,
     opponent_factory: OpponentFactory | None = None,
     deck_split: str = "train",
+    curriculum: Any = None,
     sampler_spec: dict[str, Any] | None = None,
 ) -> list[Callable[[], EnvBase]]:
     """
@@ -326,12 +367,31 @@ def make_env_factories(
     :param deck_split: ``"train"`` (default) or ``"eval"``. Only affects runs
         with ``env.deck_pool`` set and a non-zero ``env.deck_holdout_frac``,
         where ``"eval"`` draws from the held-out, never-trained decks.
+    :param curriculum: A :class:`~src.training.curriculum.Curriculum` whose
+        published distribution the environments draw matchups from. None keeps
+        the configured deck sampler. Ignored for the ``"eval"`` split, which
+        must stay an unbiased read across held-out decks rather than following
+        the training distribution.
     :param sampler_spec: Precomputed spec from :func:`_build_sampler_spec`, for
         a caller that already built one for this exact ``deck_split``.
-        Built fresh when ``None``.
+        Built fresh when ``None``. Ignored when a ``curriculum`` drives the
+        train split, which supplies its own spec.
     :return: List of ``cfg.env.num_workers`` picklable environment factories.
     """
-    if sampler_spec is None:
+    if curriculum is not None and deck_split != "eval":
+        # The train split specifically, and via the same call the curriculum
+        # used to build its archetype index: it addresses decks by position, so
+        # a different subset or order here would silently mis-deal every level.
+        # Loading the whole pool would also train on the held-out decks the
+        # evaluator scores generalization against.
+        decks, _paths = load_deck_pool(cfg, deck_split="train")
+        sampler_spec = {
+            "kind": "curriculum",
+            "decks": decks,
+            "archetypes": curriculum.archetypes,
+            "handles": curriculum.handles,
+        }
+    elif sampler_spec is None:
         sampler_spec = _build_sampler_spec(cfg, deck_split)
     encoder = cfg.env.get("encoder", "structured")
     deck_switch_steps = int(cfg.env.get("deck_switch_steps", 0))

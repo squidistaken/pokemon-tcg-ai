@@ -13,13 +13,16 @@ from src.policies.ppo_actor import build_actor_critic
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training import (
     CrossPlayCallback,
+    CurriculumStateCallback,
     Evaluator,
+    MultiEvaluator,
     PPOTrainer,
     SnapshotCallback,
     Trainer,
     TrainingCallback,
     WeightsAndBiases,
     build_best_response_opponent_factory,
+    build_curriculum,
     build_evaluator,
     build_opponent_factory,
     build_probe_specs,
@@ -180,11 +183,27 @@ def _build_ppo_trainer(
         )
     callbacks = [*new_callbacks, *callbacks]
 
+    curriculum = build_curriculum(cfg)
+    if curriculum is not None:
+        callbacks = [
+            *callbacks,
+            CurriculumStateCallback(
+                curriculum=curriculum,
+                state_dir=checkpoint_dir.parent / "curriculum",
+                interval=int(
+                    cfg.env.curriculum.get("state_interval")
+                    or cfg.collector.frames_per_batch * 50
+                ),
+            ),
+        ]
+
     frames_per_batch = int(
         cfg.agent.get("frames_per_batch", cfg.collector.frames_per_batch)
     )
     return PPOTrainer(
-        env_factories=make_env_factories(cfg, opponent_factory=opponent_factory),
+        env_factories=make_env_factories(
+            cfg, opponent_factory=opponent_factory, curriculum=curriculum
+        ),
         actor_critic=actor_critic,
         action_spec=action_spec,
         frames_per_batch=frames_per_batch,
@@ -215,9 +234,15 @@ def _build_ppo_trainer(
         callbacks=callbacks,
         run_config=run_config,
         evaluator=_build_evaluator(
-            cfg, obs_spec, action_spec, eval_opponent_factory, eval_sampler_spec
+            cfg,
+            obs_spec,
+            action_spec,
+            checkpoint_dir,
+            eval_opponent_factory,
+            eval_sampler_spec,
         ),
         eval_interval=eval_interval,
+        curriculum=curriculum,
     )
 
 
@@ -253,27 +278,76 @@ def _build_evaluator(
     cfg: DictConfig,
     obs_spec: Composite,
     action_spec: Categorical,
+    checkpoint_dir: Path | None = None,
     opponent_factory: OpponentFactory | None = None,
     sampler_spec: dict[str, Any] | None = None,
-) -> Evaluator | None:
+) -> Evaluator | MultiEvaluator | None:
     """
-    Build the fixed-opponent evaluator selected by ``cfg.train``, gated on
+    Build the fixed-opponent evaluator(s) selected by ``cfg.train``, gated on
     ``eval_interval``.
+
+    The evaluation environment is given its opponent explicitly, from
+    ``cfg.train.eval_opponents`` (or the singular ``eval_opponent``), rather
+    than inheriting whichever opponent :class:`~src.env.tcg_env.TCGEnv` happens
+    to default to. Under self-play the collected ``win_rate`` is pinned near
+    0.5 by construction, so this fixed reference is what makes the run's
+    progress readable.
+
+    With several opponents configured the result is a
+    :class:`~src.training.multi_evaluator.MultiEvaluator`, whose metrics are
+    namespaced per opponent.
 
     :param cfg: Hydra configuration with a ``train`` section.
     :param obs_spec: Environment observation spec, forwarded to the opponent
-        factory so a ``checkpoint`` reference can rebuild its network.
+        factory so a snapshot-backed reference can rebuild its network.
     :param action_spec: Environment action spec, same purpose.
+    :param checkpoint_dir: Snapshot directory, forwarded for
+        ``first_snapshot``.
     :param opponent_factory: Explicit eval opponent, overriding
-        ``cfg.train.eval_opponent``. Used by a best-response run to score the
-        learner against the same frozen agent it trains against.
+        ``cfg.train.eval_opponent(s)`` and collapsing the result to a single
+        evaluator. Used by a best-response run to score the learner against the
+        same frozen agent it trains against.
     :param sampler_spec: Precomputed eval-split sampler spec, shared with
         ``CrossPlayCallback`` when both are active; built fresh when ``None``.
     :return: An evaluator, or None when ``eval_interval`` disables evaluation.
     """
     if int(cfg.train.get("eval_interval", 0)) <= 0:
         return None
-    return build_evaluator(cfg, obs_spec, action_spec, opponent_factory, sampler_spec)
+    if opponent_factory is not None:
+        return build_evaluator(
+            cfg, obs_spec, action_spec, opponent_factory, sampler_spec
+        )
+    evaluators = [
+        build_evaluator(
+            cfg,
+            obs_spec,
+            action_spec,
+            sampler_spec=sampler_spec,
+            opponent=name,
+            checkpoint_dir=checkpoint_dir,
+        )
+        for name in _eval_opponent_names(cfg)
+    ]
+    return evaluators[0] if len(evaluators) == 1 else MultiEvaluator(evaluators)
+
+
+def _eval_opponent_names(cfg: DictConfig) -> list[str]:
+    """
+    Resolve which reference opponents the evaluator scores against.
+
+    ``train.eval_opponents`` (plural, a list) takes precedence when set, so a
+    run can be scored against several references at once — typically a frozen
+    snapshot, which keeps discriminating late in training, alongside random,
+    which stays comparable across runs. Falls back to the singular
+    ``train.eval_opponent``.
+
+    :param cfg: Hydra configuration with a ``train`` section.
+    :return: Opponent names, in the order they should be evaluated.
+    """
+    configured = cfg.train.get("eval_opponents")
+    if configured:
+        return [str(name) for name in configured]
+    return [str(cfg.train.get("eval_opponent", "random"))]
 
 
 if __name__ == "__main__":

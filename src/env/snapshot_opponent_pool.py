@@ -65,6 +65,7 @@ class SnapshotOpponentPool(OpponentPool):
         self._checkpoint_dir = Path(checkpoint_dir)
         self._load_snapshot = load_snapshot
         self._warmup_opponents = list(warmup_opponents)
+        self._warmup_keys = [f"warmup:{index}" for index in range(len(warmup_opponents))]
         self._pool_size = pool_size
         self._loaded: dict[Path, Callable[[Observation], list[int]]] = {}
 
@@ -110,7 +111,9 @@ class SnapshotOpponentPool(OpponentPool):
         for path in list(self._loaded):
             if path not in keep_set:
                 del self._loaded[path]
-        members = self._warmup_opponents + [self._loaded[path] for path in keep if path in self._loaded]
+        live = [path for path in keep if path in self._loaded]
+        members = self._warmup_opponents + [self._loaded[path] for path in live]
+        keys = self._warmup_keys + [str(path) for path in live]
         if len(members) != len(self._opponents):
             logger.info(
                 "Self-play league now has %d member(s): %d warmup + %d snapshot(s).",
@@ -118,4 +121,21 @@ class SnapshotOpponentPool(OpponentPool):
                 len(self._warmup_opponents),
                 len(members) - len(self._warmup_opponents),
             )
-        self.set_opponents(members)
+        self.set_opponents(members, self._member_weights(keys))
+
+    # Instance method (not static) so subclasses can weight from instance state;
+    # the base returns None, leaving the pool uniform exactly as before.
+    # noinspection PyMethodMayBeStatic
+    def _member_weights(self, keys: list[str]) -> list[float] | None:  # noqa: ARG002, PLR6301
+        """
+        Sampling weight for each league member, aligned with ``keys``.
+
+        Returns None in this class, which leaves the pool sampling uniformly.
+        :class:`~src.env.pfsp_opponent_pool.PFSPOpponentPool` overrides it to
+        weight members by the learner's win rate against them.
+
+        :param keys: Stable identifier per member, in member order: the warmup
+            opponents first, then one snapshot path per loaded snapshot.
+        :return: One weight per member, or None for uniform sampling.
+        """
+        return None
