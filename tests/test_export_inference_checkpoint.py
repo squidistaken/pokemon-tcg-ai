@@ -8,7 +8,10 @@ from scripts.export_inference_checkpoint import (
     export_inference_checkpoint,
     resolve_source_config,
 )
-from src.policies.greedy_policy_opponent import save_actor_critic
+from src.policies.greedy_policy_opponent import (
+    checkpoint_state_dict,
+    save_actor_critic,
+)
 from src.policies.inference import build_inference_specs
 from src.policies.ppo_actor import build_actor_critic
 from tests.conftest import MAX_OPTIONS
@@ -37,7 +40,10 @@ def test_export_uses_the_training_runs_config(tmp_path: Path, structured_model_c
     obs_spec, _, action_spec = build_inference_specs(MAX_OPTIONS)
     actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
     source_path = save_actor_critic(
-        actor_critic, run_dir / "checkpoints" / "snapshot.pt"
+        actor_critic,
+        run_dir / "checkpoints" / "snapshot.pt",
+        config=OmegaConf.to_container(cfg, resolve=True),
+        frames=42,
     )
 
     assert resolve_source_config(source_path, None) == config_path
@@ -47,7 +53,8 @@ def test_export_uses_the_training_runs_config(tmp_path: Path, structured_model_c
 
     exported_config = OmegaConf.load(model_config_path)
     assert exported_config.model.backbone.activation == "relu"
-    source_state = torch.load(source_path, map_location="cpu", weights_only=True)
+    source_payload = torch.load(source_path, map_location="cpu", weights_only=True)
+    source_state = checkpoint_state_dict(source_payload)
     exported_state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     assert source_state.keys() == exported_state.keys()
     assert all(

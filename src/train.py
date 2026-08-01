@@ -18,6 +18,7 @@ from src.training import (
     SnapshotCallback,
     Trainer,
     TrainingCallback,
+    WeightsAndBiases,
     build_best_response_opponent_factory,
     build_evaluator,
     build_opponent_factory,
@@ -144,30 +145,40 @@ def _build_ppo_trainer(
         else None
     )
 
-    if snapshot_interval > 0:
-        new_callbacks: list[TrainingCallback] = [
-            SnapshotCallback(
+    checkpoint_loggers = [
+        callback.log_checkpoint
+        for callback in callbacks
+        if isinstance(callback, WeightsAndBiases)
+    ]
+    # Snapshotting starts first and finishes before cross-play and W&B. This
+    # makes the final checkpoint visible to cross-play and keeps W&B alive while
+    # both final checkpoint and evaluation artifacts are logged.
+    new_callbacks: list[TrainingCallback] = [
+        SnapshotCallback(
+            actor_critic=actor_critic,
+            checkpoint_dir=checkpoint_dir,
+            interval=snapshot_interval,
+            checkpoint_loggers=checkpoint_loggers,
+            registry_path=_resolve_checkpoint_registry(cfg),
+            repo_root=Path(__file__).parents[1],
+        )
+    ]
+    if snapshot_interval > 0 and cross_play_enabled:
+        new_callbacks.append(
+            CrossPlayCallback(
                 actor_critic=actor_critic,
+                cfg=cfg,
+                obs_spec=obs_spec,
+                action_spec=action_spec,
                 checkpoint_dir=checkpoint_dir,
-                interval=snapshot_interval,
-            ),
-        ]
-        if cross_play_enabled:
-            new_callbacks.append(
-                CrossPlayCallback(
-                    actor_critic=actor_critic,
-                    cfg=cfg,
-                    obs_spec=obs_spec,
-                    action_spec=action_spec,
-                    checkpoint_dir=checkpoint_dir,
-                    output_dir=HydraConfig.get().runtime.output_dir,
-                    n_games=int(cfg.train.get("cross_play_games", 20)),
-                    max_checkpoints=int(cfg.train.get("cross_play_max_checkpoints", 8)),
-                    seed=int(cfg.seed),
-                    sampler_spec=eval_sampler_spec,
-                )
+                output_dir=HydraConfig.get().runtime.output_dir,
+                n_games=int(cfg.train.get("cross_play_games", 20)),
+                max_checkpoints=int(cfg.train.get("cross_play_max_checkpoints", 8)),
+                seed=int(cfg.seed),
+                sampler_spec=eval_sampler_spec,
             )
-        callbacks = [*new_callbacks, *callbacks]
+        )
+    callbacks = [*new_callbacks, *callbacks]
 
     frames_per_batch = int(
         cfg.agent.get("frames_per_batch", cfg.collector.frames_per_batch)
@@ -228,6 +239,14 @@ def _resolve_checkpoint_dir(cfg: DictConfig) -> Path:
     if configured.is_absolute():
         return configured
     return Path(HydraConfig.get().runtime.output_dir) / configured
+
+
+def _resolve_checkpoint_registry(cfg: DictConfig) -> Path:
+    """Resolve the append-only completed-checkpoint CSV from the repository root."""
+    configured = Path(cfg.paths.checkpoint_registry)
+    if configured.is_absolute():
+        return configured.resolve()
+    return (Path(__file__).parents[1] / configured).resolve()
 
 
 def _build_evaluator(

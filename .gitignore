@@ -2,8 +2,10 @@ results
 outputs
 multirun
 checkpoints
+submissions
 wandb
 slurm-conf/logs/
+/logs/
 .vscode
 
 # Decks

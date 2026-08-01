@@ -35,7 +35,10 @@ sys.path.insert(0, str(REPO_ROOT))
 import torch
 from omegaconf import OmegaConf
 
-from src.policies.greedy_policy_opponent import save_actor_critic
+from src.policies.greedy_policy_opponent import (
+    checkpoint_state_dict,
+    save_actor_critic,
+)
 from src.policies.inference import build_inference_specs
 from src.policies.ppo_actor import build_actor_critic
 
@@ -114,8 +117,8 @@ def export_inference_checkpoint(
     obs_spec, _, action_spec = build_inference_specs(max_options, encoder_name)
     actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
 
-    state_dict = torch.load(source_checkpoint, map_location="cpu", weights_only=True)
-    actor_critic.load_state_dict(state_dict)
+    payload = torch.load(source_checkpoint, map_location="cpu", weights_only=True)
+    actor_critic.load_state_dict(checkpoint_state_dict(payload))
 
     output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = save_actor_critic(actor_critic, output_dir / "model.pt")

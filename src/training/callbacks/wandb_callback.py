@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 if TYPE_CHECKING:
@@ -42,6 +43,7 @@ class WeightsAndBiases(TrainingCallback):
             mode: str = "online",
             notes: str | None = None,
             dir: str | None = None,
+            log_checkpoints: bool = True,
     ) -> None:
         """
         :param project: W&B project to log the run under.
@@ -54,6 +56,8 @@ class WeightsAndBiases(TrainingCallback):
             or ``disabled`` (drop everything).
         :param notes: Free-text note attached to the run.
         :param dir: Parent directory for W&B's local run files.
+        :param log_checkpoints: Mirror written model checkpoints as versioned
+            W&B model artifacts.
         :raises ValueError: If ``mode`` is not a mode W&B accepts. Checked here so
             a config typo fails before the environments are built.
         """
@@ -70,6 +74,7 @@ class WeightsAndBiases(TrainingCallback):
         self._mode: WandbMode = cast(WandbMode, mode)
         self._notes = notes
         self._dir = dir
+        self._log_checkpoints = log_checkpoints
         self._run: Run | None = None
         self._latest_archetype_rates: dict[str, float] = {}
 
@@ -154,6 +159,29 @@ class WeightsAndBiases(TrainingCallback):
 
         table = wandb.Table(columns=list(columns), data=[list(row) for row in rows])
         self._run.log({key: table})
+
+    def log_checkpoint(self, path: Path, digest: str, frames: int) -> None:
+        """
+        Log a local checkpoint as a version of this run's model artifact.
+
+        The stable artifact collection is keyed by W&B run ID. ``latest`` and
+        the short SHA-256 key make either the newest or an exact checkpoint
+        easy to retrieve from W&B without changing the local submission flow.
+
+        :param path: Local checkpoint path.
+        :param digest: Full SHA-256 digest of the checkpoint.
+        :param frames: Collected-frame counter captured by the checkpoint.
+        """
+        if self._run is None or not self._log_checkpoints:
+            return
+        key = digest[:12]
+        self._run.log_artifact(
+            str(path),
+            name=f"checkpoint-{self._run.id}",
+            type="model",
+            aliases=["latest", f"sha-{key}", f"frames-{frames}"],
+        )
+        logger.info("W&B checkpoint artifact logged: sha-%s", key)
 
     def _log(self, prefix: str, step: int, metrics: Mapping[str, float]) -> None:
         """
