@@ -700,7 +700,7 @@ classDiagram
 | `src/env/pfsp_opponent_pool.py` | `PFSPOpponentPool(SnapshotOpponentPool)`. Tracks per-member `(wins, games)` smoothed toward 0.5 by a `prior_games` prior, weights members by `(1-p)^η` (`hard`) or `p(1-p)` (`even`) plus a `min_weight` floor. Records keyed by snapshot path survive eviction. |
 | `src/training/curriculum.py` | `Curriculum`: owns the buffer, consumes the post-GAE `(workers, time)` batch, carries a per-row open-episode accumulator across batch boundaries, commits at episode ends. Segments on `done` but decides outcomes on `terminated` — truncated runs are scored for their residual but not entered as phantom draws. `build_curriculum(cfg)` constructs from config. |
 | `src/training/callbacks/curriculum_callback.py` | `CurriculumStateCallback`: atomic periodic dumps of the buffer's tallies, so Phase 2 deck selection can difference two dumps into any window. |
-| `conf/env/curriculum.yaml` | Enables the curriculum on top of `multideck`. `python -m src.train agent=ppo env=curriculum train=ppo_selfplay`. |
+| `conf/env/curriculum_v2.yaml` | Enables the curriculum on top of `multideck_v2` (the archetype-filtered corpus). `python -m src.train agent=ppo env=curriculum_v2 train=ppo_selfplay`. |
 
 ### 13.2 Touch points
 
@@ -727,7 +727,7 @@ This only works under `mp_start_method=fork` — `spawn` would pickle the tensor
 | Arm | Config | Description |
 |---|---|---|
 | Uniform | `env=multideck train=ppo_selfplay` | Both seats' decks drawn uniformly from the training split. League sampled uniformly. |
-| Curriculum | `env=curriculum train=ppo_selfplay` | Both seats' decks drawn from the PLR buffer over archetype pairs. League sampled by PFSP. |
+| Curriculum | `env=curriculum_v2 train=ppo_selfplay` | Both seats' decks drawn from the PLR buffer over archetype pairs. League sampled by PFSP. |
 
 Both arms share: the PPO hyperparameters, the model architecture, the deck corpus and holdout split, the collector configuration, and the seed.
 

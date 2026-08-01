@@ -92,7 +92,7 @@ def build_eval_opponent_factory(
                 "network; pass them to build_eval_opponent_factory."
             )
         return partial(
-            _load_first_snapshot_opponent,
+            _load_oldest_snapshot_opponent,
             checkpoint_dir=Path(checkpoint_dir),
             cfg=cfg,
             obs_spec=obs_spec,
@@ -142,7 +142,7 @@ def build_eval_opponent_factory(
     )
 
 
-def _load_first_snapshot_opponent(
+def _load_oldest_snapshot_opponent(
         checkpoint_dir: Path,
         cfg: DictConfig,
         obs_spec: Composite,
@@ -151,6 +151,11 @@ def _load_first_snapshot_opponent(
 ) -> Callable[[Observation], list[int]]:
     """
     Load the oldest snapshot from ``checkpoint_dir`` as a greedy opponent.
+
+    Backs the ``first_snapshot`` reference, where "first" means lowest-frame,
+    not most recent: the point is a yardstick frozen early enough to stay
+    fixed for the whole run. The config value keeps its name so metric series
+    stay comparable with runs already logged.
 
     Falls back to :class:`~src.env.random_opponent.RandomOpponent` when no
     snapshot exists yet, so the first eval interval that fires before the

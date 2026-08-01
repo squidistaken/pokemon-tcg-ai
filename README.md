@@ -174,13 +174,13 @@ python -m src.train +experiment=debug
 
 ### Level curriculum
 
-`env=curriculum` replaces uniform deck sampling with Prioritized Level Replay over
+`env=curriculum_v2` replaces uniform deck sampling with Prioritized Level Replay over
 deck-archetype matchups. The learner scores each matchup by how much systematic error the
 critic still carries on it, and republishes a sampling distribution to the environment
 workers after every batch, so training concentrates on the matchups it handles worst:
 
 ```bash
-python -m src.train agent=ppo env=curriculum train=ppo_selfplay
+python -m src.train agent=ppo env=curriculum_v2 train=ppo_selfplay
 ```
 
 Pair it with `train=ppo_selfplay`, which also enables PFSP over the self-play league. The

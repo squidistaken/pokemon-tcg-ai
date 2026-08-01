@@ -167,6 +167,15 @@ class PFSPOpponentPool(SnapshotOpponentPool):
         Truncated episodes are not reported, since a run cut off by the
         selection cap says nothing about either player's strength.
 
+        A draw scores 0.5, the standard convention for win-rate estimation
+        (chess/Elo, Bradley-Terry, and :mod:`src.training.cross_play` alike).
+        It has to be the neutral value here rather than a stylistic choice:
+        PFSP weights each member by how much it still contests the game, so
+        counting a draw as a loss would make drawish members read as hard and
+        soak up sampling budget, while counting it as a win would starve them.
+        Only 0.5 leaves a drawn series weighting the member exactly as an
+        evenly-split one.
+
         :param reward: Terminal reward from the agent's perspective: positive
             for a win, negative for a loss, zero for a draw.
         """
