@@ -12,6 +12,7 @@ from torchrl.data import Categorical, Composite
 from src.policies.ppo_actor import build_actor_critic
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training import (
+    CrossPlayCallback,
     CurriculumStateCallback,
     Evaluator,
     MultiEvaluator,
@@ -19,11 +20,14 @@ from src.training import (
     SnapshotCallback,
     Trainer,
     TrainingCallback,
+    build_best_response_opponent_factory,
     build_curriculum,
-    build_eval_opponent_factory,
+    build_evaluator,
     build_opponent_factory,
+    build_probe_specs,
     make_env_factories,
 )
+from src.training.env_factory import OpponentFactory, _build_sampler_spec
 
 load_dotenv(Path(__file__).parents[1] / ".env", override=False)
 
@@ -110,29 +114,63 @@ def _build_ppo_trainer(
     :param run_config: Resolved run config, forwarded to the callbacks.
     :return: A configured :class:`~src.training.ppo_trainer.PPOTrainer`.
     """
-    probe_env = make_env_factories(cfg)[0]()
-    try:
-        obs_spec = probe_env.observation_spec
-        action_spec = probe_env.action_spec
-    finally:
-        probe_env.close()
-    assert isinstance(action_spec, Categorical), "env action spec must be Categorical"
+    obs_spec, action_spec = build_probe_specs(cfg)
 
     actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
 
     checkpoint_dir = _resolve_checkpoint_dir(cfg)
-    opponent_factory = build_opponent_factory(
-        cfg, obs_spec, action_spec, checkpoint_dir
+    is_best_response = bool(cfg.train.get("best_response", False))
+    if is_best_response:
+        # Exploitability run: the learner both trains against and is scored
+        # against one frozen agent, and its eval win-rate is that agent's
+        # exploitability. No self-play league, so cross-play against the
+        # learner's own history is meaningless.
+        opponent_factory = build_best_response_opponent_factory(cfg, obs_spec, action_spec)
+        eval_opponent_factory = opponent_factory
+    else:
+        opponent_factory = build_opponent_factory(
+            cfg, obs_spec, action_spec, checkpoint_dir
+        )
+        eval_opponent_factory = None
+
+    snapshot_interval = int(cfg.train.get("snapshot_interval", 0))
+    cross_play_enabled = (
+        not is_best_response and opponent_factory is not None
+        and bool(cfg.train.get("cross_play", False))
     )
-    if opponent_factory is not None:
-        callbacks = [
-            *callbacks,
+    eval_interval = int(cfg.train.get("eval_interval", 0))
+    # Built once and shared with both consumers below when both are active, so
+    # the held-out deck corpus is not parsed twice for identical data.
+    eval_sampler_spec = (
+        _build_sampler_spec(cfg, deck_split="eval")
+        if cross_play_enabled and eval_interval > 0
+        else None
+    )
+
+    if snapshot_interval > 0:
+        new_callbacks: list[TrainingCallback] = [
             SnapshotCallback(
                 actor_critic=actor_critic,
                 checkpoint_dir=checkpoint_dir,
-                interval=int(cfg.train.snapshot_interval),
+                interval=snapshot_interval,
             ),
         ]
+        if cross_play_enabled:
+            new_callbacks.append(
+                CrossPlayCallback(
+                    actor_critic=actor_critic,
+                    cfg=cfg,
+                    obs_spec=obs_spec,
+                    action_spec=action_spec,
+                    checkpoint_dir=checkpoint_dir,
+                    output_dir=HydraConfig.get().runtime.output_dir,
+                    n_games=int(cfg.train.get("cross_play_games", 20)),
+                    max_checkpoints=int(cfg.train.get("cross_play_max_checkpoints", 8)),
+                    seed=int(cfg.seed),
+                    sampler_spec=eval_sampler_spec,
+                )
+            )
+        callbacks = [*new_callbacks, *callbacks]
 
     curriculum = build_curriculum(cfg)
     if curriculum is not None:
@@ -184,8 +222,15 @@ def _build_ppo_trainer(
         reward_scaling=cfg.agent.get("reward_scaling", 1.0),
         callbacks=callbacks,
         run_config=run_config,
-        evaluator=_build_evaluator(cfg, obs_spec, action_spec, checkpoint_dir),
-        eval_interval=int(cfg.train.get("eval_interval", 0)),
+        evaluator=_build_evaluator(
+            cfg,
+            obs_spec,
+            action_spec,
+            checkpoint_dir,
+            eval_opponent_factory,
+            eval_sampler_spec,
+        ),
+        eval_interval=eval_interval,
         curriculum=curriculum,
     )
 
@@ -212,12 +257,15 @@ def _resolve_checkpoint_dir(cfg: DictConfig) -> Path:
 
 def _build_evaluator(
     cfg: DictConfig,
-    obs_spec: Composite | None = None,
-    action_spec: Categorical | None = None,
+    obs_spec: Composite,
+    action_spec: Categorical,
     checkpoint_dir: Path | None = None,
+    opponent_factory: OpponentFactory | None = None,
+    sampler_spec: dict[str, Any] | None = None,
 ) -> Evaluator | MultiEvaluator | None:
     """
-    Build the fixed-opponent evaluator(s) selected by ``cfg.train``.
+    Build the fixed-opponent evaluator(s) selected by ``cfg.train``, gated on
+    ``eval_interval``.
 
     The evaluation environment is given its opponent explicitly, from
     ``cfg.train.eval_opponents`` (or the singular ``eval_opponent``), rather
@@ -231,32 +279,35 @@ def _build_evaluator(
     namespaced per opponent.
 
     :param cfg: Hydra configuration with a ``train`` section.
-    :param obs_spec: Environment observation spec, forwarded to
-        :func:`~src.training.self_play.build_eval_opponent_factory` for
-        snapshot-backed opponents.
-    :param action_spec: Environment action spec, same.
+    :param obs_spec: Environment observation spec, forwarded to the opponent
+        factory so a snapshot-backed reference can rebuild its network.
+    :param action_spec: Environment action spec, same purpose.
     :param checkpoint_dir: Snapshot directory, forwarded for
         ``first_snapshot``.
+    :param opponent_factory: Explicit eval opponent, overriding
+        ``cfg.train.eval_opponent(s)`` and collapsing the result to a single
+        evaluator. Used by a best-response run to score the learner against the
+        same frozen agent it trains against.
+    :param sampler_spec: Precomputed eval-split sampler spec, shared with
+        ``CrossPlayCallback`` when both are active; built fresh when ``None``.
     :return: An evaluator, or None when ``eval_interval`` disables evaluation.
     """
     if int(cfg.train.get("eval_interval", 0)) <= 0:
         return None
-    names = _eval_opponent_names(cfg)
-    evaluators = [
-        Evaluator(
-            env_factory=make_env_factories(
-                cfg,
-                opponent_factory=build_eval_opponent_factory(
-                    cfg, obs_spec, action_spec, checkpoint_dir, opponent=name
-                ),
-                deck_split="eval",
-            )[0],
-            n_episodes=int(cfg.train.get("eval_episodes", 100)),
-            device=cfg.agent.get("device", "cpu"),
-            deterministic=bool(cfg.train.get("eval_deterministic", True)),
-            name=_eval_label(name),
+    if opponent_factory is not None:
+        return build_evaluator(
+            cfg, obs_spec, action_spec, opponent_factory, sampler_spec
         )
-        for name in names
+    evaluators = [
+        build_evaluator(
+            cfg,
+            obs_spec,
+            action_spec,
+            sampler_spec=sampler_spec,
+            opponent=name,
+            checkpoint_dir=checkpoint_dir,
+        )
+        for name in _eval_opponent_names(cfg)
     ]
     return evaluators[0] if len(evaluators) == 1 else MultiEvaluator(evaluators)
 
@@ -278,18 +329,6 @@ def _eval_opponent_names(cfg: DictConfig) -> list[str]:
     if configured:
         return [str(name) for name in configured]
     return [str(cfg.train.get("eval_opponent", "random"))]
-
-
-def _eval_label(opponent: str) -> str:
-    """
-    Shorten an opponent spec into a metric-key-friendly label.
-
-    :param opponent: Opponent name or checkpoint path.
-    :return: Label used to namespace this evaluator's metrics.
-    """
-    if opponent.endswith(".pt"):
-        return Path(opponent).stem
-    return opponent
 
 
 if __name__ == "__main__":

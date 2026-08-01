@@ -6,11 +6,16 @@ from omegaconf import OmegaConf
 
 from src.env.random_opponent import RandomOpponent
 from src.env.snapshot_opponent_pool import SnapshotOpponentPool
+from src.policies.greedy_policy_opponent import GreedyPolicyOpponent, save_actor_critic
 from src.policies.ppo_actor import build_actor_critic, build_ppo_actor_critic
 from src.training.callbacks import SnapshotCallback
 from src.training.env_factory import make_env_factories
 from src.training.evaluator import Evaluator
-from src.training.self_play import build_eval_opponent_factory, build_opponent_factory
+from src.training.self_play import (
+    build_best_response_opponent_factory,
+    build_eval_opponent_factory,
+    build_opponent_factory,
+)
 from tests.conftest import structured_env_cfg
 
 
@@ -279,6 +284,102 @@ def test_unsupported_eval_opponent_is_rejected(tmp_path, structured_model_cfg) -
     cfg.train.eval_opponent = "snapshot"
     with pytest.raises(ValueError, match="eval_opponent"):
         build_eval_opponent_factory(cfg)
+
+
+def test_checkpoint_eval_opponent_loads_a_frozen_snapshot(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    ``eval_opponent=checkpoint`` scores the run against a frozen saved model.
+    """
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    snapshot = save_actor_critic(actor_critic, tmp_path / "reference.pt")
+    cfg.train.eval_opponent = "checkpoint"
+    cfg.train.eval_opponent_checkpoint = str(snapshot)
+
+    opponent = build_eval_opponent_factory(cfg, structured_obs_spec, action_spec)()
+    assert isinstance(opponent, GreedyPolicyOpponent)
+
+
+def test_checkpoint_eval_opponent_requires_a_path(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    Selecting the checkpoint reference without a path fails loudly at build time.
+    """
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    cfg.train.eval_opponent = "checkpoint"
+    with pytest.raises(ValueError, match="eval_opponent_checkpoint"):
+        build_eval_opponent_factory(cfg, structured_obs_spec, action_spec)
+
+
+def test_checkpoint_eval_opponent_requires_specs(tmp_path, structured_model_cfg) -> None:
+    """
+    Rebuilding a checkpoint's network needs the env specs, so omitting them raises.
+    """
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    cfg.train.eval_opponent = "checkpoint"
+    cfg.train.eval_opponent_checkpoint = str(tmp_path / "reference.pt")
+    with pytest.raises(ValueError, match="specs"):
+        build_eval_opponent_factory(cfg)
+
+
+def test_checkpoint_eval_opponent_rejects_missing_file(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    A checkpoint path that does not exist is caught at build time, not mid-eval.
+    """
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    cfg.train.eval_opponent = "checkpoint"
+    cfg.train.eval_opponent_checkpoint = str(tmp_path / "does_not_exist.pt")
+    with pytest.raises(ValueError, match="does not exist"):
+        build_eval_opponent_factory(cfg, structured_obs_spec, action_spec)
+
+
+def test_best_response_opponent_loads_the_frozen_agent(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    The best-response opponent is the frozen agent whose exploitability is probed.
+    """
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    probed = save_actor_critic(actor_critic, tmp_path / "probed.pt")
+    cfg.train.best_response_checkpoint = str(probed)
+
+    factory = build_best_response_opponent_factory(cfg, structured_obs_spec, action_spec)
+    assert isinstance(factory(), GreedyPolicyOpponent)
+
+
+def test_best_response_opponent_survives_pickling(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    The collection opponent is pickled into each worker, so it must round-trip.
+    """
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    cfg.train.best_response_checkpoint = str(save_actor_critic(actor_critic, tmp_path / "probed.pt"))
+
+    factory = build_best_response_opponent_factory(cfg, structured_obs_spec, action_spec)
+    opponent = pickle.loads(pickle.dumps(factory))()
+    assert isinstance(opponent, GreedyPolicyOpponent)
+
+
+def test_best_response_requires_an_existing_checkpoint(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    A missing or unset probed checkpoint fails loudly before training starts.
+    """
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    with pytest.raises(ValueError, match="best_response_checkpoint"):
+        build_best_response_opponent_factory(cfg, structured_obs_spec, action_spec)
+    cfg.train.best_response_checkpoint = str(tmp_path / "missing.pt")
+    with pytest.raises(ValueError, match="does not exist"):
+        build_best_response_opponent_factory(cfg, structured_obs_spec, action_spec)
 
 
 @pytest.mark.parametrize("deterministic", [True, False])

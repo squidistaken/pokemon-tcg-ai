@@ -27,3 +27,9 @@ eval_deterministic: false
 eval_opponents:
   - first_snapshot
   - random
+# Opt-in: cross-play needs snapshot_interval > 0, which this config provides,
+# but it costs a series against the latest snapshot every eval round plus a
+# full round-robin at run end. It ranks checkpoints *within* one run to pick
+# which to submit, so turn it on (train.cross_play=true) for a submission run
+# rather than paying for it on every experiment.
+cross_play: false

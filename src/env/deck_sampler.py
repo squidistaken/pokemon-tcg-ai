@@ -65,6 +65,7 @@ class PoolDeckSampler:
         seed: int | None = None,
         mirror_prob: float | None = None,
         weights: Sequence[float] | None = None,
+        labels: Sequence[str] | None = None,
     ) -> None:
         """
         :param decks: Pool of decks, each a list of 60 card IDs.
@@ -79,8 +80,13 @@ class PoolDeckSampler:
         :param weights: Per-deck sampling weights aligned with ``decks`` (e.g.
             tournament win-rate). None samples uniformly. Ignored under
             ``round_robin``, which is deterministic coverage.
+        :param labels: Per-deck archetype labels aligned with ``decks``. When
+            given, every :meth:`sample` records the drawn pair's labels in
+            :attr:`last_labels`, so evaluation can attribute an episode's
+            outcome to the deck archetype it was played with. None leaves
+            :attr:`last_labels` at None.
         :raises ValueError: If the pool is empty, an option is unknown, or the
-            weights are malformed.
+            weights or labels are malformed.
         """
         if not decks:
             raise ValueError("PoolDeckSampler requires a non-empty deck pool")
@@ -100,6 +106,8 @@ class PoolDeckSampler:
         self._mirror_prob = float(mirror_prob)
         self._mode = mode
         self._weights = self._validate_weights(weights, len(self._decks))
+        self._labels = self._validate_labels(labels, len(self._decks))
+        self._last_labels: tuple[str, str] | None = None
         self._rng = random.Random(seed)
 
         # A random start offset keeps two round-robin workers from marching in
@@ -132,6 +140,38 @@ class PoolDeckSampler:
             raise ValueError("weights must have a positive sum")
         return weights
 
+    @staticmethod
+    def _validate_labels(
+        labels: Sequence[str] | None, pool_size: int
+    ) -> list[str] | None:
+        """
+        Validate and copy per-deck archetype labels.
+
+        :param labels: Labels aligned with the pool, or None for no labelling.
+        :param pool_size: Number of decks the labels must line up with.
+        :return: A copied label list, or None.
+        :raises ValueError: If the labels are the wrong length.
+        """
+        if labels is None:
+            return None
+        labels = list(labels)
+        if len(labels) != pool_size:
+            raise ValueError(
+                f"labels length {len(labels)} does not match pool size {pool_size}"
+            )
+        return labels
+
+    @property
+    def last_labels(self) -> tuple[str, str] | None:
+        """
+        Archetype labels of the ``(deck0, deck1)`` pair from the last
+        :meth:`sample`, or None when the pool was built without labels (or
+        nothing has been sampled yet).
+
+        :return: The most recently sampled pair's labels, or None.
+        """
+        return self._last_labels
+
     def sample(self) -> tuple[Deck, Deck]:
         """
         :return: The ``(deck0, deck1)`` pair for the next episode.
@@ -140,6 +180,8 @@ class PoolDeckSampler:
         mirror = self._rng.random() < self._mirror_prob
         index1 = index0 if mirror else self._next_index()
 
+        if self._labels is not None:
+            self._last_labels = (self._labels[index0], self._labels[index1])
         return list(self._decks[index0]), list(self._decks[index1])
 
     def _next_index(self) -> int:
@@ -175,9 +217,9 @@ def build_deck_sampler(spec: dict[str, Any], seed: int | None = None) -> DeckSam
 
     :param spec: ``{"kind": "fixed", "deck0": [...], "deck1": [...]}``,
         ``{"kind": "pool", "decks": [[...], ...], "matchup": ..., "mode": ...,
-        "mirror_prob": ..., "weights": [...]}`` (the last two optional), or
-        ``{"kind": "curriculum", "decks": [[...], ...], "archetypes": ...,
-        "handles": ...}``.
+        "mirror_prob": ..., "weights": [...], "labels": [...]}`` (everything
+        past ``decks`` is optional), or ``{"kind": "curriculum", "decks":
+        [[...], ...], "archetypes": ..., "handles": ...}``.
     :param seed: Seed forwarded to the pool and curriculum samplers (ignored
         for fixed).
     :return: A constructed deck sampler.
@@ -205,6 +247,7 @@ def build_deck_sampler(spec: dict[str, Any], seed: int | None = None) -> DeckSam
             seed=seed,
             mirror_prob=spec.get("mirror_prob"),
             weights=spec.get("weights"),
+            labels=spec.get("labels"),
         )
 
     raise ValueError(f"unknown deck sampler kind {kind!r}; expected 'fixed' or 'pool'")

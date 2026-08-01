@@ -2,7 +2,9 @@ import logging
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
+from typing import Any
 
+from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
 from torchrl.data import Categorical, Composite
 
@@ -20,11 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 def build_eval_opponent_factory(
-    cfg: DictConfig,
-    obs_spec: Composite | None = None,
-    action_spec: Categorical | None = None,
-    checkpoint_dir: str | Path | None = None,
-    opponent: str | None = None,
+        cfg: DictConfig,
+        obs_spec: Composite | None = None,
+        action_spec: Categorical | None = None,
+        checkpoint_dir: str | Path | None = None,
+        opponent: str | None = None,
 ) -> OpponentFactory:
     """
     Build the fixed reference opponent the evaluator scores against.
@@ -47,9 +49,16 @@ def build_eval_opponent_factory(
         first eval interval that fires before the league has been snapshotted
         still produces a readable number.
 
+    ``"checkpoint"``
+        The ``save_actor_critic`` snapshot named by
+        ``train.eval_opponent_checkpoint``, e.g. a previous run's
+        best-submitted agent. A relative path resolves against the original
+        working directory, and must exist on disk at startup.
+
     ``/path/to/snapshot.pt``
-        A specific ``save_actor_critic`` checkpoint, e.g. a previous run's
-        best-submitted agent. Must exist on disk at startup.
+        The same frozen-checkpoint reference named inline rather than through
+        ``eval_opponent_checkpoint``, which is what lets a run score itself
+        against several distinct checkpoints at once.
 
     :param cfg: Hydra config with a ``train`` section and a top-level ``seed``.
     :param obs_spec: Environment observation spec, needed to rebuild the
@@ -60,8 +69,9 @@ def build_eval_opponent_factory(
     :param opponent: Opponent to build, overriding ``cfg.train.eval_opponent``.
         Set by callers scoring against several references at once.
     :return: Factory building the reference opponent.
-    :raises ValueError: If the opponent name is unsupported.
-    :raises FileNotFoundError: If a specific checkpoint path does not exist.
+    :raises ValueError: If the opponent name is unsupported, or a
+        snapshot-backed reference is missing its path, its checkpoint
+        directory, or the specs needed to rebuild its network.
     """
     name = (
         opponent
@@ -78,7 +88,8 @@ def build_eval_opponent_factory(
             )
         if obs_spec is None or action_spec is None:
             raise ValueError(
-                "eval_opponent=first_snapshot requires obs_spec and action_spec."
+                "eval_opponent=first_snapshot needs obs/action specs to rebuild its "
+                "network; pass them to build_eval_opponent_factory."
             )
         return partial(
             _load_first_snapshot_opponent,
@@ -89,7 +100,24 @@ def build_eval_opponent_factory(
             fallback_seed=int(cfg.seed),
         )
 
-    # Specific checkpoint path
+    if name == "checkpoint":
+        if obs_spec is None or action_spec is None:
+            raise ValueError(
+                "A checkpoint eval opponent needs obs/action specs to rebuild its "
+                "network; pass them to build_eval_opponent_factory."
+            )
+        return _checkpoint_opponent_factory(
+            cfg,
+            obs_spec,
+            action_spec,
+            checkpoint=cfg.train.get("eval_opponent_checkpoint"),
+            missing_message=(
+                "eval_opponent='checkpoint' requires train.eval_opponent_checkpoint "
+                "to point at a saved snapshot."
+            ),
+            not_found_prefix="eval_opponent_checkpoint",
+        )
+
     if name.endswith(".pt"):
         if obs_spec is None or action_spec is None:
             raise ValueError(
@@ -110,16 +138,16 @@ def build_eval_opponent_factory(
 
     raise ValueError(
         f"Unsupported eval_opponent '{name}'; expected 'random', 'first_snapshot', "
-        f"or a path to a .pt checkpoint."
+        f"'checkpoint', or a path to a .pt checkpoint."
     )
 
 
 def _load_first_snapshot_opponent(
-    checkpoint_dir: Path,
-    cfg: DictConfig,
-    obs_spec: Composite,
-    action_spec: Categorical,
-    fallback_seed: int,
+        checkpoint_dir: Path,
+        cfg: DictConfig,
+        obs_spec: Composite,
+        action_spec: Categorical,
+        fallback_seed: int,
 ) -> Callable[[Observation], list[int]]:
     """
     Load the oldest snapshot from ``checkpoint_dir`` as a greedy opponent.
@@ -154,10 +182,10 @@ def _load_first_snapshot_opponent(
 
 
 def _load_checkpoint_opponent(
-    checkpoint_path: Path,
-    cfg: DictConfig,
-    obs_spec: Composite,
-    action_spec: Categorical,
+        checkpoint_path: Path,
+        cfg: DictConfig,
+        obs_spec: Composite,
+        action_spec: Categorical,
 ) -> Callable[[Observation], list[int]]:
     """
     Load a specific checkpoint as a greedy opponent.
@@ -174,6 +202,97 @@ def _load_checkpoint_opponent(
     encoder = make_encoder(
         str(cfg.env.get("encoder", "structured")), int(cfg.env.max_options)
     )
+    return load_greedy_opponent(
+        checkpoint_path, cfg, obs_spec, action_spec, encoder, device="cpu"
+    )
+
+
+def build_best_response_opponent_factory(
+        cfg: DictConfig,
+        obs_spec: Composite,
+        action_spec: Categorical,
+) -> OpponentFactory:
+    """
+    Build the fixed opponent for a best-response (exploitability) run.
+
+    Exploitability is measured by freezing a trained agent and training a fresh
+    learner to beat it: the collection opponent every worker faces is that one
+    frozen checkpoint, and the learner's eval win-rate against it is the
+    exploitability signal.
+
+    :param cfg: Hydra config with ``train.best_response_checkpoint`` and the
+        ``env``/``model`` sections used to rebuild the frozen network.
+    :param obs_spec: Environment observation composite spec.
+    :param action_spec: Environment action spec.
+    :return: A picklable opponent factory playing the frozen checkpoint.
+    :raises ValueError: If the checkpoint path is missing or does not exist.
+    """
+    return _checkpoint_opponent_factory(
+        cfg,
+        obs_spec,
+        action_spec,
+        checkpoint=cfg.train.get("best_response_checkpoint"),
+        missing_message=(
+            "best_response requires train.best_response_checkpoint to point at the "
+            "saved agent whose exploitability is being measured."
+        ),
+        not_found_prefix="best_response_checkpoint",
+    )
+
+
+def _checkpoint_opponent_factory(
+        cfg: DictConfig,
+        obs_spec: Composite,
+        action_spec: Categorical,
+        checkpoint: Any,
+        missing_message: str,
+        not_found_prefix: str,
+) -> OpponentFactory:
+    """
+    Validate a config-supplied checkpoint path and build its opponent factory.
+
+    :param cfg: Hydra config used to rebuild the matching architecture.
+    :param obs_spec: Environment observation composite spec.
+    :param action_spec: Environment action spec.
+    :param checkpoint: The config value for the checkpoint path (unset/empty
+        when the required override was not passed).
+    :param missing_message: Error raised when ``checkpoint`` is unset.
+    :param not_found_prefix: Prefix for the error when the path does not
+        resolve to a file, naming which config key it came from.
+    :return: A picklable opponent factory playing the frozen checkpoint.
+    :raises ValueError: If the checkpoint path is missing or does not exist.
+    """
+    if not checkpoint:
+        raise ValueError(missing_message)
+    path = Path(to_absolute_path(str(checkpoint)))
+    if not path.is_file():
+        raise ValueError(f"{not_found_prefix} {path} does not exist.")
+    return partial(
+        _make_checkpoint_opponent,
+        cfg=cfg,
+        obs_spec=obs_spec,
+        action_spec=action_spec,
+        checkpoint_path=path,
+    )
+
+
+def _make_checkpoint_opponent(
+        cfg: DictConfig,
+        obs_spec: Composite,
+        action_spec: Categorical,
+        checkpoint_path: Path,
+) -> Callable[[Observation], list[int]]:
+    """
+    Load a frozen snapshot as a greedy opponent (fixed eval reference or the
+    probed agent in a best-response run).
+
+    :param cfg: Hydra config used to rebuild the matching architecture.
+    :param obs_spec: Environment observation composite spec.
+    :param action_spec: Environment action spec.
+    :param checkpoint_path: Path to a ``save_actor_critic`` snapshot.
+    :return: A greedy opponent playing that snapshot on CPU.
+    """
+    encoder = make_encoder(cfg.env.get("encoder", "structured"), int(cfg.env.max_options))
     return load_greedy_opponent(
         checkpoint_path, cfg, obs_spec, action_spec, encoder, device="cpu"
     )
