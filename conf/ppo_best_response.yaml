@@ -19,4 +19,9 @@ train:
   # No self-play league to rank checkpoints within; snapshotting still runs so
   # the trained best-responder itself is recoverable.
   cross_play: false
+  # The probed agent is the only meaningful reference here, so the inherited
+  # multi-reference list does not apply. It is already overridden in code (the
+  # best-response opponent is passed to the evaluator explicitly); nulled here
+  # so reading this config does not suggest otherwise.
+  eval_opponents: null
   eval_episodes: 150
