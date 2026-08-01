@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .card_index import CardIndex
+from .card_swapper import CardSwapper
 from .models import RawDeck
 from .resolver import resolve_deck
 from .validator import validate_deck
@@ -27,6 +28,9 @@ class RunSummary:
     written_slugs: list[str] = field(default_factory=list)
     drops: list[str] = field(default_factory=list)  # human-readable reasons
     warnings: list[str] = field(default_factory=list)  # non-fatal, e.g. impossible evolutions
+    #: Written/re-observed decks that only resolved because of a hardcoded card
+    #: swap (see :mod:`scraper.card_swapper`) — a subset of ``written`` + ``reobserved``.
+    swapped_decks: int = 0
 
     def format(self) -> str:
         """
@@ -40,6 +44,7 @@ class RunSummary:
             f"  dropped unresolved: {self.dropped_unresolved}",
             f"  dropped invalid:    {self.dropped_invalid}",
             f"  warnings:           {len(self.warnings)}",
+            f"  swapped decks:      {self.swapped_decks}",
         ]
         if self.written_slugs:
             lines.append("  decks: " + ", ".join(self.written_slugs))
@@ -56,6 +61,7 @@ def process_deck(
     verbose: bool = False,
     date: str | None = None,
     warn_impossible_evolutions: bool = False,
+    swapper: CardSwapper | None = None,
 ) -> None:
     """
     Resolve, validate, and (unless dry-run) record a single scraped deck.
@@ -79,13 +85,20 @@ def process_deck(
     :param warn_impossible_evolutions: Non-fatally flag Stage 1/2 Pokémon with no
         copy of their previous stage in the deck (legal, but can never evolve).
         Warnings are recorded in ``summary`` and the deck's manifest entry.
+    :param swapper: Optional hardcoded-substitute table consulted for cards that
+        would otherwise be unresolved (see :mod:`scraper.card_swapper`). Swaps
+        applied are recorded on the deck's manifest entry, like validator warnings.
     """
     summary.fetched += 1
-    resolved = resolve_deck(raw, index)
+    resolved = resolve_deck(raw, index, swapper)
 
     if verbose and resolved.fuzzy_matches:
         for scraped, matched, score in resolved.fuzzy_matches:
             print(f"  fuzzy: {scraped!r} -> {matched!r} ({score})")
+
+    if verbose and resolved.swaps:
+        for scraped, substitute in resolved.swaps:
+            print(f"  swap: {scraped!r} -> {substitute!r}")
 
     if not resolved.ok:
         summary.dropped_unresolved += 1
@@ -125,10 +138,18 @@ def process_deck(
             if verbose:
                 print("WARN:", reason)
 
+    deck_warnings = [
+        *result.warnings,
+        *(f"swapped {orig!r} -> {sub!r}" for orig, sub in resolved.swaps),
+    ]
+
     if dry_run:
         outcome = writer.classify(resolved, date=date)
     else:
-        outcome = writer.write(resolved, date=date, warnings=result.warnings)
+        outcome = writer.write(resolved, date=date, warnings=deck_warnings)
+
+    if resolved.swaps and (outcome.new_deck or outcome.new_observation):
+        summary.swapped_decks += 1
 
     prefix = "OK (dry-run)" if dry_run else "WROTE"
     if outcome.new_deck:

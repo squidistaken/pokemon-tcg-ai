@@ -5,6 +5,7 @@ import datetime
 import sys
 
 from .card_index import CardIndex
+from .card_swapper import CardSwapper
 from .pipeline import RunSummary, process_deck
 from .sources import SOURCES
 from .writer import DEFAULT_DECKS_DIR, DeckWriter
@@ -63,6 +64,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Flag (non-fatally) Stage 1/2 Pokémon with no copy of their "
         "previous stage in the deck, e.g. a Vaporeon with no Eevee",
     )
+    p.add_argument(
+        "--disable-card-swap",
+        action="store_true",
+        help="Don't substitute hardcoded staples missing from the card pool "
+        "(see scraper.card_swapper); swapping is on by default",
+    )
     return p
 
 
@@ -109,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     index = CardIndex()
+    swapper = None if args.disable_card_swap else CardSwapper(index)
     writer = DeckWriter(args.out)
     summary = RunSummary()
     today = datetime.date.today().isoformat()  # noqa: DTZ011 - local run date is fine for a scrape label
@@ -128,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
                     verbose=args.verbose,
                     date=today,
                     warn_impossible_evolutions=args.warn_impossible_evolutions,
+                    swapper=swapper,
                 )
         except Exception as e:  # noqa: BLE001 - report and continue with what we have
             print(f"  source {name!r} error: {e}", file=sys.stderr)

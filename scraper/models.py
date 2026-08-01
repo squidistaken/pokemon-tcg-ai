@@ -54,6 +54,8 @@ class ResolvedDeck:
     unresolved_cards: list[RawCard] = field(default_factory=list)
     # Fuzzy substitutions applied, for auditing: (scraped name -> matched name, score).
     fuzzy_matches: list[tuple[str, str, float]] = field(default_factory=list)
+    # Hardcoded swaps applied, for auditing: (scraped name -> substitute name).
+    swaps: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
