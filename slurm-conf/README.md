@@ -56,7 +56,7 @@ and the normal Python training callback performs the locked CSV append.
 
 ## Deck scraping
 
-First submit the 24-hour fetch-only discovery job. It scans at most 5,000
+First submit the 12-hour fetch-only discovery job. It scans at most 5,000
 Limitless decks and 200 Bulbapedia category pages, writes no training decks, and
 atomically checkpoints a resumable research inventory:
 

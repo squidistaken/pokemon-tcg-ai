@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
-#SBATCH --time=24:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=slurm-conf/logs/%x_%j.out
 #SBATCH --error=slurm-conf/logs/%x_%j.err
 

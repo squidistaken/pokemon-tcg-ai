@@ -102,6 +102,6 @@ remain coherent after mapping. Cross-subtype Energy mappings require an explicit
 rule flag. Ordinary cards cannot target ACE SPEC cards, and the normal copy-count
 and ACE SPEC guards still run after candidate selection.
 
-The 24-hour discovery job provides the research input in
+The 12-hour discovery job provides the research input in
 `outputs/card_discovery/seen_cards.jsonl.gz`. The tracked mapping remains empty
 until proposer/reviewer research is approved by Stef or Teun.

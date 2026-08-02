@@ -13,12 +13,12 @@ def _script(name: str) -> str:
     return (ROOT / "slurm-conf" / name).read_text(encoding="utf-8")
 
 
-def test_discovery_is_a_true_24_hour_fetch_only_slurm_job():
+def test_discovery_is_a_true_12_hour_fetch_only_slurm_job():
     script = _script("discover_cards.sh")
 
     assert script.startswith("#!/bin/bash\n\n#SBATCH")
     assert "#SBATCH --partition=regular" in script
-    assert "#SBATCH --time=24:00:00" in script
+    assert "#SBATCH --time=12:00:00" in script
     assert "#SBATCH --gpus" not in script
     assert "python -m scraper.discovery" in script
     assert "--source all" in script
