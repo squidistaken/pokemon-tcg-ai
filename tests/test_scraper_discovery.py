@@ -22,8 +22,8 @@ class FakeProfileLoader:
 class FakeSource:
     @staticmethod
     def iter_decks(**kwargs):
-        assert kwargs["max_decks"] == 5000
-        assert kwargs["bulbapedia_max_pages"] == 200
+        assert kwargs["max_decks"] == 15000
+        assert kwargs["bulbapedia_max_pages"] == 600
         yield RawDeck(
             "fake",
             "Example",

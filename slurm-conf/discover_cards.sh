@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
-#SBATCH --time=12:00:00
+#SBATCH --time=06:00:00
 #SBATCH --output=slurm-conf/logs/%x_%j.out
 #SBATCH --error=slurm-conf/logs/%x_%j.err
 
@@ -38,11 +38,11 @@ srun uv run --frozen --no-sync python -m scraper.discovery \
   --source all \
   --limit "${SCRAPER_LIMIT:-200}" \
   --max-pages "${SCRAPER_MAX_PAGES:-0}" \
-  --max-decks "${SCRAPER_MAX_DECKS:-5000}" \
+  --max-decks "${SCRAPER_MAX_DECKS:-15000}" \
   --per-tournament "${SCRAPER_PER_TOURNAMENT:-8}" \
   --since "${SCRAPER_SINCE:-2026-01-01}" \
   --category "${BULBAPEDIA_CATEGORY:-Deck archetypes}" \
-  --bulbapedia-max-pages "${BULBAPEDIA_MAX_PAGES:-200}" \
+  --bulbapedia-max-pages "${BULBAPEDIA_MAX_PAGES:-600}" \
   --out "${CARD_DISCOVERY_OUT:-outputs/card_discovery/seen_cards.jsonl.gz}" \
   --verbose \
   "$@"

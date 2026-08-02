@@ -22,7 +22,7 @@ python -m scraper --source limitless --format standard --limit 20 --verbose
 # --limit is the page size, --max-pages how many pages (0 = until exhausted),
 # --per-tournament 0 takes every published list instead of just the top 8.
 python -m scraper --source limitless --limit 50 --max-pages 0 \
-    --per-tournament 0 --since 2026-01-01 --max-decks 5000 --verbose
+    --per-tournament 0 --since 2026-01-01 --max-decks 15000 --verbose
 
 # Wiki decklists (best effort; older-set cards get dropped as unavailable)
 python -m scraper --source bulbapedia --pages "Abyss (TCG),Aurora Blast (TCG)"
@@ -34,8 +34,8 @@ python -m scraper --source text --input mylist.txt --name my-deck
 python -m scraper --source all --limit 20 --bulbapedia-max-pages 20
 
 # Fetch card research data only; no deck CSVs or strategy manifests are written
-python -m scraper.discovery --source all --max-decks 5000 \
-    --bulbapedia-max-pages 200
+python -m scraper.discovery --source all --max-decks 15000 \
+    --bulbapedia-max-pages 600
 
 # Fetch once and write isolated mapping/heuristic corpora with separate manifests
 python -m scraper --source all --card-swap-strategy all --out decks

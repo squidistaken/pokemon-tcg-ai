@@ -36,8 +36,8 @@ work for either corpus.
 
 ## Discovery and mapping work still to do
 
-Run `slurm-conf/discover_cards.sh` first. Its 12-hour CPU job concurrently scans up
-to 5,000 Limitless decks and 200 Bulbapedia pages, writing only the resumable
+Run `slurm-conf/discover_cards.sh` first. Its 6-hour CPU job concurrently scans up
+to 15,000 Limitless decks and 600 Bulbapedia pages, writing only the resumable
 `seen_cards.jsonl.gz` inventory. Download that file before starting mapping work.
 
 Shard the deterministic inventory across proposer agents, then have independent

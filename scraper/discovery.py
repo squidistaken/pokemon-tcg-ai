@@ -33,12 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--per-tournament", type=int, default=8)
     parser.add_argument("--page", type=int, default=1)
     parser.add_argument("--max-pages", type=int, default=0)
-    parser.add_argument("--max-decks", type=int, default=5000)
+    parser.add_argument("--max-decks", type=int, default=15000)
     parser.add_argument("--since", default="2026-01-01")
     parser.add_argument("--until")
     parser.add_argument("--pages")
     parser.add_argument("--category", default="Deck archetypes")
-    parser.add_argument("--bulbapedia-max-pages", type=int, default=200)
+    parser.add_argument("--bulbapedia-max-pages", type=int, default=600)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
         "--checkpoint-every",

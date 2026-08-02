@@ -56,8 +56,8 @@ and the normal Python training callback performs the locked CSV append.
 
 ## Deck scraping
 
-First submit the 12-hour fetch-only discovery job. It scans at most 5,000
-Limitless decks and 200 Bulbapedia category pages, writes no training decks, and
+First submit the 6-hour fetch-only discovery job. It scans at most 15,000
+Limitless decks and 600 Bulbapedia category pages, writes no training decks, and
 atomically checkpoints a resumable research inventory:
 
 ```bash
@@ -86,7 +86,7 @@ and follows Bulbapedia's entire `Deck archetypes` category. Bounds can be change
 through `SCRAPER_LIMIT`, `SCRAPER_MAX_PAGES`, `SCRAPER_PER_TOURNAMENT`,
 `SCRAPER_SINCE`, `BULBAPEDIA_CATEGORY`, `BULBAPEDIA_MAX_PAGES`, and `SCRAPER_OUT`;
 an explicit `--max-decks` may still be appended for a smaller run. Discovery also
-accepts `SCRAPER_MAX_DECKS` (default 5000) and `CARD_DISCOVERY_OUT`.
+accepts `SCRAPER_MAX_DECKS` (default 15000) and `CARD_DISCOVERY_OUT`.
 
 Multi-deck training and evaluation use the heuristic corpus by default. Select the
 mapping corpus with the top-level Hydra override:
