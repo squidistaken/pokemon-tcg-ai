@@ -13,11 +13,13 @@ from bs4 import BeautifulSoup
 
 from .card_index import CardIndex, CardProfile, normalize_name, normalize_number
 from .http import HttpClient
+from .mapping_rules import MappingRuleSet, SetCanonicalizer
 from .models import CardSwap, RawCard
 
 CARD_URL = "https://limitlesstcg.com/cards/{set_code}/{number}"
 SET_INDEX_URL = "https://limitlesstcg.com/cards"
 DEFAULT_CACHE_DIR = Path("outputs/card_swap_cache")
+DEFAULT_MAPPING_RULE_DIR = Path(__file__).with_name("card_mappings")
 
 _TYPE_CODES = {
     "grass": "g",
@@ -139,14 +141,23 @@ class CardSwapper(ABC):
 
 
 class MappingCardSwapper(CardSwapper):
-    """Placeholder for the explicit mapping strategy; intentionally empty."""
+    """Resolve from versioned, approved rules without heuristic fallback."""
 
-    def __init__(self, index: CardIndex):
+    def __init__(
+        self,
+        index: CardIndex,
+        rules_dir: Path | str = DEFAULT_MAPPING_RULE_DIR,
+        set_canonicalizer: SetCanonicalizer | None = None,
+    ):
         self.index = index
+        self.rules = MappingRuleSet.load(rules_dir, index, set_canonicalizer)
 
     @override
     def resolve(self, card: RawCard) -> tuple[CardSwap, ...]:
-        return ()
+        try:
+            return self.rules.candidates_for(card)
+        except Exception:  # noqa: BLE001 - metadata failure leaves the card unresolved
+            return ()
 
 
 def _present(value: str | None) -> bool:
@@ -434,6 +445,12 @@ class LimitlessProfileLoader:
         if re.fullmatch(r"[A-Za-z0-9]{2,5}", value.strip()):
             return value.upper()
         return self._load_set_codes().get(normalize_name(value))
+
+    def canonical_set_code(self, value: str | None) -> str | None:
+        """Resolve a source set code or full expansion name to Limitless's code."""
+        if value is None or not value.strip():
+            return None
+        return self._set_code(value)
 
     def __call__(self, card: RawCard) -> SourceProfile | None:
         number = normalize_number(card.number)

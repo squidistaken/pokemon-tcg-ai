@@ -58,10 +58,14 @@ class CardSwap:
     kind: str  # "variant"
     confidence: float
     rationale: str
+    rule_id: str | None = None
+    family_id: str | None = None
+    source_stage: str | None = None
+    source_previous_stage: str | None = None
 
     def to_json(self) -> dict[str, str | int | float | None]:
         """Return the stable representation stored on a manifest observation."""
-        return {
+        result: dict[str, str | int | float | None] = {
             "source_name": self.source_name,
             "source_set": self.source_set,
             "source_number": self.source_number,
@@ -72,6 +76,15 @@ class CardSwap:
             "confidence": self.confidence,
             "rationale": self.rationale,
         }
+        if self.rule_id is not None:
+            result["rule_id"] = self.rule_id
+        if self.family_id is not None:
+            result["family_id"] = self.family_id
+        if self.source_stage is not None:
+            result["source_stage"] = self.source_stage
+        if self.source_previous_stage is not None:
+            result["source_previous_stage"] = self.source_previous_stage
+        return result
 
 
 @dataclass

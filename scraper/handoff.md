@@ -11,9 +11,10 @@ Two implementations currently exist:
 
 - `HeuristicCardSwapper` ranks compatible same-name competition printings from
   gameplay profiles.
-- `MappingCardSwapper` is deliberately empty and therefore resolves nothing yet.
+- `MappingCardSwapper` loads reviewed versioned JSON fragments. The tracked rule
+  set is deliberately empty until discovery and human review are complete.
 
-The Slurm scraper passes `--card-swap-strategy all`. A source deck is fetched once
+The production Slurm scraper passes `--card-swap-strategy all`. A source deck is fetched once
 and independently processed into:
 
 - `decks/mapping-resolved/`, with its own `manifest.json`;
@@ -33,22 +34,20 @@ deck_corpus=mapping-resolved
 override such as `paths.data_dir=/scratch/$USER/pokemon-tcg-ai/decks` continues to
 work for either corpus.
 
-## Mapping work still to do
+## Discovery and mapping work still to do
 
-The mapper needs a large, reviewable data source and must not be filled ad hoc in
-Python. Before adding rules, decide and document a versioned schema that can key a
-source by normalized name plus optional set and collection number, express ordered
-competition Card ID candidates, and retain rationale and review metadata.
+Run `slurm-conf/discover_cards.sh` first. Its 24-hour CPU job concurrently scans up
+to 5,000 Limitless decks and 200 Bulbapedia pages, writing only the resumable
+`seen_cards.jsonl.gz` inventory. Download that file before starting mapping work.
 
-Implement `MappingCardSwapper.resolve()` against that schema and validate every
-configured target against `CardIndex` at startup. Stale, ambiguous, non-competition,
-or ordinary-card-to-ACE-SPEC targets must fail closed. Preserve the existing
-deck-level copy-count and ACE SPEC guards and the manifest-v3 substitution fields.
+Shard the deterministic inventory across proposer agents, then have independent
+reviewer agents challenge the proposed targets and unresolved dispositions. Add
+only Stef- or Teun-approved rules under `card_mappings/`. The loader already fails
+closed on stale targets, unapproved active rules, subtype violations, invalid
+evolution-family rules, and ordinary-card-to-ACE-SPEC mappings.
 
-Add table-driven tests covering accepted and unresolved inputs, Unicode names,
-set/number-specific rules, ordered fallbacks, stale targets, copy caps, ACE SPEC
-conflicts, exact-card precedence, and manifest provenance. Do not change
-`scraper/EN_Card_Data.csv`.
+Add table-driven resolution cases for approved and intentionally unresolved inputs.
+Do not change `scraper/EN_Card_Data.csv`.
 
 ## Experiment contract
 
@@ -57,3 +56,7 @@ retained-deck yield, invalid-deck count, unresolved cards, substitution frequenc
 and downstream train/eval results for the same fetch window. A mapping result must
 never silently fall back to the heuristic result; otherwise the comparison no
 longer isolates the strategy.
+
+After approval, `slurm-conf/scrape_all.sh` refetches the full Limitless date window
+and complete Bulbapedia category. It writes both corpora plus
+`decks/mapping-gaps.jsonl.gz` for the next review cycle.

@@ -1,12 +1,12 @@
 #!/bin/bash
 
-#SBATCH --job-name=pokemon-tcg-scrape
+#SBATCH --job-name=pokemon-tcg-card-discovery
 #SBATCH --partition=regular
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
-#SBATCH --time=48:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=slurm-conf/logs/%x_%j.out
 #SBATCH --error=slurm-conf/logs/%x_%j.err
 
@@ -34,16 +34,16 @@ echo "Job: $SLURM_JOB_ID"
 echo "Node: $(hostname)"
 echo "Start: $(date --iso-8601=seconds)"
 
-srun uv run --frozen --no-sync python -m scraper \
+srun uv run --frozen --no-sync python -m scraper.discovery \
   --source all \
-  --card-swap-strategy all \
   --limit "${SCRAPER_LIMIT:-200}" \
   --max-pages "${SCRAPER_MAX_PAGES:-0}" \
+  --max-decks "${SCRAPER_MAX_DECKS:-5000}" \
   --per-tournament "${SCRAPER_PER_TOURNAMENT:-8}" \
   --since "${SCRAPER_SINCE:-2026-01-01}" \
   --category "${BULBAPEDIA_CATEGORY:-Deck archetypes}" \
-  --bulbapedia-max-pages "${BULBAPEDIA_MAX_PAGES:-0}" \
-  --out "${SCRAPER_OUT:-decks}" \
+  --bulbapedia-max-pages "${BULBAPEDIA_MAX_PAGES:-200}" \
+  --out "${CARD_DISCOVERY_OUT:-outputs/card_discovery/seen_cards.jsonl.gz}" \
   --verbose \
   "$@"
 

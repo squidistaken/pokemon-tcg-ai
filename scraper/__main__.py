@@ -3,13 +3,22 @@ from __future__ import annotations
 import argparse
 import datetime
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .card_index import CardIndex
-from .card_swapper import CardSwapper, HeuristicCardSwapper, MappingCardSwapper
+from .card_swapper import (
+    DEFAULT_MAPPING_RULE_DIR,
+    CardSwapper,
+    HeuristicCardSwapper,
+    LimitlessProfileLoader,
+    MappingCardSwapper,
+)
+from .discovery import build_canonicalizer
+from .inventory import InventoryCheckpointMismatch, SeenCardInventory
 from .pipeline import RunSummary, process_deck
-from .sources import NETWORK_SOURCES, SOURCES
+from .source_runner import iter_source_events
+from .sources import NETWORK_SOURCES, SOURCES, LimitlessSource
 from .writer import DEFAULT_DECKS_DIR, DeckWriter
 
 STRATEGY_DIRS = {
@@ -68,6 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--until", help="Keep tournaments on/before YYYY-MM-DD (limitless)")
     p.add_argument("--pages", help="Comma-separated wiki page titles (bulbapedia)")
     p.add_argument("--category", help="Wiki category to enumerate (bulbapedia)")
+    p.add_argument(
+        "--bulbapedia-max-pages",
+        type=int,
+        default=20,
+        help="Maximum Bulbapedia category pages; 0 = until exhausted",
+    )
     p.add_argument("--input", help="Decklist text file (text source)")
     p.add_argument("--name", help="Archetype/deck name (text source)")
     p.add_argument("--out", default=DEFAULT_DECKS_DIR, help="Output decks directory")
@@ -92,6 +107,17 @@ def build_parser() -> argparse.ArgumentParser:
         default="heuristic",
         help="Fallback resolver(s); 'all' writes isolated strategy subfolders",
     )
+    p.add_argument(
+        "--card-swap-map",
+        type=Path,
+        default=DEFAULT_MAPPING_RULE_DIR,
+        help="Directory containing versioned reviewed mapping-rule JSON fragments",
+    )
+    p.add_argument(
+        "--mapping-gap-out",
+        type=Path,
+        help="Mapping gap inventory (default: <out>/mapping-gaps.jsonl.gz)",
+    )
     return p
 
 
@@ -113,35 +139,46 @@ def _source_kwargs(args) -> dict:
         "until": args.until,
         "pages": [s.strip() for s in args.pages.split(",")] if args.pages else None,
         "category": args.category,
+        "bulbapedia_max_pages": args.bulbapedia_max_pages,
         "input": args.input,
         "archetype": args.name,
         "verbose": args.verbose,
     }
 
 
-def _resolution_runs(args, index: CardIndex) -> list[ResolutionRun]:
+def _resolution_runs(
+    args, index: CardIndex, profile_loader: LimitlessProfileLoader | None = None
+) -> list[ResolutionRun]:
     names = (
         ("mapping", "heuristic")
         if args.card_swap_strategy == "all"
         else (args.card_swap_strategy,)
     )
-    swappers: dict[str, CardSwapper] = {
-        "mapping": MappingCardSwapper(index),
-        "heuristic": HeuristicCardSwapper(index),
-    }
-    return [
-        ResolutionRun(
-            name=name,
-            swapper=None if args.disable_card_swap else swappers[name],
-            writer=DeckWriter(
-                str(Path(args.out) / STRATEGY_DIRS[name])
-                if len(names) > 1
-                else args.out
-            ),
-            summary=RunSummary(),
+    runs: list[ResolutionRun] = []
+    for name in names:
+        swapper: CardSwapper | None = None
+        if not args.disable_card_swap:
+            if name == "mapping":
+                swapper = MappingCardSwapper(
+                    index,
+                    args.card_swap_map,
+                    profile_loader.canonical_set_code if profile_loader else None,
+                )
+            else:
+                swapper = HeuristicCardSwapper(index, profile_loader)
+        runs.append(
+            ResolutionRun(
+                name=name,
+                swapper=swapper,
+                writer=DeckWriter(
+                    str(Path(args.out) / STRATEGY_DIRS[name])
+                    if len(names) > 1
+                    else args.out
+                ),
+                summary=RunSummary(),
+            )
         )
-        for name in names
-    ]
+    return runs
 
 
 def _print_summary(run: ResolutionRun, *, verbose: bool, labelled: bool) -> None:
@@ -178,37 +215,96 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
 
-    index = CardIndex()
-    runs = _resolution_runs(args, index)
-    today = datetime.date.today().isoformat()  # noqa: DTZ011 - local run date is fine for a scrape label
-    kwargs = _source_kwargs(args)
+    sources = {name: SOURCES[name]() for name in source_names}
+    limitless = sources.get("limitless")
+    if isinstance(limitless, LimitlessSource):
+        # The source API and card-profile requests share one thread-safe limiter.
+        profile_loader = LimitlessProfileLoader(client=limitless.client)
+    else:
+        profile_loader = LimitlessProfileLoader()
 
+    index = CardIndex()
+    runs = _resolution_runs(args, index, profile_loader)
+    mapping_run = next((run for run in runs if run.name == "mapping"), None)
+    mapping_swapper = (
+        mapping_run.swapper
+        if mapping_run is not None
+        and isinstance(mapping_run.swapper, MappingCardSwapper)
+        else None
+    )
+    gap_inventory: SeenCardInventory | None = None
+    gap_path = args.mapping_gap_out or Path(args.out) / "mapping-gaps.jsonl.gz"
+    if mapping_run is not None and not args.disable_card_swap and not args.dry_run:
+        assert mapping_swapper is not None
+        gap_inventory = SeenCardInventory(
+            index,
+            build_canonicalizer(profile_loader),
+            profile_loader,
+            checkpoint_label=f"mapping-rules:{mapping_swapper.rules.fingerprint}",
+        )
+        if gap_path.exists():
+            try:
+                gap_inventory.merge_file(gap_path)
+                gap_inventory.refresh_metadata_errors()
+            except InventoryCheckpointMismatch:
+                print("  mapping rules changed; starting a fresh gap inventory")
+        gap_inventory.write(gap_path)
+    gap_decks = 0
+    had_source_errors = False
+    today = datetime.date.today().isoformat()  # noqa: DTZ011 - local run date is fine for a scrape label
     for name in source_names:
-        source = SOURCES[name]()
         print(f"== source: {name} ==")
-        try:
-            for raw in source.iter_decks(**kwargs):
-                for run in runs:
-                    process_deck(
-                        raw,
-                        index,
-                        run.writer,
-                        run.summary,
-                        dry_run=args.dry_run,
-                        verbose=args.verbose,
-                        date=today,
-                        warn_impossible_evolutions=args.warn_impossible_evolutions,
-                        swapper=run.swapper,
-                    )
-        except Exception as e:  # noqa: BLE001 - report and continue with what we have
-            print(f"  source {name!r} error: {e}", file=sys.stderr)
+    for event in iter_source_events(sources, _source_kwargs(args)):
+        if event.error is not None:
+            had_source_errors = True
+            print(f"  source {event.source!r} error: {event.error}", file=sys.stderr)
+            continue
+        if event.deck is None:
+            continue
+        if gap_inventory is not None and mapping_swapper is not None:
+            gaps = [
+                card
+                for card in event.deck.cards
+                if index.match(card.name, card.set_code, card.number).card_id is None
+                and not mapping_swapper.resolve(card)
+            ]
+            try:
+                gap_observed = gaps and gap_inventory.observe(
+                    replace(event.deck, cards=gaps)
+                )
+            except Exception as exc:  # noqa: BLE001 - preserve decks; retry gaps later
+                had_source_errors = True
+                print(
+                    f"  mapping gap inventory error for [{event.source}] "
+                    f"{event.deck.archetype}: {exc}",
+                    file=sys.stderr,
+                )
+            else:
+                if gap_observed:
+                    gap_decks += 1
+                    if gap_decks % 100 == 0:
+                        gap_inventory.write(gap_path)
+        for run in runs:
+            process_deck(
+                event.deck,
+                index,
+                run.writer,
+                run.summary,
+                dry_run=args.dry_run,
+                verbose=args.verbose,
+                date=today,
+                warn_impossible_evolutions=args.warn_impossible_evolutions,
+                swapper=run.swapper,
+            )
 
     if not args.dry_run:
         for run in runs:
             run.writer.ensure_manifest()
+        if gap_inventory is not None:
+            gap_inventory.write(gap_path)
     for run in runs:
         _print_summary(run, verbose=args.verbose, labelled=len(runs) > 1)
-    return 0
+    return 1 if had_source_errors else 0
 
 
 if __name__ == "__main__":

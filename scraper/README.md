@@ -30,8 +30,12 @@ python -m scraper --source bulbapedia --pages "Abyss (TCG),Aurora Blast (TCG)"
 # Import a decklist you pasted into a file
 python -m scraper --source text --input mylist.txt --name my-deck
 
-# Run every network source (local text imports still require --source text --input ...)
-python -m scraper --source all --limit 20
+# Run every network source concurrently (text still requires --source text --input)
+python -m scraper --source all --limit 20 --bulbapedia-max-pages 20
+
+# Fetch card research data only; no deck CSVs or strategy manifests are written
+python -m scraper.discovery --source all --max-decks 5000 \
+    --bulbapedia-max-pages 200
 
 # Fetch once and write isolated mapping/heuristic corpora with separate manifests
 python -m scraper --source all --card-swap-strategy all --out decks
@@ -46,6 +50,9 @@ Three things bound the yield, and they multiply:
 | Tournaments per page | `--limit` | The API does not cap this; 500 works. |
 | Pages walked | `--max-pages` | Newest-first; paging reaches back years. `0` = until exhausted. |
 | Decks per tournament | `--per-tournament` | Best finish first. `0` = every published list. |
+
+Bulbapedia has its own `--bulbapedia-max-pages` bound. Set it to `0` to follow
+MediaWiki continuation until the configured category is exhausted.
 
 Every player who publishes a list is available — a 220-player event exposes 220
 decklists — so the default `--per-tournament 8` takes about **10%** of what's there.
@@ -79,6 +86,8 @@ Energy: 35
   header. This matches `main.read_deck_csv()` and the engine loader exactly, so
   a generated deck can be dropped in as `deck.csv` and submitted unchanged.
 - `decks/manifest.json` — the corpus's provenance record (see below).
+- `decks/mapping-gaps.jsonl.gz` — source printings not covered by the reviewed
+  mapper during mapping/all production runs.
 
 Decks are **deduplicated** by card multiset, and any deck that references a card
 outside our card database (unavailable expansion) is **dropped** with a logged

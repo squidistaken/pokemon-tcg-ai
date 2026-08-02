@@ -69,7 +69,7 @@ def resolve_deck(
 
     def assign(offset: int, current_ace_count: int) -> bool:
         if offset == len(assignable):
-            return True
+            return _mapping_evolutions_are_coherent(assignments, index)
         position, card, candidates = assignable[offset]
         copies = max(0, card.count)
         for candidate in candidates:
@@ -94,7 +94,8 @@ def resolve_deck(
     failures: list[str] = []
     if assignable and not assigned:
         failures.append(
-            "no complete swap assignment satisfies copy-count and ACE SPEC guards"
+            "no complete swap assignment satisfies copy-count, ACE SPEC, and "
+            "evolution guards"
         )
 
     unresolved_positions = {position for position, _, _ in pending}
@@ -121,3 +122,66 @@ def resolve_deck(
         swaps=swaps,
         swap_failures=failures,
     )
+
+
+def _mapping_evolutions_are_coherent(
+    assignments: dict[int, CardSwap],
+    index: CardIndex,
+) -> bool:
+    """Preserve source evolution links for reviewed cross-species families.
+
+    Every mapped Stage 1/2 target must have a lower-stage target selected from the
+    same reviewed family, and that target must be an actual ancestor. A Stage 2
+    may link transitively to a Basic, preserving Rare Candy-style chains without
+    letting an unrelated exact Pokémon satisfy the family guard.
+    """
+    for candidate in assignments.values():
+        if candidate.family_id is None:
+            continue
+        target_stage = index.by_id[candidate.target_id].stage
+        target_rank = _evolution_rank(target_stage)
+        if target_rank == 0:
+            continue
+        lower_family_targets = [
+            other.target_id
+            for other in assignments.values()
+            if other.family_id == candidate.family_id
+            and _evolution_rank(index.by_id[other.target_id].stage) < target_rank
+        ]
+        if not lower_family_targets or not any(
+            _is_target_ancestor(lower_id, candidate.target_id, index)
+            for lower_id in lower_family_targets
+        ):
+            return False
+    return True
+
+
+def _evolution_rank(stage: str) -> int:
+    normalized = normalize_name(stage)
+    if normalized == "basic pokemon":
+        return 0
+    if normalized == "stage 1 pokemon":
+        return 1
+    if normalized == "stage 2 pokemon":
+        return 2
+    return 0
+
+
+def _is_target_ancestor(ancestor_id: int, descendant_id: int, index: CardIndex) -> bool:
+    """Return whether one selected target belongs below another's evolution line."""
+    wanted = normalize_name(index.by_id[ancestor_id].name)
+    pending = [index.by_id[descendant_id].previous_stage]
+    visited: set[str] = set()
+    while pending:
+        name = pending.pop()
+        normalized = normalize_name(name or "")
+        if not normalized or normalized in visited:
+            continue
+        if normalized == wanted:
+            return True
+        visited.add(normalized)
+        pending.extend(
+            index.by_id[card_id].previous_stage
+            for card_id in index.candidates_for_name(name or "")
+        )
+    return False

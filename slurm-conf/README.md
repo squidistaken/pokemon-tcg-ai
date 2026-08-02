@@ -56,21 +56,37 @@ and the normal Python training callback performs the locked CSV append.
 
 ## Deck scraping
 
+First submit the 24-hour fetch-only discovery job. It scans at most 5,000
+Limitless decks and 200 Bulbapedia category pages, writes no training decks, and
+atomically checkpoints a resumable research inventory:
+
+```bash
+mkdir -p slurm-conf/logs
+sbatch slurm-conf/discover_cards.sh
+# outputs/card_discovery/seen_cards.jsonl.gz
+```
+
+Download that inventory, complete proposer/reviewer mapping work, and obtain Stef
+or Teun's approval before submitting production.
+
 `scrape_all.sh` submits a 48-hour job to the regular CPU partition and runs every
-network-backed deck source via `--source all` (Limitless and Bulbapedia). Each
+network-backed deck source concurrently via `--source all` (Limitless and
+Bulbapedia). Each
 source deck is resolved through both strategies in the same fetch pass, producing
 `decks/mapping-resolved/manifest.json` and
 `decks/heuristic-resolved/manifest.json`:
 
 ```bash
-./slurm-conf/scrape_all.sh
+mkdir -p slurm-conf/logs
+sbatch slurm-conf/scrape_all.sh
 ```
 
-The defaults fetch Limitless events since 2026-01-01 and Bulbapedia's
-`Deck archetypes` category. Bounds can be changed through `SCRAPER_LIMIT`,
-`SCRAPER_MAX_PAGES`, `SCRAPER_MAX_DECKS`, `SCRAPER_PER_TOURNAMENT`,
-`SCRAPER_SINCE`, `BULBAPEDIA_CATEGORY`, and `SCRAPER_OUT`. Additional arguments
-are appended to the scraper command.
+Production fetches Limitless events since 2026-01-01 without a default deck cap
+and follows Bulbapedia's entire `Deck archetypes` category. Bounds can be changed
+through `SCRAPER_LIMIT`, `SCRAPER_MAX_PAGES`, `SCRAPER_PER_TOURNAMENT`,
+`SCRAPER_SINCE`, `BULBAPEDIA_CATEGORY`, `BULBAPEDIA_MAX_PAGES`, and `SCRAPER_OUT`;
+an explicit `--max-decks` may still be appended for a smaller run. Discovery also
+accepts `SCRAPER_MAX_DECKS` (default 5000) and `CARD_DISCOVERY_OUT`.
 
 Multi-deck training and evaluation use the heuristic corpus by default. Select the
 mapping corpus with the top-level Hydra override:

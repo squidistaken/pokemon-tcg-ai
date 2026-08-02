@@ -616,9 +616,13 @@ def test_rescrape_backfills_missing_substitution_provenance(tmp_path):
             count=2,
             target_id=927,
             target_name="Charmeleon",
-            kind="variant",
+            kind="mapping",
             confidence=0.9,
-            rationale="same-name gameplay profile",
+            rationale="reviewed mapping fixture",
+            rule_id="reviewed-rule-1",
+            family_id="family-1",
+            source_stage="Stage 1 Pokémon",
+            source_previous_stage="Charmander",
         )
     )
 
@@ -627,6 +631,10 @@ def test_rescrape_backfills_missing_substitution_provenance(tmp_path):
     assert result.new_observation is False
     observation = next(iter(writer.manifest.decks.values())).observations[0]
     assert observation.substitutions[0]["target_id"] == 927
+    assert observation.substitutions[0]["rule_id"] == "reviewed-rule-1"
+    assert observation.substitutions[0]["family_id"] == "family-1"
+    assert observation.substitutions[0]["source_stage"] == "Stage 1 Pokémon"
+    assert observation.substitutions[0]["source_previous_stage"] == "Charmander"
 
 
 def test_missing_manifest_is_an_empty_one(tmp_path):

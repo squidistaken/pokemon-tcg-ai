@@ -2,15 +2,18 @@
 
 `CardSwapper` defines the strategy interface for resolving an incoming printing
 to a competition Card ID without changing `EN_Card_Data.csv`.
-`HeuristicCardSwapper` implements same-name gameplay-profile matching. If the
-available data does not identify a compatible printing, the card remains
-unresolved and the deck is dropped.
+`HeuristicCardSwapper` implements same-name gameplay-profile matching.
+`MappingCardSwapper` independently loads versioned, human-approved rules from
+`card_mappings/`. Neither strategy falls back to the other. If the selected
+strategy has no defensible resolution, the card remains unresolved and the deck
+is dropped.
 
 ## Resolution order
 
 1. Exact competition set and collection number.
 2. A unique competition printing with the same normalized name.
-3. The closest compatible same-name printing by gameplay profile.
+3. The selected strategy: either the closest compatible same-name gameplay
+   profile or an approved mapping rule.
 4. Unresolved.
 
 The third step is used only when multiple competition Card IDs share the incoming
@@ -85,3 +88,20 @@ their own source-printing provenance.
 
 Team Rocket's Energy is already an exact competition card, so exact-card precedence
 resolves it directly and records no substitution.
+
+## Reviewed mapping rules
+
+Mapping rules are JSON fragments loaded in stable path order. Exact
+name/set/number rules precede optional name fallbacks. Active rules require an
+approved human review, validate every expected target name and Card ID against the
+competition CSV, and preserve their ordered fallback list.
+
+Cross-species Pokémon mappings require an evolution-family identifier and the same
+stage. The deck-level assignment backtracks until existing source evolution links
+remain coherent after mapping. Cross-subtype Energy mappings require an explicit
+rule flag. Ordinary cards cannot target ACE SPEC cards, and the normal copy-count
+and ACE SPEC guards still run after candidate selection.
+
+The 24-hour discovery job provides the research input in
+`outputs/card_discovery/seen_cards.jsonl.gz`. The tracked mapping remains empty
+until proposer/reviewer research is approved by Stef or Teun.
