@@ -1,5 +1,31 @@
 {
+  "schema_version": 2,
   "rules": [
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "babiri-berry-ssp-163",
+      "source_name": "Babiri Berry",
+      "source_number": "163",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SSP",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1164,
+          "expected_name": "Payapa Berry",
+          "mapping_confidence": 3,
+          "rationale": "Both Tools prevent 60 attack damage once and are then discarded. Changing the protected attacker type from Metal to Psychic preserves the full mechanic and numbers but materially shifts matchup coverage."
+        },
+        {
+          "card_id": 1170,
+          "expected_name": "Haban Berry",
+          "mapping_confidence": 3,
+          "rationale": "Both Tools prevent 60 attack damage once and are then discarded. Changing the protected attacker type from Metal to Dragon preserves the full mechanic and numbers but materially shifts matchup coverage."
+        }
+      ]
+    },
     {
       "allow_cross_subtype": false,
       "family_id": null,
@@ -16,6 +42,107 @@
           "expected_name": "Iris’s Fighting Spirit",
           "mapping_confidence": 3,
           "rationale": "Both Supporters draw until the user has 6 cards in hand. Iris's Fighting Spirit requires discarding another card as a play cost, which preserves the draw-to-six effect but materially worsens its card economy and playability."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "calamitous-snowy-mountain-pal-174",
+      "source_name": "Calamitous Snowy Mountain",
+      "source_number": "174",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAL",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1260,
+          "expected_name": "Risky Ruins",
+          "mapping_confidence": 2,
+          "rationale": "Both symmetric Stadiums place 2 damage counters on Basic Pokemon while exempting one type. The different trigger and exempted type materially change when and where the damage applies, but preserve the same disruptive role."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "defiance-vest-par-162",
+      "source_name": "Defiance Vest",
+      "source_number": "162",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAR",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1177,
+          "expected_name": "Sacred Charm",
+          "mapping_confidence": 2,
+          "rationale": "Both Tools reduce attack damage to the attached Pokemon. The reduction changes from 40 while behind on Prizes to 30 against attackers with Abilities, which preserves the defensive role but materially changes its activation condition."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "double-gust-n1-100",
+      "source_name": "Double Gust",
+      "source_number": "100",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "N1",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1124,
+          "expected_name": "Pokémon Catcher",
+          "mapping_confidence": 1,
+          "rationale": "Both Items can gust an opposing Benched Pokemon. The target is coin-dependent and removes Double Gust's forced switch on the user's side, creating a major reliability and board-state difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "electrike-pbl-23",
+      "source_name": "Electrike",
+      "source_number": "23",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PBL",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 374,
+          "expected_name": "Electrike",
+          "mapping_confidence": 2,
+          "rationale": "The target preserves species, stage, type, Weakness, Retreat Cost, and the 30-damage evolution-line role. Losing 10 HP and replacing the source's draw attack with damage is a material utility difference."
+        },
+        {
+          "card_id": 736,
+          "expected_name": "Electrike",
+          "mapping_confidence": 2,
+          "rationale": "The target preserves species, stage, type, HP, Weakness, Retreat Cost, and an inexpensive 30-damage attack. It loses the draw option and incurs self-damage, materially reducing flexibility."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "energy-loto-gri-122",
+      "source_name": "Energy Loto",
+      "source_number": "122",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "GRI",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1119,
+          "expected_name": "Energy Search",
+          "mapping_confidence": 2,
+          "rationale": "Both Items search one Energy into the hand. Searching the whole deck but only for Basic Energy replaces a top-7 search that may take Special Energy, materially changing reliability and coverage."
         }
       ]
     },
@@ -155,6 +282,25 @@
     {
       "allow_cross_subtype": false,
       "family_id": null,
+      "rule_id": "great-catcher-cec-192",
+      "source_name": "Great Catcher",
+      "source_number": "192",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "CEC",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1124,
+          "expected_name": "Pokémon Catcher",
+          "mapping_confidence": 2,
+          "rationale": "Both Items fill the opposing gust role. Replacing a guaranteed GX/EX-only gust with an unrestricted coin-flip gust removes the discard cost but materially changes reliability and target coverage."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
       "rule_id": "guzma-bus-115",
       "source_name": "Guzma",
       "source_number": "115",
@@ -218,6 +364,297 @@
           "expected_name": "Enhanced Hammer",
           "mapping_confidence": 4,
           "rationale": "Both Items unconditionally remove 1 Special Energy attached to an opponent's Pokémon. Enhanced Hammer discards it rather than sending it to the Lost Zone, retaining the immediate denial but allowing later discard recovery."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "mapping-0658e89a6d70d980",
+      "source_name": "muscle band",
+      "source_number": "121",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "XY",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1175,
+          "expected_name": "Brave Bangle",
+          "mapping_confidence": 2,
+          "rationale": "Both Tools increase attack damage to the opposing Active Pokémon. Brave Bangle gives 30 rather than 20 damage but is restricted to Rule-Box-free attackers hitting Pokémon ex."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": "family-cleffa-hs-17-audino",
+      "rule_id": "mapping-0e7a8c69220947a4",
+      "source_name": "cleffa",
+      "source_number": "17",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "HS",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 554,
+          "expected_name": "Audino",
+          "mapping_confidence": 1,
+          "rationale": "Both standalone Colorless Basic Pokémon can fill an early-game hand-refresh slot. Audino costs one Energy, draws only up to six, lacks sleep protection and free retreat, and has much higher HP, so this is only a low-confidence role substitution."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": "family-cleffa-cl-24-audino",
+      "rule_id": "mapping-297df08a57663795",
+      "source_name": "cleffa",
+      "source_number": "24",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "CL",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 554,
+          "expected_name": "Audino",
+          "mapping_confidence": 1,
+          "rationale": "Both standalone Colorless Basic Pokémon can fill an early-game hand-refresh slot. Audino costs one Energy, draws only up to six, lacks sleep protection and free retreat, and has much higher HP, so this is only a low-confidence role substitution."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": "family-cleffa-svp-95-gimmighoul",
+      "rule_id": "mapping-3d7cec776a0c0f6c",
+      "source_name": "cleffa",
+      "source_number": "95",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SVP",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 186,
+          "expected_name": "Gimmighoul",
+          "mapping_confidence": 2,
+          "rationale": "Both ordinary Psychic Basic Pokémon have the same search-for-two-Basic-Energy attack effect. Gimmighoul requires one Energy instead of attacking for free and differs substantially in HP, retreat, and its additional attack."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "mapping-518288fb82a2730c",
+      "source_name": "miss fortune sisters",
+      "source_number": "164",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "LOR",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1186,
+          "expected_name": "Eri",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters inspect a hidden opponent zone and discard Item cards. Eri acts on the hand with a two-Item cap rather than the top five deck cards, so the disruption role is preserved with a material targeting difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "mapping-58f39fce4bce5b7e",
+      "source_name": "beast ring",
+      "source_number": "102",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "FLI",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1135,
+          "expected_name": "Energy Coin",
+          "mapping_confidence": 1,
+          "rationale": "Both Items accelerate Basic Energy from the deck onto a Pokémon. Energy Coin removes the Prize and Ultra Beast restrictions but attaches only one Energy and succeeds on only a double-heads flip, a major effectiveness difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "mapping-60408beb5f3e1e33",
+      "source_name": "warp point",
+      "source_number": "116",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "DP",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1143,
+          "expected_name": "Repel",
+          "mapping_confidence": 2,
+          "rationale": "Both Items make the opponent switch their Active Pokémon and let the opponent choose the replacement. Repel materially differs by not also switching the user's Active Pokémon."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "mapping-937c480ec9db64f2",
+      "source_name": "warp point",
+      "source_number": "126",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "G2",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1143,
+          "expected_name": "Repel",
+          "mapping_confidence": 2,
+          "rationale": "Both Items make the opponent switch their Active Pokémon and let the opponent choose the replacement. Repel materially differs by not also switching the user's Active Pokémon."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "mapping-94d7fb5209d3e494",
+      "source_name": "warp point",
+      "source_number": "88",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "MD",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1143,
+          "expected_name": "Repel",
+          "mapping_confidence": 2,
+          "rationale": "Both Items make the opponent switch their Active Pokémon and let the opponent choose the replacement. Repel materially differs by not also switching the user's Active Pokémon."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "mapping-9fa4c3a9f213c1b2",
+      "source_name": "max elixir",
+      "source_number": "102",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BKP",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1135,
+          "expected_name": "Energy Coin",
+          "mapping_confidence": 2,
+          "rationale": "Both Items attempt to accelerate one Basic Energy from the deck to a Pokémon. Their success condition and eligible targets differ materially: a double-heads full-deck search versus the top six cards and a Benched Basic Pokémon."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": "family-cleffa-n1-20-audino",
+      "rule_id": "mapping-a9431add033e384b",
+      "source_name": "cleffa",
+      "source_number": "20",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "N1",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 554,
+          "expected_name": "Audino",
+          "mapping_confidence": 1,
+          "rationale": "Both Colorless Basic Pokémon offer a one-Energy hand-refill attack. Audino draws to six rather than shuffling and drawing seven, lacks Cleffa's Baby Rule and free retreat, and has much higher HP."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "mapping-bebcfe5c24b7f46e",
+      "source_name": "battle compressor",
+      "source_number": "92",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PHF",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1078,
+          "expected_name": "Hole-Digging Shovel",
+          "mapping_confidence": 1,
+          "rationale": "Both Items put cards from the user's deck into the discard pile. Hole-Digging Shovel is a substantially weaker substitute because it mills two unknown top cards instead of selecting up to three cards."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "mapping-c906f7d4a179c759",
+      "source_name": "brassius",
+      "source_number": "187",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "OBF",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1199,
+          "expected_name": "Lacey",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters shuffle the user's hand into the deck and draw a replacement hand. Lacey draws four or conditionally eight rather than the prior hand size plus one."
+        },
+        {
+          "card_id": 1227,
+          "expected_name": "Lillie's Determination",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters shuffle the user's hand into the deck and draw a replacement hand. Lillie's Determination draws six or conditionally eight rather than the prior hand size plus one."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "mapping-d437fc22959993d7",
+      "source_name": "fiery flint",
+      "source_number": "60",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "DRM",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1119,
+          "expected_name": "Energy Search",
+          "mapping_confidence": 2,
+          "rationale": "Both Items search Basic Energy from the deck into the hand. Energy Search retrieves one Energy without a discard cost instead of up to four Fire Energy after discarding two cards."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "mapping-fdbde0628475b7fa",
+      "source_name": "brigette",
+      "source_number": "134",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BKT",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1210,
+          "expected_name": "Brock’s Scouting",
+          "mapping_confidence": 1,
+          "rationale": "Both Supporters provide early Pokémon setup by searching for Basic Pokémon. Brock's Scouting finds fewer Basics and puts them into the hand rather than directly onto the Bench, a major tempo difference."
         }
       ]
     },
@@ -313,6 +750,289 @@
           "expected_name": "Brock’s Scouting",
           "mapping_confidence": 4,
           "rationale": "Both Supporters search the deck for up to 2 Basic Pokémon and put them into the hand. Brock's Scouting adds an alternative search for 1 Evolution Pokémon without weakening the matching Basic-search mode."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "professor-oaks-research-e1-149",
+      "source_name": "Professor Oak's Research",
+      "source_number": "149",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "E1",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1199,
+          "expected_name": "Lacey",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters shuffle the hand into the deck and draw a replacement hand. Drawing 4 instead of 5, with a late-game increase to 8, is a modest numeric and conditional difference."
+        },
+        {
+          "card_id": 1227,
+          "expected_name": "Lillie's Determination",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters shuffle the hand into the deck and draw a replacement hand. Drawing 6 instead of 5, with an opening-state increase to 8, modestly changes hand size and timing."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": "rerun-014-beldum-cri-family",
+      "rule_id": "rerun-014-beldum-cri-59",
+      "source_name": "Beldum",
+      "source_number": "59",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "CRI",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 85,
+          "expected_name": "Beldum",
+          "mapping_confidence": 2,
+          "rationale": "Both cards are 70-HP single-prize Metal Basic Beldum with matching Weakness, Resistance, and Retreat Cost, and both retain a one-Metal 10-damage attack. The target's other attack costs an additional Colorless Energy, deals 30 more damage, and causes 10 self-damage, which is a material effectiveness change within the same deck slot."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rerun-014-caretaker-twm-144",
+      "source_name": "Caretaker",
+      "source_number": "144",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "TWM",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1181,
+          "expected_name": "Billy & O'Nare",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters draw two cards and add an upside under a condition. The target can draw two more cards when the hand is large instead of recycling itself when Community Center is in play, retaining the core draw mechanic with a different secondary effect."
+        },
+        {
+          "card_id": 1224,
+          "expected_name": "Cheren",
+          "mapping_confidence": 3,
+          "rationale": "Both are generic draw Supporters. Cheren draws one additional card but lacks Caretaker's conditional self-recycling effect, a modest numerical and secondary-effect difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rerun-014-future-booster-energy-capsule-tef-149",
+      "source_name": "Future Booster Energy Capsule",
+      "source_number": "149",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "TEF",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1174,
+          "expected_name": "Air Balloon",
+          "mapping_confidence": 1,
+          "rationale": "Both Pokémon Tools primarily improve mobility by reducing Retreat Cost. Air Balloon applies to any Pokémon but reduces the cost by two rather than guaranteeing free retreat for Future Pokémon, and it omits the source's 20-damage bonus, so it preserves only the broad strategic slot."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rerun-014-level-ball-aor-76",
+      "source_name": "Level Ball",
+      "source_number": "76",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "AOR",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1086,
+          "expected_name": "Buddy-Buddy Poffin",
+          "mapping_confidence": 2,
+          "rationale": "Both Items search for low-HP Pokémon without a discard cost. Buddy-Buddy Poffin can find two cards but requires Basic Pokémon with 70 HP or less and benches them directly, rather than finding one Pokémon with 90 HP or less and putting it into the hand."
+        },
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 2,
+          "rationale": "Both Items search the deck for a Pokémon and put it into the hand. Ultra Ball removes the HP restriction but requires two cards to be discarded, a material resource-cost difference while preserving the search role."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rerun-014-level-ball-bst-129",
+      "source_name": "Level Ball",
+      "source_number": "129",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BST",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1086,
+          "expected_name": "Buddy-Buddy Poffin",
+          "mapping_confidence": 2,
+          "rationale": "Both Items search for low-HP Pokémon without a discard cost. Buddy-Buddy Poffin can find two cards but requires Basic Pokémon with 70 HP or less and benches them directly, rather than finding one Pokémon with 90 HP or less and putting it into the hand."
+        },
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 2,
+          "rationale": "Both Items search the deck for a Pokémon and put it into the hand. Ultra Ball removes the HP restriction but requires two cards to be discarded, a material resource-cost difference while preserving the search role."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rerun-014-level-ball-nxd-89",
+      "source_name": "Level Ball",
+      "source_number": "89",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "NXD",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1086,
+          "expected_name": "Buddy-Buddy Poffin",
+          "mapping_confidence": 2,
+          "rationale": "Both Items search for low-HP Pokémon without a discard cost. Buddy-Buddy Poffin can find two cards but requires Basic Pokémon with 70 HP or less and benches them directly, rather than finding one Pokémon with 90 HP or less and putting it into the hand."
+        },
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 2,
+          "rationale": "Both Items search the deck for a Pokémon and put it into the hand. Ultra Ball removes the HP restriction but requires two cards to be discarded, a material resource-cost difference while preserving the search role."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": "rerun-014-beldum-cri-family",
+      "rule_id": "rerun-014-metang-cri-60",
+      "source_name": "Metang",
+      "source_number": "60",
+      "source_previous_stage": "Beldum",
+      "source_rule": "n/a",
+      "source_set": "CRI",
+      "source_stage": "Stage 1 Pokémon",
+      "targets": [
+        {
+          "card_id": 86,
+          "expected_name": "Metang",
+          "mapping_confidence": 1,
+          "rationale": "Both are 100-HP single-prize Metal Stage 1 Metang evolving from Beldum, with identical Weakness, Resistance, and Retreat Cost. The target keeps the evolution family coherent but replaces the source's attack-focused and defensive effects with Metal Energy acceleration, a major card-level role change."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rerun-014-shauna-xy-127",
+      "source_name": "Shauna",
+      "source_number": "127",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "XY",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1227,
+          "expected_name": "Lillie's Determination",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters shuffle the user's hand into the deck and draw a fixed replacement hand. Lillie's Determination draws six instead of five, with a further increase to eight only when exactly six Prize cards remain."
+        },
+        {
+          "card_id": 1213,
+          "expected_name": "Judge",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters shuffle the user's hand into the deck and draw a replacement hand. Judge draws four rather than five and also resets the opponent's hand, a material additional disruption effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rerun-014-shaymin-ul-8",
+      "source_name": "Shaymin",
+      "source_number": "8",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "UL",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 1013,
+          "expected_name": "Shaymin",
+          "mapping_confidence": 1,
+          "rationale": "Both are 70-HP single-prize Grass Basic Shaymin that support a team's Energy. The source moves already attached Energy through a Bench-triggered Ability and supplies spread healing, whereas the target must attack to search and accelerate one Energy to a Benched Grass Pokémon, preserving only the broad support slot."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rerun-014-strong-energy-ffi-104",
+      "source_name": "Strong Energy",
+      "source_number": "104",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "FFI",
+      "source_stage": "Special Energy",
+      "targets": [
+        {
+          "card_id": 20,
+          "expected_name": "Rock Fighting Energy",
+          "mapping_confidence": 1,
+          "rationale": "Both Special Energy cards attach to Fighting Pokémon and provide Fighting Energy. The source boosts attack damage, while the target instead prevents non-damage effects of opposing attacks, preserving the Energy slot but substantially changing its secondary utility."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rerun-014-teammates-prc-141",
+      "source_name": "Teammates",
+      "source_number": "141",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PRC",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1193,
+          "expected_name": "Hassel",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters share the condition that one of the user's Pokémon was Knocked Out during the opponent's previous turn and then provide card recovery. Hassel selects up to three cards only from the top eight rather than searching the full deck for two, materially reducing precision."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rerun-014-volcanion-sts-25",
+      "source_name": "Volcanion",
+      "source_number": "25",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "STS",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 663,
+          "expected_name": "Volcanion",
+          "mapping_confidence": 1,
+          "rationale": "Both are 130-HP single-prize Fire Basic Volcanion with matching Weakness and Retreat Cost and Fire-Energy interactions in their attacks. The source accelerates discarded Energy to the Bench, while the target burns or returns its attached Energy to the hand, a major strategic difference within the same Pokémon slot."
         }
       ]
     },
@@ -1167,6 +1887,253 @@
     {
       "allow_cross_subtype": false,
       "family_id": null,
+      "rule_id": "shard-015-abra-mew-63",
+      "source_name": "Abra",
+      "source_number": "63",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "MEW",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 741,
+          "expected_name": "Abra",
+          "mapping_confidence": 2,
+          "rationale": "Both are 50-HP Basic Psychic Abra with a single one-Psychic attack, but the target deals 10 less damage in exchange for switching itself with a Benched Pokémon."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-abra-tr-49",
+      "source_name": "Abra",
+      "source_number": "49",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "TR",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 109,
+          "expected_name": "Abra",
+          "mapping_confidence": 3,
+          "rationale": "Both are low-HP Basic Psychic Abra with a 10-damage Psychic attack and a self-shuffling effect; the target moves that effect to an Ability, preserves attachments, and removes the paralysis chance."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-charmander-ar-59",
+      "source_name": "Charmander",
+      "source_number": "59",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "AR",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 788,
+          "expected_name": "Charmander",
+          "mapping_confidence": 1,
+          "rationale": "Both preserve the Basic Fire Charmander evolution slot and a 20-damage attack, but the target replaces the source's Basic Fire Pokémon search attack with a retreat-focused Ability."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-charmander-obf-26",
+      "source_name": "Charmander",
+      "source_number": "26",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "OBF",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 926,
+          "expected_name": "Charmander",
+          "mapping_confidence": 2,
+          "rationale": "Both are Basic Fire Charmander attacking for 30, while the target gains 20 HP and avoids self-damage but requires a second Energy."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-charmander-paf-7",
+      "source_name": "Charmander",
+      "source_number": "7",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAF",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 926,
+          "expected_name": "Charmander",
+          "mapping_confidence": 3,
+          "rationale": "Both are Basic Fire Charmander with a two-Energy 30-damage attack; the target gains 10 HP and a more flexible cost but lacks the source's Stadium-discard option."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-charmeleon-ar-35",
+      "source_name": "Charmeleon",
+      "source_number": "35",
+      "source_previous_stage": "Charmander",
+      "source_rule": "n/a",
+      "source_set": "AR",
+      "source_stage": "Stage 1 Pokémon",
+      "targets": [
+        {
+          "card_id": 927,
+          "expected_name": "Charmeleon",
+          "mapping_confidence": 2,
+          "rationale": "Both are ordinary Stage 1 Fire Charmeleon evolving from Charmander and can attack for 50; the target is bulkier and cheaper to attack but loses the source's coin-flip attack."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-charmeleon-mew-5",
+      "source_name": "Charmeleon",
+      "source_number": "5",
+      "source_previous_stage": "Charmander",
+      "source_rule": "n/a",
+      "source_set": "MEW",
+      "source_stage": "Stage 1 Pokémon",
+      "targets": [
+        {
+          "card_id": 927,
+          "expected_name": "Charmeleon",
+          "mapping_confidence": 1,
+          "rationale": "Both are 100-HP ordinary Stage 1 Fire Charmeleon evolving from Charmander, but their attack packages differ substantially in cost, damage, and discard effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-charmeleon-paf-8",
+      "source_name": "Charmeleon",
+      "source_number": "8",
+      "source_previous_stage": "Charmander",
+      "source_rule": "n/a",
+      "source_set": "PAF",
+      "source_stage": "Stage 1 Pokémon",
+      "targets": [
+        {
+          "card_id": 927,
+          "expected_name": "Charmeleon",
+          "mapping_confidence": 2,
+          "rationale": "Both are ordinary Stage 1 Fire Charmeleon evolving from Charmander with a two-Energy 50-damage attack; the target gains 10 HP and a flexible cost but loses Flare Veil."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-cherish-ball-unm-191",
+      "source_name": "Cherish Ball",
+      "source_number": "191",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "UNM",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 2,
+          "rationale": "Both Items search a Pokémon into the hand, but the target searches any Pokémon at the material cost of discarding two cards instead of limiting the search to Pokémon-GX."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-gust-of-wind-bs-93",
+      "source_name": "Gust of Wind",
+      "source_number": "93",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BS",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1124,
+          "expected_name": "Pokémon Catcher",
+          "mapping_confidence": 2,
+          "rationale": "Both Items gust an opposing Benched Pokémon into the Active Spot, but the target succeeds only on a heads coin flip."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-mesagoza-svi-178",
+      "source_name": "Mesagoza",
+      "source_number": "178",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SVI",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1267,
+          "expected_name": "Lumiose City",
+          "mapping_confidence": 1,
+          "rationale": "Both are symmetric once-per-turn Pokémon-search Stadiums, but the target restricts the search to Basics, benches the result directly, guarantees success, and ends the user's turn."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-mistys-determination-bkp-104",
+      "source_name": "Misty's Determination",
+      "source_number": "104",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BKP",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1185,
+          "expected_name": "Explorer’s Guidance",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters inspect the top of the deck and keep selected cards, but the target keeps two of six and discards the rest rather than paying a hand discard to keep one of eight and shuffle the remainder."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-night-maintenance-sw-120",
+      "source_name": "Night Maintenance",
+      "source_number": "120",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SW",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1097,
+          "expected_name": "Night Stretcher",
+          "mapping_confidence": 2,
+          "rationale": "Both Items recover Pokémon or Basic Energy from the discard pile, but the target returns one card to hand rather than shuffling as many as three into the deck."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
       "rule_id": "shard-015-riolu-asc-112",
       "source_name": "riolu",
       "source_number": "112",
@@ -1180,6 +2147,63 @@
           "expected_name": "Riolu",
           "mapping_confidence": 5,
           "rationale": "The printings match as 80 HP Basic Fighting Pokémon with Psychic Weakness, no Resistance, two Retreat Cost, and the one-Fighting Accelerating Stab attack for 30 with the same next-turn reuse restriction."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-riolu-svi-113",
+      "source_name": "Riolu",
+      "source_number": "113",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SVI",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 974,
+          "expected_name": "Riolu",
+          "mapping_confidence": 2,
+          "rationale": "Both are 70-HP Basic Fighting Riolu with Punch, but the target makes Punch stronger and more expensive while removing the source's separate self-damaging attack."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-snom-tef-45",
+      "source_name": "Snom",
+      "source_number": "45",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "TEF",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 865,
+          "expected_name": "Snom",
+          "mapping_confidence": 3,
+          "rationale": "Both are 50-HP Basic Water Snom with a one-Water attack; the target deals 10 more damage but gives up the source's guaranteed Sleep effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-youngster-svi-198",
+      "source_name": "Youngster",
+      "source_number": "198",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SVI",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1227,
+          "expected_name": "Lillie's Determination",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters shuffle the player's hand into the deck and draw a replacement hand; the target draws one more card normally and three more at exactly six remaining Prize cards."
         }
       ]
     },
@@ -1549,7 +2573,50 @@
           "rationale": "Both unrestricted Items discard opposing Pokémon Tools in play. Tool Scrapper selects up to 2 Tools and may target either player's board, whereas Startling Megaphone discards every opposing Tool, so removal scope changes but the primary disruption is preserved."
         }
       ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "temple-of-sinnoh-asr-155",
+      "source_name": "Temple of Sinnoh",
+      "source_number": "155",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "ASR",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1246,
+          "expected_name": "Jamming Tower",
+          "mapping_confidence": 1,
+          "rationale": "Both are symmetric Stadiums whose strategic slot is suppressing the effects of attached cards. Disabling Pokemon Tools rather than Special Energy is a major difference in the affected resource."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "yamask-scr-62",
+      "source_name": "Yamask",
+      "source_number": "62",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SCR",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 218,
+          "expected_name": "Yamask",
+          "mapping_confidence": 1,
+          "rationale": "The target preserves the same species, stage, type, HP, Weakness, Resistance, Retreat Cost, and evolution slot. Direct low damage replaces flexible damage-counter placement, a major attack-level difference."
+        },
+        {
+          "card_id": 592,
+          "expected_name": "Yamask",
+          "mapping_confidence": 1,
+          "rationale": "The target preserves the same species, stage, type, HP, Weakness, Resistance, Retreat Cost, and evolution slot. A coin-dependent direct attack replaces flexible damage-counter placement, a major attack-level difference."
+        }
+      ]
     }
-  ],
-  "schema_version": 2
+  ]
 }

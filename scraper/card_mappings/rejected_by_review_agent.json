@@ -23,6 +23,25 @@
     {
       "allow_cross_subtype": false,
       "family_id": null,
+      "rule_id": "beast-energy-fli-117",
+      "source_name": "Beast Energy",
+      "source_number": "117",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "FLI",
+      "source_stage": "Special Energy",
+      "targets": [
+        {
+          "card_id": 16,
+          "expected_name": "Prism Energy",
+          "mapping_confidence": 1,
+          "rationale": "Both are Special Energy cards that provide every Energy type only when attached to a restricted class of Pokemon. Prism Energy requires a Basic Pokemon rather than an Ultra Beast and loses the 30-damage bonus, a major strategic difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
       "rule_id": "brooklet-hill-gri-120",
       "source_name": "Brooklet Hill",
       "source_number": "120",
@@ -61,6 +80,25 @@
     {
       "allow_cross_subtype": false,
       "family_id": null,
+      "rule_id": "evosoda-xy-116",
+      "source_name": "Evosoda",
+      "source_number": "116",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "XY",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1079,
+          "expected_name": "Rare Candy",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that evolve a Pokemon directly from a searched or held Evolution card and share first-turn/newly-played restrictions. Rare Candy specifically skips from Basic to Stage 2 and requires the Stage 2 in hand, materially narrowing the evolution path."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
       "rule_id": "nitro-fire-energy-cri-86",
       "source_name": "Nitro Fire Energy",
       "source_number": "86",
@@ -74,6 +112,82 @@
           "expected_name": "Boomerang Energy",
           "mapping_confidence": 3,
           "rationale": "Preserves the Special Energy's defining self-recycling trigger when it is discarded by an attack used by its attached Pokémon, but it provides Colorless rather than Fire Energy and reattaches itself instead of returning to the hand."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "pluspower-bs-84",
+      "source_name": "PlusPower",
+      "source_number": "84",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BS",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1141,
+          "expected_name": "Premium Power Pro",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that increase damage to the opponent's Active Pokemon for the turn. Premium Power Pro gives 30 rather than 10 extra damage but works only for Fighting Pokemon, a material effectiveness and applicability difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "pluspower-dp-109",
+      "source_name": "PlusPower",
+      "source_number": "109",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "DP",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1141,
+          "expected_name": "Premium Power Pro",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that increase damage to the opponent's Active Pokemon for the turn. Premium Power Pro gives 30 rather than 10 extra damage but works only for Fighting Pokemon, a material effectiveness and applicability difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "pluspower-pl-112",
+      "source_name": "PlusPower",
+      "source_number": "112",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PL",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1141,
+          "expected_name": "Premium Power Pro",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that increase damage to the opponent's Active Pokemon for the turn. Premium Power Pro gives 30 rather than 10 extra damage but works only for Fighting Pokemon, a material effectiveness and applicability difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "pluspower-sw-121",
+      "source_name": "PlusPower",
+      "source_number": "121",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SW",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1141,
+          "expected_name": "Premium Power Pro",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that increase damage to the opponent's Active Pokemon for the turn. Premium Power Pro gives 30 rather than 10 extra damage but works only for Fighting Pokemon, a material effectiveness and applicability difference."
         }
       ]
     },
@@ -826,6 +940,25 @@
           "expected_name": "Forest of Vitality",
           "mapping_confidence": 4,
           "rationale": "Both Stadiums let each player's Grass Pokémon evolve during the turn those Pokémon are played. Forest of Vitality retains the first-turn evolution prohibition, while Forest of Giant Plants also bypasses it."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-pokemon-league-headquarters-obf-192",
+      "source_name": "Pokémon League Headquarters",
+      "source_number": "192",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "OBF",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1266,
+          "expected_name": "Nighttime Mine",
+          "mapping_confidence": 1,
+          "rationale": "Both are symmetric Stadiums that add one Colorless Energy to attack costs; the affected class changes materially from all Basic Pokémon to Tera Pokémon."
         }
       ]
     },
