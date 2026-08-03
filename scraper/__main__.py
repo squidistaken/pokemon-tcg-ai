@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import os
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -15,7 +16,7 @@ from .card_swapper import (
     MappingCardSwapper,
 )
 from .discovery import build_canonicalizer
-from .inventory import InventoryCheckpointMismatch, SeenCardInventory
+from .inventory import SeenCardInventory
 from .pipeline import RunSummary, process_deck
 from .source_runner import iter_source_events
 from .sources import NETWORK_SOURCES, SOURCES, LimitlessSource
@@ -25,6 +26,14 @@ STRATEGY_DIRS = {
     "mapping": "mapping-resolved",
     "heuristic": "heuristic-resolved",
 }
+
+
+def _fresh_gap_path(out: str | Path) -> Path:
+    """Return a run-specific gap path; production reports never resume older data."""
+    run_id = os.environ.get("SLURM_JOB_ID") or datetime.datetime.now(
+        datetime.UTC
+    ).strftime("%Y%m%dT%H%M%S%fZ")
+    return Path(out) / f"mapping-gaps-{run_id}.jsonl.gz"
 
 
 @dataclass
@@ -114,9 +123,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory containing versioned reviewed mapping-rule JSON fragments",
     )
     p.add_argument(
+        "--use-rejected-mappings",
+        action="store_true",
+        help="Also use rules rejected by the independent agent reviewer",
+    )
+    p.add_argument(
+        "--minimum-mapping-confidence",
+        type=int,
+        choices=range(1, 6),
+        default=1,
+        metavar="1-5",
+        help="Lowest mapping-confidence tier eligible for substitution (default: 1)",
+    )
+    p.add_argument(
         "--mapping-gap-out",
         type=Path,
-        help="Mapping gap inventory (default: <out>/mapping-gaps.jsonl.gz)",
+        help="Fresh mapping gap report path (default: run-specific file under <out>)",
     )
     return p
 
@@ -163,6 +185,8 @@ def _resolution_runs(
                     index,
                     args.card_swap_map,
                     profile_loader.canonical_set_code if profile_loader else None,
+                    use_rejected_mappings=args.use_rejected_mappings,
+                    minimum_mapping_confidence=args.minimum_mapping_confidence,
                 )
             else:
                 swapper = HeuristicCardSwapper(index, profile_loader)
@@ -233,21 +257,21 @@ def main(argv: list[str] | None = None) -> int:
         else None
     )
     gap_inventory: SeenCardInventory | None = None
-    gap_path = args.mapping_gap_out or Path(args.out) / "mapping-gaps.jsonl.gz"
+    gap_path = args.mapping_gap_out or _fresh_gap_path(args.out)
     if mapping_run is not None and not args.disable_card_swap and not args.dry_run:
         assert mapping_swapper is not None
+        if gap_path.exists():
+            print(
+                f"mapping gap report already exists; refusing to append: {gap_path}",
+                file=sys.stderr,
+            )
+            return 2
         gap_inventory = SeenCardInventory(
             index,
             build_canonicalizer(profile_loader),
             profile_loader,
             checkpoint_label=f"mapping-rules:{mapping_swapper.rules.fingerprint}",
         )
-        if gap_path.exists():
-            try:
-                gap_inventory.merge_file(gap_path)
-                gap_inventory.refresh_metadata_errors()
-            except InventoryCheckpointMismatch:
-                print("  mapping rules changed; starting a fresh gap inventory")
         gap_inventory.write(gap_path)
     gap_decks = 0
     had_source_errors = False

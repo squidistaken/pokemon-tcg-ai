@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .card_index import CardIndex, normalize_name, normalize_number
 from .card_swapper import LimitlessProfileLoader
-from .inventory import CanonicalPrinting, SeenCardInventory
+from .inventory import CanonicalPrinting, SeenCardInventory, resolve_inventory_path
 from .models import RawCard
 from .source_runner import iter_source_events
 from .sources import NETWORK_SOURCES, LimitlessSource
@@ -99,8 +99,12 @@ def main(argv: list[str] | None = None) -> int:
     inventory = SeenCardInventory(
         CardIndex(), build_canonicalizer(profile_loader), profile_loader
     )
-    if args.out.exists():
-        inventory.merge_file(args.out)
+    try:
+        existing_inventory = resolve_inventory_path(args.out)
+    except FileNotFoundError:
+        existing_inventory = None
+    if existing_inventory is not None:
+        inventory.merge_file(existing_inventory)
         inventory.refresh_metadata_errors()
 
     new_decks = 0

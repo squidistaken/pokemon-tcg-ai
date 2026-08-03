@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import gzip
+
 from scraper import discovery
 from scraper.inventory import read_inventory
 from scraper.models import RawCard, RawDeck
@@ -50,6 +52,24 @@ def test_discovery_writes_inventory_only_and_resumes_idempotently(
     assert record.counts_by_source["fake"].decks == 1
     assert not list(tmp_path.rglob("*.csv"))
     assert not list(tmp_path.rglob("manifest.json"))
+
+
+def test_discovery_resumes_from_macos_decompressed_inventory(tmp_path, monkeypatch):
+    monkeypatch.setattr(discovery, "NETWORK_SOURCES", {"fake": FakeSource})
+    monkeypatch.setattr(discovery, "LimitlessProfileLoader", FakeProfileLoader)
+    compressed = tmp_path / "seen_cards.jsonl.gz"
+    plain = tmp_path / "seen_cards.jsonl"
+    args = ["--source", "all", "--out", str(compressed)]
+
+    assert discovery.main(args) == 0
+    plain.write_bytes(gzip.decompress(compressed.read_bytes()))
+    compressed.unlink()
+
+    assert discovery.main(args) == 0
+    assert compressed.exists()
+    assert gzip.decompress(compressed.read_bytes()) == plain.read_bytes()
+    (record,) = read_inventory(compressed)
+    assert record.counts_by_source["fake"].decks == 1
 
 
 def test_negative_checkpoint_interval_fails_before_fetching(monkeypatch):

@@ -86,8 +86,9 @@ Energy: 35
   header. This matches `main.read_deck_csv()` and the engine loader exactly, so
   a generated deck can be dropped in as `deck.csv` and submitted unchanged.
 - `decks/manifest.json` — the corpus's provenance record (see below).
-- `decks/mapping-gaps.jsonl.gz` — source printings not covered by the reviewed
-  mapper during mapping/all production runs.
+- `decks/mapping-gaps-<run-id>.jsonl.gz` — a fresh, run-specific report of source
+  printings not covered by the reviewed mapper. Production never appends to a
+  previous gap inventory.
 
 Decks are **deduplicated** by card multiset, and any deck that references a card
 outside our card database (unavailable expansion) is **dropped** with a logged

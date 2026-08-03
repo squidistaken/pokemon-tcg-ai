@@ -55,9 +55,10 @@ class CardSwap:
     count: int
     target_id: int
     target_name: str
-    kind: str  # "variant"
-    confidence: float
+    kind: str  # "variant" | "mapping"
+    confidence: float | None
     rationale: str
+    mapping_confidence: int | None = None
     rule_id: str | None = None
     family_id: str | None = None
     source_stage: str | None = None
@@ -73,9 +74,12 @@ class CardSwap:
             "target_id": self.target_id,
             "target_name": self.target_name,
             "kind": self.kind,
-            "confidence": self.confidence,
             "rationale": self.rationale,
         }
+        if self.confidence is not None:
+            result["confidence"] = self.confidence
+        if self.mapping_confidence is not None:
+            result["mapping_confidence"] = self.mapping_confidence
         if self.rule_id is not None:
             result["rule_id"] = self.rule_id
         if self.family_id is not None:

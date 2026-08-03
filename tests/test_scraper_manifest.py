@@ -617,8 +617,9 @@ def test_rescrape_backfills_missing_substitution_provenance(tmp_path):
             target_id=927,
             target_name="Charmeleon",
             kind="mapping",
-            confidence=0.9,
+            confidence=None,
             rationale="reviewed mapping fixture",
+            mapping_confidence=4,
             rule_id="reviewed-rule-1",
             family_id="family-1",
             source_stage="Stage 1 Pokémon",
@@ -635,6 +636,8 @@ def test_rescrape_backfills_missing_substitution_provenance(tmp_path):
     assert observation.substitutions[0]["family_id"] == "family-1"
     assert observation.substitutions[0]["source_stage"] == "Stage 1 Pokémon"
     assert observation.substitutions[0]["source_previous_stage"] == "Charmander"
+    assert observation.substitutions[0]["mapping_confidence"] == 4
+    assert "confidence" not in observation.substitutions[0]
 
 
 def test_missing_manifest_is_an_empty_one(tmp_path):

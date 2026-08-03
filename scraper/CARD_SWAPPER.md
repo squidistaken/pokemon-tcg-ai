@@ -3,10 +3,18 @@
 `CardSwapper` defines the strategy interface for resolving an incoming printing
 to a competition Card ID without changing `EN_Card_Data.csv`.
 `HeuristicCardSwapper` implements same-name gameplay-profile matching.
-`MappingCardSwapper` independently loads versioned, human-approved rules from
+`MappingCardSwapper` independently loads versioned rules from
 `card_mappings/`. Neither strategy falls back to the other. If the selected
 strategy has no defensible resolution, the card remains unresolved and the deck
 is dropped.
+
+`--minimum-mapping-confidence` controls the lowest eligible target tier. The
+production Slurm job sets it to `1`, making all stored targets eligible before the
+normal safety guards run.
+
+The optional `rejected_by_review_agent.json` fragment is excluded by default and
+has the same compact rule schema. `--use-rejected-mappings` includes it for an
+explicit comparison run; production does not pass that flag.
 
 ## Resolution order
 
@@ -16,10 +24,10 @@ is dropped.
    profile or an approved mapping rule.
 4. Unresolved.
 
-The third step is used only when multiple competition Card IDs share the incoming
-name. The source printing is fetched from Limitless by set and collection number.
-Its HTML is cached under ignored `outputs/card_swap_cache/`; it is never written to
-a deck file or added to the training data.
+The third step is used whenever ordinary lookup remains unresolved or ambiguous.
+When source metadata is needed, the printing is fetched from Limitless by set and
+collection number. Its HTML is cached under ignored `outputs/card_swap_cache/`; it
+is never written to a deck file or added to the training data.
 
 ## Gameplay profiles
 
@@ -82,19 +90,18 @@ would exceed the four-copy or ACE SPEC limits. The normal validator then checks 
 complete post-resolution deck before it can be written.
 
 Every selected variant is stored on its manifest observation under `substitutions`,
-including source set/number, copy count, target ID/name, confidence, and the score
-used for the decision. Different observations of the same final deck therefore keep
-their own source-printing provenance.
+including source set/number, copy count, target ID/name, and either heuristic
+similarity or the explicit mapper's 1–5 confidence. Different observations of the
+same final deck therefore keep their own source-printing provenance.
 
 Team Rocket's Energy is already an exact competition card, so exact-card precedence
 resolves it directly and records no substitution.
 
-## Reviewed mapping rules
+## Mapping rules
 
-Mapping rules are JSON fragments loaded in stable path order. Exact
-name/set/number rules precede optional name fallbacks. Active rules require an
-approved human review, validate every expected target name and Card ID against the
-competition CSV, and preserve their ordered fallback list.
+Mapping rules are JSON fragments loaded in stable path order. Only exact
+name/set/number rules are supported. Every expected target name and Card ID is
+validated against the competition CSV, and ordered fallback lists are preserved.
 
 Cross-species Pokémon mappings require an evolution-family identifier and the same
 stage. The deck-level assignment backtracks until existing source evolution links
@@ -103,5 +110,5 @@ rule flag. Ordinary cards cannot target ACE SPEC cards, and the normal copy-coun
 and ACE SPEC guards still run after candidate selection.
 
 The 6-hour discovery job provides the research input in
-`outputs/card_discovery/seen_cards.jsonl.gz`. The tracked mapping remains empty
-until proposer/reviewer research is approved by Stef or Teun.
+`outputs/card_discovery/seen_cards.jsonl.gz`. Only mappings accepted by the
+proposer/reviewer research pass are stored in the tracked production mapping.

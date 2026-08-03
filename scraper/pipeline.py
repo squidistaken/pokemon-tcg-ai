@@ -103,9 +103,18 @@ def process_deck(
 
     if verbose and resolved.swaps:
         for swap in resolved.swaps:
+            confidence = (
+                f"mapping confidence {swap.mapping_confidence}/5"
+                if swap.mapping_confidence is not None
+                else (
+                    f"confidence {swap.confidence:.2f}"
+                    if swap.confidence is not None
+                    else "confidence unavailable"
+                )
+            )
             print(
                 f"  {swap.kind}: {swap.source_name!r} -> {swap.target_name!r} "
-                f"(ID {swap.target_id}, confidence {swap.confidence:.2f})"
+                f"(ID {swap.target_id}, {confidence})"
             )
     if verbose and resolved.swap_failures:
         for failure in resolved.swap_failures:

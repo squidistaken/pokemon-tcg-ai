@@ -1,4 +1,1555 @@
 {
-  "schema_version": 1,
-  "rules": []
+  "rules": [
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "bianca-epo-90",
+      "source_name": "Bianca",
+      "source_number": "90",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "EPO",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1208,
+          "expected_name": "Iris’s Fighting Spirit",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters draw until the user has 6 cards in hand. Iris's Fighting Spirit requires discarding another card as a play cost, which preserves the draw-to-six effect but materially worsens its card economy and playability."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "energy-removal-bs-92",
+      "source_name": "Energy Removal",
+      "source_number": "92",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BS",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1081,
+          "expected_name": "Enhanced Hammer",
+          "mapping_confidence": 3,
+          "rationale": "Both Items discard Energy from an opponent's Pokémon without a coin flip or other play condition. Enhanced Hammer is limited to Special Energy rather than any Energy, materially narrowing targets while retaining direct Energy denial."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "erikas-hospitality-teu-140",
+      "source_name": "Erika's Hospitality",
+      "source_number": "140",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "TEU",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1187,
+          "expected_name": "Morty’s Conviction",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters draw a number of cards scaled by the opponent's Pokémon in play. Morty's Conviction counts only the Bench and requires a discard, whereas Erika's Hospitality also counts the Active and instead requires a hand of 5 or fewer including itself, changing cost and ceiling but retaining opponent-board-scaled draw."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "escape-board-upr-122",
+      "source_name": "Escape Board",
+      "source_number": "122",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "UPR",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1157,
+          "expected_name": "Rescue Board",
+          "mapping_confidence": 3,
+          "rationale": "Both Tools always reduce the attached Pokémon's Retreat Cost by 1 Colorless. Rescue Board replaces permission to retreat while Asleep or Paralyzed with free retreat at 30 HP or less, so the baseline mobility is shared but the situational benefit differs."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "field-blower-gri-125",
+      "source_name": "Field Blower",
+      "source_number": "125",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "GRI",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1137,
+          "expected_name": "Tool Scrapper",
+          "mapping_confidence": 3,
+          "rationale": "Both unrestricted Items choose and discard up to 2 Pokémon Tools from either player's board. Tool Scrapper lacks Field Blower's additional Stadium-removal choice, so the Tool-removal mode is retained but the source's broader board control is not."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "great-ball-pal-183",
+      "source_name": "Great Ball",
+      "source_number": "183",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAL",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1102,
+          "expected_name": "Dusk Ball",
+          "mapping_confidence": 4,
+          "rationale": "Both Items inspect exactly 7 deck cards, optionally take 1 Pokémon, and shuffle the remainder back. Dusk Ball inspects the bottom rather than the top, a narrow but real difference when deck order is known or manipulated."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "great-ball-slg-60",
+      "source_name": "Great Ball",
+      "source_number": "60",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SLG",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1102,
+          "expected_name": "Dusk Ball",
+          "mapping_confidence": 4,
+          "rationale": "Both Items inspect exactly 7 deck cards, optionally take 1 Pokémon, and shuffle the remainder back. Dusk Ball inspects the bottom rather than the top, a narrow but real difference when deck order is known or manipulated."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "great-ball-ssh-164",
+      "source_name": "Great Ball",
+      "source_number": "164",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SSH",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1102,
+          "expected_name": "Dusk Ball",
+          "mapping_confidence": 4,
+          "rationale": "Both Items inspect exactly 7 deck cards, optionally take 1 Pokémon, and shuffle the remainder back. Dusk Ball inspects the bottom rather than the top, a narrow but real difference when deck order is known or manipulated."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "guzma-bus-115",
+      "source_name": "Guzma",
+      "source_number": "115",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BUS",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1182,
+          "expected_name": "Boss’s Orders",
+          "mapping_confidence": 3,
+          "rationale": "Both unrestricted Supporters force a chosen opposing Benched Pokémon into the Active Spot. Boss's Orders omits Guzma's mandatory follow-up switch of the user's own Active Pokémon, preserving gust control while losing the coupled pivot."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "iono-pal-185",
+      "source_name": "Iono",
+      "source_number": "185",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAL",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1213,
+          "expected_name": "Judge",
+          "mapping_confidence": 2,
+          "rationale": "Both are unrestricted Supporters that replace both players' hands and redraw for both players, preserving Iono's core hand-reset and disruption role. Judge instead shuffles into the deck and always draws four, so it loses Prize-count scaling and materially changes late-game effectiveness."
+        },
+        {
+          "card_id": 1237,
+          "expected_name": "Lucian",
+          "mapping_confidence": 2,
+          "rationale": "Both are unrestricted Supporters that put both players' shuffled hands on the bottom of their decks before both players redraw. Lucian replaces deterministic Prize-count scaling with independent coin flips for three or six cards, materially changing reliability and comeback disruption."
+        },
+        {
+          "card_id": 1223,
+          "expected_name": "Harlequin",
+          "mapping_confidence": 2,
+          "rationale": "Both are unrestricted Supporters that reset and redraw both players' hands, including potentially asymmetric hand sizes. Harlequin shuffles the hands into the decks and uses one coin flip for a five-three split rather than each player's remaining Prize count, materially changing control and timing."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "lost-remover-cl-80",
+      "source_name": "Lost Remover",
+      "source_number": "80",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "CL",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1081,
+          "expected_name": "Enhanced Hammer",
+          "mapping_confidence": 4,
+          "rationale": "Both Items unconditionally remove 1 Special Energy attached to an opponent's Pokémon. Enhanced Hammer discards it rather than sending it to the Lost Zone, retaining the immediate denial but allowing later discard recovery."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "marnie-ssh-169",
+      "source_name": "Marnie",
+      "source_number": "169",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SSH",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1237,
+          "expected_name": "Lucian",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters put both players' hands on the bottom of their decks and redraw for both players. Lucian replaces Marnie's deterministic 5-card user and 4-card opponent hands with independent coin flips for 3 or 6, materially changing reliability and disruption."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "max-potion-epo-94",
+      "source_name": "Max Potion",
+      "source_number": "94",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "EPO",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1112,
+          "expected_name": "Super Potion",
+          "mapping_confidence": 3,
+          "rationale": "Both Items heal 1 of the user's Pokémon and require discarding Energy from that Pokémon. Super Potion caps healing at 60 and discards 1 Energy, while Max Potion heals all damage and discards all attached Energy, preserving the healing-for-Energy tradeoff with materially different scale."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "max-potion-gri-128",
+      "source_name": "Max Potion",
+      "source_number": "128",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "GRI",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1112,
+          "expected_name": "Super Potion",
+          "mapping_confidence": 3,
+          "rationale": "Both Items heal 1 of the user's Pokémon and require discarding Energy from that Pokémon. Super Potion caps healing at 60 and discards 1 Energy, while Max Potion heals all damage and discards all attached Energy, preserving the healing-for-Energy tradeoff with materially different scale."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "pokemon-fan-club-e2-130",
+      "source_name": "Pokémon Fan Club",
+      "source_number": "130",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "E2",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1210,
+          "expected_name": "Brock’s Scouting",
+          "mapping_confidence": 4,
+          "rationale": "Both Supporters search the deck for up to 2 Basic Pokémon and put them into the hand. Brock's Scouting adds an alternative search for 1 Evolution Pokémon without weakening the matching Basic-search mode."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "pokemon-fan-club-flf-94",
+      "source_name": "Pokémon Fan Club",
+      "source_number": "94",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "FLF",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1210,
+          "expected_name": "Brock’s Scouting",
+          "mapping_confidence": 4,
+          "rationale": "Both Supporters search the deck for up to 2 Basic Pokémon and put them into the hand. Brock's Scouting adds an alternative search for 1 Evolution Pokémon without weakening the matching Basic-search mode."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rescue-carrier-evs-154",
+      "source_name": "Rescue Carrier",
+      "source_number": "154",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "EVS",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1097,
+          "expected_name": "Night Stretcher",
+          "mapping_confidence": 3,
+          "rationale": "Both Items immediately return Pokémon from the discard pile to the hand. Night Stretcher returns only 1 rather than up to 2 Pokémon with 90 HP or less, while permitting any Pokémon and offering Basic Energy instead, a material quantity and eligibility tradeoff."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rescue-stretcher-gri-130",
+      "source_name": "Rescue Stretcher",
+      "source_number": "130",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "GRI",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1097,
+          "expected_name": "Night Stretcher",
+          "mapping_confidence": 3,
+          "rationale": "Night Stretcher exactly preserves Rescue Stretcher's immediate mode of returning 1 Pokémon from the discard pile to the hand. Its alternative recovers a Basic Energy instead of shuffling 3 Pokémon into the deck, so only the secondary mode changes."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rosa-cec-204",
+      "source_name": "Rosa",
+      "source_number": "204",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "CEC",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1206,
+          "expected_name": "Larry’s Skill",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters search the deck simultaneously for a Pokémon, a Trainer-category card, and a Basic Energy. Larry's Skill narrows Trainer to Supporter and discards the user's hand instead of requiring a Knock Out on the prior turn, preserving the distinctive three-part search with a major timing and resource-cost change."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "saguaro-pal-187",
+      "source_name": "Saguaro",
+      "source_number": "187",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAL",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1222,
+          "expected_name": "Fennel",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters heal multiple Pokémon without a separate play condition. Fennel heals 40 from every Pokémon rather than 50 from up to 2 chosen Pokémon, retaining spread healing while changing both per-target amount and board-wide reach."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-003-arven-obf-186",
+      "source_name": "arven",
+      "source_number": "186",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "OBF",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1219,
+          "expected_name": "Team Rocket's Petrel",
+          "mapping_confidence": 2,
+          "rationale": "Both cards are unconditional Supporters that directly search the deck for Trainer cards. Petrel can retrieve either an Item or a Pokemon Tool and therefore preserves targeted Trainer access, but it returns only one card instead of Arven's simultaneous Item-plus-Tool pair; that material loss in search yield warrants confidence 2."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-003-arven-svi-166",
+      "source_name": "arven",
+      "source_number": "166",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SVI",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1219,
+          "expected_name": "Team Rocket's Petrel",
+          "mapping_confidence": 2,
+          "rationale": "Both cards are unconditional Supporters that directly search the deck for Trainer cards. Petrel can retrieve either an Item or a Pokemon Tool and therefore preserves targeted Trainer access, but it returns only one card instead of Arven's simultaneous Item-plus-Tool pair; that material loss in search yield warrants confidence 2."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-004-counter-catcher-cin-91",
+      "source_name": "counter catcher",
+      "source_number": "91",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "CIN",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1124,
+          "expected_name": "Pokémon Catcher",
+          "mapping_confidence": 2,
+          "rationale": "Both Items gust one opposing Benched Pokémon. Pokémon Catcher is unrestricted but succeeds only on a heads, whereas Counter Catcher is guaranteed only while behind on Prizes."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-004-counter-catcher-par-160",
+      "source_name": "counter catcher",
+      "source_number": "160",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAR",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1124,
+          "expected_name": "Pokémon Catcher",
+          "mapping_confidence": 2,
+          "rationale": "Both Items gust one opposing Benched Pokémon. Pokémon Catcher is unrestricted but succeeds only on a heads, whereas Counter Catcher is guaranteed only while behind on Prizes."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-005-earthen-vessel-par-163",
+      "source_name": "Earthen Vessel",
+      "source_number": "163",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAR",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1119,
+          "expected_name": "Energy Search",
+          "mapping_confidence": 2,
+          "rationale": "Both Items search Basic Energy into the hand. Energy Search finds one without a cost, while Earthen Vessel discards a card to find up to two, materially changing throughput and discard interaction."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-007-energy-sticker-mew-159",
+      "source_name": "energy sticker",
+      "source_number": "159",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "MEW",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1135,
+          "expected_name": "Energy Coin",
+          "mapping_confidence": 2,
+          "rationale": "Both coin-dependent Items attach one Basic Energy directly to a Pokémon. Energy Coin uses a two-heads deck search for any Pokémon; Energy Sticker uses one heads and the discard pile for a Benched Pokémon."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-007-luminous-energy-pal-191",
+      "source_name": "luminous energy",
+      "source_number": "191",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAL",
+      "source_stage": "Special Energy",
+      "targets": [
+        {
+          "card_id": 16,
+          "expected_name": "Prism Energy",
+          "mapping_confidence": 3,
+          "rationale": "Both Special Energy provide one Energy of every type while their condition holds. Prism Energy requires a Basic Pokémon; Luminous Energy instead fails beside another Special Energy."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-007-rock-guard-plf-108",
+      "source_name": "rock guard",
+      "source_number": "108",
+      "source_previous_stage": null,
+      "source_rule": "ACE SPEC",
+      "source_set": "PLF",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1167,
+          "expected_name": "Deluxe Bomb",
+          "mapping_confidence": 3,
+          "rationale": "Both are ACE SPEC Tools that retaliate with damage counters after the attached Active Pokémon is attacked. Deluxe Bomb places 12 counters then discards itself; Rock Guard places 6 and can remain."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-007-switch-cart-asr-154",
+      "source_name": "switch cart",
+      "source_number": "154",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "ASR",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1123,
+          "expected_name": "Switch",
+          "mapping_confidence": 3,
+          "rationale": "Both Items switch the user's Active Pokémon with a Benched Pokémon. Switch loses the 30-damage heal but removes Switch Cart's Basic-Pokémon restriction."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-007-xerosic-phf-110",
+      "source_name": "xerosic",
+      "source_number": "110",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PHF",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1209,
+          "expected_name": "Ruffian",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters discard attached Tools or Special Energy. Ruffian is opponent-only and removes both categories from one Pokémon, while Xerosic removes one qualifying attachment from either side."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-poke-radar-la-133",
+      "source_name": "Poke Radar",
+      "source_number": "133",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "LA",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1102,
+          "expected_name": "Dusk Ball",
+          "mapping_confidence": 3,
+          "rationale": "Both Items inspect a fixed portion of the deck and move found Pokémon into the hand. Dusk Ball inspects the bottom seven but takes at most one; Poké Radar inspects the top five and can take every Pokémon found."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-skyla-bcr-134",
+      "source_name": "Skyla",
+      "source_number": "134",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BCR",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1219,
+          "expected_name": "Team Rocket's Petrel",
+          "mapping_confidence": 5,
+          "rationale": "Both Supporters have the same unrestricted effect: search the deck for one Trainer card, reveal it, put it into the hand, and shuffle."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-skyla-bkt-148",
+      "source_name": "Skyla",
+      "source_number": "148",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BKT",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1219,
+          "expected_name": "Team Rocket's Petrel",
+          "mapping_confidence": 5,
+          "rationale": "Both Supporters have the same unrestricted effect: search the deck for one Trainer card, reveal it, put it into the hand, and shuffle."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-tepig-blw-15",
+      "source_name": "Tepig",
+      "source_number": "15",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BLW",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 567,
+          "expected_name": "Tepig",
+          "mapping_confidence": 3,
+          "rationale": "Both are Basic Tepig with a one-Fire Tackle for 10 and a second Rollout attack. The target's Rollout costs two Fire and does 30 instead of costing Fire-Colorless and doing 20."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-009-fisherman-bkt-136",
+      "source_name": "fisherman",
+      "source_number": "136",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BKT",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1184,
+          "expected_name": "Lana’s Aid",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters recover Basic Energy from the discard pile directly to the hand. Lana's Aid recovers up to three rather than four, but may spend selections on non-Rule-Box Pokémon."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-009-fisherman-e3-125",
+      "source_name": "fisherman",
+      "source_number": "125",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "E3",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1184,
+          "expected_name": "Lana’s Aid",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters recover Basic Energy from the discard pile directly to the hand. Lana's Aid recovers up to three rather than four, but may spend selections on non-Rule-Box Pokémon."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-009-lysandre-aor-78",
+      "source_name": "lysandre",
+      "source_number": "78",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "AOR",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1182,
+          "expected_name": "Boss’s Orders",
+          "mapping_confidence": 5,
+          "rationale": "Both Supporters have the same unrestricted effect: switch one opposing Benched Pokémon into the Active Spot."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-009-lysandre-flf-90",
+      "source_name": "lysandre",
+      "source_number": "90",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "FLF",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1182,
+          "expected_name": "Boss’s Orders",
+          "mapping_confidence": 5,
+          "rationale": "Both Supporters have the same unrestricted effect: switch one opposing Benched Pokémon into the Active Spot."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-009-victini-nvi-15",
+      "source_name": "victini",
+      "source_number": "15",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "NVI",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 490,
+          "expected_name": "Victini",
+          "mapping_confidence": 3,
+          "rationale": "Both are Basic Victini whose sole attack fails with four or fewer Benched Pokémon. The target costs two Fire and does 120 instead of Fire-Colorless for 100."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-bill-bs-91",
+      "source_name": "bill",
+      "source_number": "91",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BS",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1181,
+          "expected_name": "Billy & O'Nare",
+          "mapping_confidence": 4,
+          "rationale": "Both Supporters unconditionally draw two cards. Billy & O'Nare conditionally draws two more when the resulting hand reaches ten cards."
+        },
+        {
+          "card_id": 1214,
+          "expected_name": "Emcee's Hype",
+          "mapping_confidence": 4,
+          "rationale": "Both Supporters unconditionally draw two cards. Emcee's Hype conditionally draws two more when the opponent has three or fewer Prizes."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-pokemon-communication-blw-99",
+      "source_name": "pokemon communication",
+      "source_number": "99",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BLW",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 3,
+          "rationale": "Both Items search any Pokémon from the deck into the hand. Ultra Ball discards two arbitrary cards; Pokémon Communication instead returns one revealed Pokémon from the hand to the deck."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-pokemon-communication-hs-98",
+      "source_name": "pokemon communication",
+      "source_number": "98",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "HS",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 3,
+          "rationale": "Both Items search any Pokémon from the deck into the hand. Ultra Ball discards two arbitrary cards; Pokémon Communication instead returns one revealed Pokémon from the hand to the deck."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-pokemon-communication-teu-152",
+      "source_name": "pokemon communication",
+      "source_number": "152",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "TEU",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 3,
+          "rationale": "Both Items search any Pokémon from the deck into the hand. Ultra Ball discards two arbitrary cards; Pokémon Communication instead returns one revealed Pokémon from the hand to the deck."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-twins-tm-89",
+      "source_name": "twins",
+      "source_number": "89",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "TM",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1196,
+          "expected_name": "Cassiopeia",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters search up to two unrestricted cards from the deck into the hand. Cassiopeia requires being the last card in hand; Twins instead requires being behind on Prizes."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-bebes-search-rr-89",
+      "source_name": "Bebe's Search",
+      "source_number": "89",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "RR",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1183,
+          "expected_name": "Perrin",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters exchange cards from the hand through the deck for Pokémon from the deck. Perrin requires the returned cards themselves to be Pokémon and can exchange two, whereas Bebe's Search returns any one card and finds one Pokémon, so the shared tutor mechanic remains but the usable hand states differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-bebes-search-sw-119",
+      "source_name": "Bebe's Search",
+      "source_number": "119",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SW",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1183,
+          "expected_name": "Perrin",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters exchange cards from the hand through the deck for Pokémon from the deck. Perrin requires the returned cards themselves to be Pokémon and can exchange two, whereas Bebe's Search returns any one card and finds one Pokémon, so the shared tutor mechanic remains but the usable hand states differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-escape-rope-bst-125",
+      "source_name": "Escape Rope",
+      "source_number": "125",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BST",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1143,
+          "expected_name": "Repel",
+          "mapping_confidence": 3,
+          "rationale": "Both Items make the opponent choose a Benched Pokémon to become Active. Repel omits Escape Rope's additional switch of the user's Active Pokémon, retaining the opposing forced-switch mechanic while losing a substantial simultaneous pivot effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-escape-rope-bus-114",
+      "source_name": "Escape Rope",
+      "source_number": "114",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BUS",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1143,
+          "expected_name": "Repel",
+          "mapping_confidence": 3,
+          "rationale": "Both Items make the opponent choose a Benched Pokémon to become Active. Repel omits Escape Rope's additional switch of the user's Active Pokémon, retaining the opposing forced-switch mechanic while losing a substantial simultaneous pivot effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-escape-rope-pls-120",
+      "source_name": "Escape Rope",
+      "source_number": "120",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PLS",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1143,
+          "expected_name": "Repel",
+          "mapping_confidence": 3,
+          "rationale": "Both Items make the opponent choose a Benched Pokémon to become Active. Repel omits Escape Rope's additional switch of the user's Active Pokémon, retaining the opposing forced-switch mechanic while losing a substantial simultaneous pivot effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-escape-rope-prc-127",
+      "source_name": "Escape Rope",
+      "source_number": "127",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PRC",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1143,
+          "expected_name": "Repel",
+          "mapping_confidence": 3,
+          "rationale": "Both Items make the opponent choose a Benched Pokémon to become Active. Repel omits Escape Rope's additional switch of the user's Active Pokémon, retaining the opposing forced-switch mechanic while losing a substantial simultaneous pivot effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-luxury-ball-sf-86",
+      "source_name": "Luxury Ball",
+      "source_number": "86",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SF",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 3,
+          "rationale": "Both Items search for one Pokémon without an evolution-stage restriction. Ultra Ball replaces Luxury Ball's discard-pile availability restriction and LV.X exclusion with a mandatory two-card hand discard, a material cost difference within the same universal Pokémon-tutor function."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-mysterious-treasure-fli-113",
+      "source_name": "Mysterious Treasure",
+      "source_number": "113",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "FLI",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 3,
+          "rationale": "Both Items pay a hand-discard cost to search a Pokémon into the hand. Ultra Ball costs one additional discard but removes Mysterious Treasure's Psychic-or-Dragon type restriction, preserving the tutor mechanic with a material cost-versus-scope tradeoff."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-virbank-city-gym-pls-126",
+      "source_name": "Virbank City Gym",
+      "source_number": "126",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PLS",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1243,
+          "expected_name": "Perilous Jungle",
+          "mapping_confidence": 4,
+          "rationale": "Both symmetric Stadiums add two damage counters to Poisoned Pokémon during Pokémon Checkup. Perilous Jungle alone exempts Darkness Pokémon, leaving one clearly bounded type exception to an otherwise identical effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-012-cynthia-upr-119",
+      "source_name": "cynthia",
+      "source_number": "119",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "UPR",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1227,
+          "expected_name": "Lillie's Determination",
+          "mapping_confidence": 4,
+          "rationale": "Both Supporters shuffle the user's hand into the deck and draw six. Lillie's Determination changes only the exactly-six-Prize state, where it draws eight instead, so the baseline mechanic is identical with one bounded timing exception."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-012-friends-in-paldea-pre-109",
+      "source_name": "friends in paldea",
+      "source_number": "109",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PRE",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1224,
+          "expected_name": "Cheren",
+          "mapping_confidence": 5,
+          "rationale": "Both unrestricted Supporters have the complete effect 'Draw 3 cards,' with no additional cost, condition, or effect."
+        },
+        {
+          "card_id": 1236,
+          "expected_name": "Urbain",
+          "mapping_confidence": 5,
+          "rationale": "Both unrestricted Supporters have the complete effect 'Draw 3 cards,' with no additional cost, condition, or effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": "shard-012-gastly-haunter-pfl-line",
+      "rule_id": "shard-012-gastly-asc-123",
+      "source_name": "gastly",
+      "source_number": "123",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "ASC",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 770,
+          "expected_name": "Gastly",
+          "mapping_confidence": 5,
+          "rationale": "The printings match as 70 HP Basic Darkness Pokémon with Fighting Weakness, no Resistance, one Retreat Cost, and the one-Darkness Petty Grudge attack for 10 damage."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": "shard-012-gastly-haunter-pfl-line",
+      "rule_id": "shard-012-haunter-asc-124",
+      "source_name": "haunter",
+      "source_number": "124",
+      "source_previous_stage": "Gastly",
+      "source_rule": "n/a",
+      "source_set": "ASC",
+      "source_stage": "Stage 1 Pokémon",
+      "targets": [
+        {
+          "card_id": 771,
+          "expected_name": "Haunter",
+          "mapping_confidence": 5,
+          "rationale": "The printings match as Stage 1 Darkness Pokémon evolving from Gastly, with 100 HP, Fighting Weakness, no Resistance, one Retreat Cost, and the one-Darkness Spooky Shot attack for 40 damage."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-013-bird-keeper-daa-159",
+      "source_name": "bird keeper",
+      "source_number": "159",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "DAA",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1203,
+          "expected_name": "Surfer",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters first switch the user's Active Pokémon and then draw only if the switch occurs. Surfer draws up to a five-card hand rather than a fixed three cards, so the same combined pivot-and-draw mechanic has materially hand-size-dependent effectiveness."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-014-lysandre-labs-fli-111",
+      "source_name": "lysandre labs",
+      "source_number": "111",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "FLI",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1246,
+          "expected_name": "Jamming Tower",
+          "mapping_confidence": 5,
+          "rationale": "Both symmetric Stadiums make all Pokémon Tools attached to Pokémon in play have no effect, with no differing condition, scope, or secondary effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-014-sages-training-ud-77",
+      "source_name": "sage's training",
+      "source_number": "77",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "UD",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1185,
+          "expected_name": "Explorer’s Guidance",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters inspect the top of the deck, put exactly two chosen cards into the hand, and discard every unchosen card. Explorer's Guidance inspects six rather than five, a single bounded numeric difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-riolu-asc-112",
+      "source_name": "riolu",
+      "source_number": "112",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "ASC",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 677,
+          "expected_name": "Riolu",
+          "mapping_confidence": 5,
+          "rationale": "The printings match as 80 HP Basic Fighting Pokémon with Psychic Weakness, no Resistance, two Retreat Cost, and the one-Fighting Accelerating Stab attack for 30 with the same next-turn reuse restriction."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-016-hapu-unm-200",
+      "source_name": "hapu",
+      "source_number": "200",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "UNM",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1185,
+          "expected_name": "Explorer’s Guidance",
+          "mapping_confidence": 5,
+          "rationale": "Both Supporters have the complete effect of looking at the top six cards of the user's deck, putting two into the hand, and discarding the other four."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-017-float-stone-bkt-137",
+      "source_name": "float stone",
+      "source_number": "137",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BKT",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1174,
+          "expected_name": "Air Balloon",
+          "mapping_confidence": 4,
+          "rationale": "Both Tools reduce only the attached Pokémon's Retreat Cost. Air Balloon reduces it by two rather than setting it to zero, so the effects coincide through Retreat Cost two and differ only above that threshold."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-017-float-stone-plf-99",
+      "source_name": "float stone",
+      "source_number": "99",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PLF",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1174,
+          "expected_name": "Air Balloon",
+          "mapping_confidence": 4,
+          "rationale": "Both Tools reduce only the attached Pokémon's Retreat Cost. Air Balloon reduces it by two rather than setting it to zero, so the effects coincide through Retreat Cost two and differ only above that threshold."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-017-nemona-svi-180",
+      "source_name": "nemona",
+      "source_number": "180",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SVI",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1224,
+          "expected_name": "Cheren",
+          "mapping_confidence": 5,
+          "rationale": "Both unrestricted Supporters have the complete effect 'Draw 3 cards,' with no additional cost, condition, or effect."
+        },
+        {
+          "card_id": 1236,
+          "expected_name": "Urbain",
+          "mapping_confidence": 5,
+          "rationale": "Both unrestricted Supporters have the complete effect 'Draw 3 cards,' with no additional cost, condition, or effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-017-professors-letter-xy-123",
+      "source_name": "professor's letter",
+      "source_number": "123",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "XY",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1119,
+          "expected_name": "Energy Search",
+          "mapping_confidence": 3,
+          "rationale": "Both Items search the deck for Basic Energy, reveal it, put it into the hand, and shuffle. Energy Search finds one rather than Professor's Letter's two, a meaningful quantity reduction within the identical tutor operation."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-017-superior-energy-retrieval-pal-189",
+      "source_name": "superior energy retrieval",
+      "source_number": "189",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAL",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1118,
+          "expected_name": "Energy Retrieval",
+          "mapping_confidence": 3,
+          "rationale": "Both Items move Basic Energy from the discard pile to the hand. Energy Retrieval returns two without a cost, while Superior Energy Retrieval discards two other hand cards to return four, preserving the exact recovery operation with material cost and quantity differences."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-017-superior-energy-retrieval-plf-103",
+      "source_name": "superior energy retrieval",
+      "source_number": "103",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PLF",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1118,
+          "expected_name": "Energy Retrieval",
+          "mapping_confidence": 3,
+          "rationale": "Both Items move Basic Energy from the discard pile to the hand. Energy Retrieval returns two without a cost, while Superior Energy Retrieval discards two other hand cards to return four, preserving the exact recovery operation with material cost and quantity differences."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-018-parasol-lady-par-169",
+      "source_name": "parasol lady",
+      "source_number": "169",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAR",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1199,
+          "expected_name": "Lacey",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters shuffle the user's hand into the deck and draw 4, with a conditional increase to 8. The condition moves from going second on the first turn to the opponent having 3 or fewer Prize cards, so the core reset is preserved but the high-draw timing changes materially."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-019-professor-juniper-blw-101",
+      "source_name": "professor juniper",
+      "source_number": "101",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BLW",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1192,
+          "expected_name": "Carmine",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters discard the full hand and draw a new fixed-size hand. Carmine draws 5 instead of 7 and uniquely may be played on the first turn when going first, materially reducing ordinary draw while retaining the same discard-draw engine."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-019-professor-juniper-dex-98",
+      "source_name": "professor juniper",
+      "source_number": "98",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "DEX",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1192,
+          "expected_name": "Carmine",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters discard the full hand and draw a new fixed-size hand. Carmine draws 5 instead of 7 and uniquely may be played on the first turn when going first, materially reducing ordinary draw while retaining the same discard-draw engine."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-019-professor-juniper-plb-84",
+      "source_name": "professor juniper",
+      "source_number": "84",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PLB",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1192,
+          "expected_name": "Carmine",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters discard the full hand and draw a new fixed-size hand. Carmine draws 5 instead of 7 and uniquely may be played on the first turn when going first, materially reducing ordinary draw while retaining the same discard-draw engine."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-019-professors-research-jtg-155",
+      "source_name": "professor's research",
+      "source_number": "155",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "JTG",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1192,
+          "expected_name": "Carmine",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters discard the full hand and draw a new fixed-size hand. Carmine draws 5 instead of 7 and uniquely may be played on the first turn when going first, materially reducing ordinary draw while retaining the same discard-draw engine."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-019-professors-research-shf-60",
+      "source_name": "professor's research",
+      "source_number": "60",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SHF",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1192,
+          "expected_name": "Carmine",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters discard the full hand and draw a new fixed-size hand. Carmine draws 5 instead of 7 and uniquely may be played on the first turn when going first, materially reducing ordinary draw while retaining the same discard-draw engine."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-019-professors-research-ssh-178",
+      "source_name": "professor's research",
+      "source_number": "178",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SSH",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1192,
+          "expected_name": "Carmine",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters discard the full hand and draw a new fixed-size hand. Carmine draws 5 instead of 7 and uniquely may be played on the first turn when going first, materially reducing ordinary draw while retaining the same discard-draw engine."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-019-professors-research-svi-189",
+      "source_name": "professor's research",
+      "source_number": "189",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SVI",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1192,
+          "expected_name": "Carmine",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters discard the full hand and draw a new fixed-size hand. Carmine draws 5 instead of 7 and uniquely may be played on the first turn when going first, materially reducing ordinary draw while retaining the same discard-draw engine."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-020-pokemon-collector-hs-97",
+      "source_name": "pokemon collector",
+      "source_number": "97",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "HS",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1210,
+          "expected_name": "Brock’s Scouting",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters search Basic Pokémon from the deck into the hand. Brock's Scouting reduces the Basic maximum from 3 to 2 and adds a separate 1-Evolution option, so it preserves the search role with a meaningful capacity difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-020-professor-oaks-new-theory-hs-101",
+      "source_name": "professor oak's new theory",
+      "source_number": "101",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "HS",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1227,
+          "expected_name": "Lillie's Determination",
+          "mapping_confidence": 4,
+          "rationale": "Both Supporters shuffle the user's hand into the deck and draw 6. Lillie's Determination changes only the exactly-6-Prize case, where it draws 8, leaving the ordinary effect identical."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-020-rika-par-172",
+      "source_name": "rika",
+      "source_number": "172",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAR",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1185,
+          "expected_name": "Explorer’s Guidance",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters select exactly 2 cards from a viewed group at the top of the deck. Explorer's Guidance views 6 rather than 4 and discards the unchosen cards instead of randomizing them onto the bottom, preserving selective draw but materially changing deck depletion and discard interaction."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "startling-megaphone-flf-97",
+      "source_name": "Startling Megaphone",
+      "source_number": "97",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "FLF",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1137,
+          "expected_name": "Tool Scrapper",
+          "mapping_confidence": 3,
+          "rationale": "Both unrestricted Items discard opposing Pokémon Tools in play. Tool Scrapper selects up to 2 Tools and may target either player's board, whereas Startling Megaphone discards every opposing Tool, so removal scope changes but the primary disruption is preserved."
+        }
+      ]
+    }
+  ],
+  "schema_version": 2
 }

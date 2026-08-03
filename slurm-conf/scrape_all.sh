@@ -37,6 +37,7 @@ echo "Start: $(date --iso-8601=seconds)"
 srun uv run --frozen --no-sync python -m scraper \
   --source all \
   --card-swap-strategy all \
+  --minimum-mapping-confidence "${MAPPING_MIN_CONFIDENCE:-1}" \
   --limit "${SCRAPER_LIMIT:-200}" \
   --max-pages "${SCRAPER_MAX_PAGES:-0}" \
   --per-tournament "${SCRAPER_PER_TOURNAMENT:-8}" \

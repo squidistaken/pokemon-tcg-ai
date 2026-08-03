@@ -148,9 +148,18 @@ class MappingCardSwapper(CardSwapper):
         index: CardIndex,
         rules_dir: Path | str = DEFAULT_MAPPING_RULE_DIR,
         set_canonicalizer: SetCanonicalizer | None = None,
+        *,
+        use_rejected_mappings: bool = False,
+        minimum_mapping_confidence: int = 1,
     ):
         self.index = index
-        self.rules = MappingRuleSet.load(rules_dir, index, set_canonicalizer)
+        self.rules = MappingRuleSet.load(
+            rules_dir,
+            index,
+            set_canonicalizer,
+            use_rejected_mappings=use_rejected_mappings,
+            minimum_mapping_confidence=minimum_mapping_confidence,
+        )
 
     @override
     def resolve(self, card: RawCard) -> tuple[CardSwap, ...]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import os
 import tempfile
@@ -507,8 +508,41 @@ class _InventoryCheckpoint:
 
 
 def read_inventory(path: Path | str) -> tuple[SeenCardRecord, ...]:
-    """Read only card records from a gzip JSONL inventory checkpoint."""
+    """Read card records from a plain or gzip JSONL inventory checkpoint."""
     return _read_checkpoint(path).records
+
+
+def resolve_inventory_path(path: Path | str) -> Path:
+    """Resolve a logical inventory path, rejecting divergent plain/gzip copies."""
+    requested = Path(path)
+    variants = _inventory_path_variants(requested)
+    if variants is None:
+        if requested.is_file():
+            return requested
+        raise FileNotFoundError(requested)
+
+    plain, compressed = variants
+    available = [candidate for candidate in (plain, compressed) if candidate.is_file()]
+    if not available:
+        raise FileNotFoundError(requested)
+    if len(available) == 2 and inventory_content_sha256(
+        plain
+    ) != inventory_content_sha256(compressed):
+        raise ValueError(
+            f"plain and gzip inventory copies differ: {plain} and {compressed}"
+        )
+    if requested in available:
+        return requested
+    return compressed if compressed in available else plain
+
+
+def inventory_content_sha256(path: Path | str) -> str:
+    """Hash the decompressed inventory content without loading it into memory."""
+    digest = hashlib.sha256()
+    with _open_inventory_binary(Path(path)) as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _read_checkpoint(path: Path | str) -> _InventoryCheckpoint:
@@ -517,7 +551,7 @@ def _read_checkpoint(path: Path | str) -> _InventoryCheckpoint:
     observation_keys: frozenset[str] = frozenset()
     found_header = False
     checkpoint_label: str | None = None
-    with gzip.open(Path(path), "rt", encoding="utf-8") as handle:
+    with _open_inventory_text(Path(path)) as handle:
         for line_number, line in enumerate(handle, 1):
             if not line.strip():
                 continue
@@ -548,6 +582,31 @@ def _read_checkpoint(path: Path | str) -> _InventoryCheckpoint:
     return _InventoryCheckpoint(
         ordered, observation_keys, found_header, checkpoint_label
     )
+
+
+def _inventory_path_variants(path: Path) -> tuple[Path, Path] | None:
+    name = path.name
+    if name.endswith(".jsonl.gz"):
+        return path.with_name(name.removesuffix(".gz")), path
+    if name.endswith(".jsonl"):
+        return path, path.with_name(f"{name}.gz")
+    if path.suffix:
+        return None
+    return path.with_name(f"{name}.jsonl"), path.with_name(f"{name}.jsonl.gz")
+
+
+def _open_inventory_binary(path: Path):
+    with path.open("rb") as handle:
+        is_gzip = handle.read(2) == b"\x1f\x8b"
+    return gzip.open(path, "rb") if is_gzip else path.open("rb")
+
+
+def _open_inventory_text(path: Path):
+    with path.open("rb") as handle:
+        is_gzip = handle.read(2) == b"\x1f\x8b"
+    if is_gzip:
+        return gzip.open(path, "rt", encoding="utf-8")
+    return path.open("rt", encoding="utf-8")
 
 
 def write_inventory(

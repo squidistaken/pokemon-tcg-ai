@@ -1,4 +1,4 @@
-"""Tests for the reviewed explicit card-mapping rule data layer."""
+"""Tests for the explicit card-mapping rule data layer."""
 
 from __future__ import annotations
 
@@ -16,19 +16,24 @@ def _rule(
     rule_id: str = "legacy-draw-fallback",
     *,
     source_name: str = "Legacy Draw",
-    source_set: str | None = None,
-    source_number: str | None = None,
+    source_set: str | None = "PAL",
+    source_number: str | None = "185",
     source_rule: str | None = None,
     source_stage: str | None = "Supporter",
     source_previous_stage: str | None = None,
     targets: list[dict[str, object]] | None = None,
-    active: bool = True,
-    status: str = "approved",
-    reviewer: str | None = "Stef",
-    reviewed_at: str | None = "2026-08-02",
     family_id: str | None = None,
     allow_cross_subtype: bool = False,
 ) -> dict[str, object]:
+    target_values = targets or [{"card_id": 1213, "expected_name": "Judge"}]
+    normalized_targets = [
+        {
+            "mapping_confidence": 4,
+            "rationale": "Reviewed deterministic substitution.",
+            **target,
+        }
+        for target in target_values
+    ]
     return {
         "rule_id": rule_id,
         "source_name": source_name,
@@ -37,21 +42,14 @@ def _rule(
         "source_rule": source_rule,
         "source_stage": source_stage,
         "source_previous_stage": source_previous_stage,
-        "targets": targets or [{"card_id": 1213, "expected_name": "Judge"}],
-        "active": active,
-        "review": {
-            "status": status,
-            "reviewer": reviewer,
-            "reviewed_at": reviewed_at,
-        },
-        "rationale": "Reviewed deterministic substitution.",
+        "targets": normalized_targets,
         "family_id": family_id,
         "allow_cross_subtype": allow_cross_subtype,
     }
 
 
 def _write_fragment(
-    path: Path, rules: list[dict[str, object]], version: int | bool = 1
+    path: Path, rules: list[dict[str, object]], version: int | bool = 2
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -70,13 +68,9 @@ def test_missing_and_empty_directories_have_no_candidates(tmp_path):
     assert empty.candidates_for(card) == ()
 
 
-def test_exact_rule_precedes_name_fallback_and_normalizes_identity(tmp_path):
+def test_exact_rule_normalizes_identity_and_unseen_printings_fail_closed(tmp_path):
     _write_fragment(
-        tmp_path / "b-name.json",
-        [_rule(targets=[{"card_id": 1213, "expected_name": "Judge"}])],
-    )
-    _write_fragment(
-        tmp_path / "a-exact.json",
+        tmp_path / "exact.json",
         [
             _rule(
                 "legacy-draw-pal-185",
@@ -98,9 +92,7 @@ def test_exact_rule_precedes_name_fallback_and_normalizes_identity(tmp_path):
     exact_rule = rules.rule_for(exact_card)
 
     assert [candidate.target_id for candidate in exact_candidates] == [927]
-    assert [
-        candidate.target_id for candidate in rules.candidates_for(other_printing)
-    ] == [1213]
+    assert rules.candidates_for(other_printing) == ()
     assert exact_rule is not None
     assert exact_rule.family_id == "example-family"
     assert exact_candidates[0].rule_id == "legacy-draw-pal-185"
@@ -114,8 +106,18 @@ def test_targets_preserve_declared_fallback_order_and_provenance(tmp_path):
         [
             _rule(
                 targets=[
-                    {"card_id": 1213, "expected_name": "Judge"},
-                    {"card_id": 1181, "expected_name": "Billy & O'Nare"},
+                    {
+                        "card_id": 1213,
+                        "expected_name": "Judge",
+                        "mapping_confidence": 5,
+                        "rationale": "Primary target rationale.",
+                    },
+                    {
+                        "card_id": 1181,
+                        "expected_name": "Billy & O'Nare",
+                        "mapping_confidence": 2,
+                        "rationale": "Fallback target rationale.",
+                    },
                 ]
             )
         ],
@@ -133,10 +135,47 @@ def test_targets_preserve_declared_fallback_order_and_provenance(tmp_path):
     assert all(candidate.kind == "mapping" for candidate in candidates)
     assert all(candidate.count == 3 for candidate in candidates)
     assert all(candidate.source_number == "185" for candidate in candidates)
-    assert all(
-        candidate.rationale == "Reviewed deterministic substitution."
-        for candidate in candidates
+    assert [candidate.rationale for candidate in candidates] == [
+        "Primary target rationale.",
+        "Fallback target rationale.",
+    ]
+    assert all(candidate.confidence is None for candidate in candidates)
+    assert [candidate.mapping_confidence for candidate in candidates] == [5, 2]
+    assert "confidence" not in candidates[0].to_json()
+    assert candidates[0].to_json()["mapping_confidence"] == 5
+
+
+def test_minimum_mapping_confidence_filters_targets(tmp_path):
+    _write_fragment(
+        tmp_path / "rules.json",
+        [
+            _rule(
+                targets=[
+                    {
+                        "card_id": 1213,
+                        "expected_name": "Judge",
+                        "mapping_confidence": 4,
+                    },
+                    {
+                        "card_id": 1181,
+                        "expected_name": "Billy & O'Nare",
+                        "mapping_confidence": 2,
+                    },
+                ]
+            )
+        ],
     )
+    card = RawCard(1, "Legacy Draw", "PAL", "185", "trainer")
+
+    all_targets = MappingRuleSet.load(
+        tmp_path, CardIndex(), minimum_mapping_confidence=1
+    )
+    high_confidence = MappingRuleSet.load(
+        tmp_path, CardIndex(), minimum_mapping_confidence=3
+    )
+
+    assert [swap.target_id for swap in all_targets.candidates_for(card)] == [1213, 1181]
+    assert [swap.target_id for swap in high_confidence.candidates_for(card)] == [1213]
 
 
 def test_exact_rule_uses_same_set_alias_for_limitless_and_bulbapedia(tmp_path):
@@ -156,35 +195,26 @@ def test_exact_rule_uses_same_set_alias_for_limitless_and_bulbapedia(tmp_path):
     assert [candidate.target_id for candidate in bulbapedia] == [1213]
 
 
-def test_inactive_exact_rule_blocks_a_name_fallback(tmp_path):
+def test_rejected_mapping_file_requires_explicit_opt_in(tmp_path):
     _write_fragment(
-        tmp_path / "rules.json",
-        [
-            _rule(),
-            _rule(
-                "rejected-printing",
-                source_set="PAL",
-                source_number="185",
-                active=False,
-                status="rejected",
-                reviewer="Teun",
-            ),
-        ],
+        tmp_path / "rejected_by_review_agent.json",
+        [_rule("rejected-rule")],
     )
-    rules = MappingRuleSet.load(tmp_path, CardIndex())
+    card = RawCard(1, "Legacy Draw", "PAL", "185", "trainer")
 
-    assert rules.candidates_for(RawCard(1, "Legacy Draw", "PAL", "185")) == ()
-    assert rules.candidates_for(RawCard(1, "Legacy Draw", "PAF", "80"))
+    default_rules = MappingRuleSet.load(tmp_path, CardIndex())
+    opted_in_rules = MappingRuleSet.load(
+        tmp_path, CardIndex(), use_rejected_mappings=True
+    )
+
+    assert default_rules.candidates_for(card) == ()
+    assert [swap.target_id for swap in opted_in_rules.candidates_for(card)] == [1213]
 
 
 @pytest.mark.parametrize(
     ("rules", "message"),
     [
         ([_rule(), _rule()], "duplicate mapping rule_id"),
-        (
-            [_rule(), _rule("other")],
-            "conflicting name fallback rules",
-        ),
         (
             [
                 _rule("one", source_set="PAL", source_number="185"),
@@ -224,37 +254,16 @@ def test_duplicates_and_conflicts_are_rejected(tmp_path, rules, message):
             "competition index names it 'Judge'",
         ),
         (
-            _rule(active=True, status="pending"),
-            "requires an approved review",
-        ),
-        (
-            _rule(active=True, reviewer="agent-7"),
-            "dated Stef or Teun review",
-        ),
-        (
-            _rule(active=True, reviewed_at=None),
-            "dated Stef or Teun review",
-        ),
-        (
-            _rule(source_set="PAL"),
-            "must specify both source_set and source_number",
+            _rule(source_set="PAL", source_number=None),
+            "source_number must be a non-empty string",
         ),
     ],
 )
-def test_stale_unreviewed_and_incomplete_rules_are_rejected(tmp_path, rule, message):
+def test_stale_and_incomplete_rules_are_rejected(tmp_path, rule, message):
     _write_fragment(tmp_path / "rules.json", [rule])
 
     with pytest.raises(MappingRuleError, match=message):
         MappingRuleSet.load(tmp_path, CardIndex())
-
-
-@pytest.mark.parametrize("reviewed_at", ["tomorrow", "2026-02-30", "20260802"])
-def test_active_rule_requires_a_real_iso_review_date(tmp_path, reviewed_at):
-    _write_fragment(tmp_path / "rules.json", [_rule(reviewed_at=reviewed_at)])
-
-    with pytest.raises(MappingRuleError, match="valid YYYY-MM-DD"):
-        MappingRuleSet.load(tmp_path, CardIndex())
-
 
 def test_ordinary_source_cannot_target_ace_spec(tmp_path):
     target = [{"card_id": 1088, "expected_name": "Prime Catcher"}]
@@ -271,6 +280,8 @@ def test_explicit_ace_spec_source_may_target_ace_spec(tmp_path):
         [
             _rule(
                 source_name="Old Computer",
+                source_set="BCR",
+                source_number="138",
                 source_rule="ACE SPEC",
                 source_stage="Item",
                 targets=target,
@@ -360,11 +371,62 @@ def test_cross_subtype_energy_requires_explicit_rule_flag(tmp_path):
     assert MappingRuleSet.load(tmp_path, CardIndex()).rules
 
 
-@pytest.mark.parametrize("version", [2, True])
+def test_tool_source_matches_pokemon_tool_competition_subtype(tmp_path):
+    _write_fragment(
+        tmp_path / "rules.json",
+        [
+            _rule(
+                source_name="Old Tool",
+                source_stage="Tool",
+                targets=[{"card_id": 1159, "expected_name": "Hero's Cape"}],
+            )
+        ],
+    )
+
+    with pytest.raises(MappingRuleError, match="ordinary source to ACE SPEC"):
+        MappingRuleSet.load(tmp_path, CardIndex())
+
+    rule = _rule(
+        source_name="Old Tool",
+        source_rule="ACE SPEC",
+        source_stage="Tool",
+        targets=[{"card_id": 1159, "expected_name": "Hero's Cape"}],
+    )
+    _write_fragment(tmp_path / "rules.json", [rule])
+
+    assert MappingRuleSet.load(tmp_path, CardIndex()).rules
+
+
+@pytest.mark.parametrize("version", [3, True])
 def test_schema_version_is_required_and_exact(tmp_path, version):
     _write_fragment(tmp_path / "rules.json", [], version=version)
 
-    with pytest.raises(MappingRuleError, match="schema_version .*; expected 1"):
+    with pytest.raises(MappingRuleError, match="schema_version .*; expected 2"):
+        MappingRuleSet.load(tmp_path, CardIndex())
+
+
+def test_empty_v1_fragment_is_safe_but_nonempty_v1_fails_closed(tmp_path):
+    path = tmp_path / "rules.json"
+    _write_fragment(path, [], version=1)
+    assert MappingRuleSet.load(tmp_path, CardIndex()).rules == ()
+
+    _write_fragment(path, [_rule()], version=1)
+    with pytest.raises(MappingRuleError, match="only an empty schema v1"):
+        MappingRuleSet.load(tmp_path, CardIndex())
+
+
+@pytest.mark.parametrize("mapping_confidence", [0, 6, 3.5, True, None])
+def test_mapping_confidence_must_be_integer_one_through_five(
+    tmp_path, mapping_confidence
+):
+    target = {
+        "card_id": 1213,
+        "expected_name": "Judge",
+        "mapping_confidence": mapping_confidence,
+    }
+    _write_fragment(tmp_path / "rules.json", [_rule(targets=[target])])
+
+    with pytest.raises(MappingRuleError, match="integer from 1 to 5"):
         MappingRuleSet.load(tmp_path, CardIndex())
 
 
@@ -385,24 +447,23 @@ def test_nested_fragments_are_loaded_in_stable_path_order(tmp_path):
 
 def test_fingerprint_is_stable_and_tracks_material_rule_changes(tmp_path):
     path = tmp_path / "rules.json"
-    base = _rule(active=False, status="pending")
+    base = _rule()
     _write_fragment(path, [base])
     first = MappingRuleSet.load(tmp_path, CardIndex()).fingerprint
     assert MappingRuleSet.load(tmp_path, CardIndex()).fingerprint == first
 
-    active = _rule()
-    _write_fragment(path, [active])
-    activated = MappingRuleSet.load(tmp_path, CardIndex()).fingerprint
-    assert activated != first
-
-    active["targets"] = [{"card_id": 1181, "expected_name": "Billy & O'Nare"}]
-    _write_fragment(path, [active])
+    base["targets"] = [{
+        "card_id": 1181,
+        "expected_name": "Billy & O'Nare",
+        "mapping_confidence": 3,
+        "rationale": "A different target.",
+    }]
+    _write_fragment(path, [base])
     retargeted = MappingRuleSet.load(tmp_path, CardIndex()).fingerprint
-    assert retargeted != activated
+    assert retargeted != first
 
-    reviewed = _rule(
-        reviewer="Teun",
+    rerationalized = _rule(
         targets=[{"card_id": 1181, "expected_name": "Billy & O'Nare"}],
     )
-    _write_fragment(path, [reviewed])
+    _write_fragment(path, [rerationalized])
     assert MappingRuleSet.load(tmp_path, CardIndex()).fingerprint != retargeted

@@ -22,6 +22,20 @@ def test_card_swapping_can_be_disabled():
     assert args.disable_card_swap is True
 
 
+def test_rejected_mappings_are_opt_in():
+    default_args = build_parser().parse_args([])
+    opted_in_args = build_parser().parse_args(["--use-rejected-mappings"])
+
+    assert default_args.use_rejected_mappings is False
+    assert opted_in_args.use_rejected_mappings is True
+
+
+def test_production_mapping_confidence_defaults_to_every_tier():
+    args = build_parser().parse_args([])
+
+    assert args.minimum_mapping_confidence == 1
+
+
 def test_all_means_every_network_source():
     assert list(NETWORK_SOURCES) == ["limitless", "bulbapedia"]
     assert "text" in SOURCES
@@ -72,7 +86,8 @@ def test_all_strategies_fetch_once_and_create_separate_manifests(
         manifest = json.loads((tmp_path / folder / "manifest.json").read_text())
         assert manifest["schema_version"] == 3
         assert manifest["decks"] == {}
-    (gap,) = read_inventory(tmp_path / "mapping-gaps.jsonl.gz")
+    (gap_path,) = tmp_path.glob("mapping-gaps-*.jsonl.gz")
+    (gap,) = read_inventory(gap_path)
     assert gap.identity.name == "entirely missing"
 
 
@@ -137,7 +152,7 @@ def test_disabled_mapping_does_not_write_a_gap_report(tmp_path, monkeypatch):
     )
 
     assert FakeSource.calls == 1
-    assert not (tmp_path / "mapping-gaps.jsonl.gz").exists()
+    assert list(tmp_path.glob("mapping-gaps-*.jsonl.gz")) == []
 
 
 def test_partial_source_failure_writes_completed_work_and_returns_nonzero(
@@ -167,7 +182,9 @@ def _gap_checkpoint_label(path):
         return json.loads(next(handle))["checkpoint_label"]
 
 
-def test_mapping_gap_resume_is_idempotent_for_the_same_rules(tmp_path, monkeypatch):
+def test_mapping_gap_report_refuses_to_append_to_an_existing_file(
+    tmp_path, monkeypatch
+):
     class GapSource:
         @staticmethod
         def iter_decks(**_kwargs):
@@ -189,12 +206,16 @@ def test_mapping_gap_resume_is_idempotent_for_the_same_rules(tmp_path, monkeypat
     ]
 
     assert main(args) == 0
-    assert main(args) == 0
+    original = gap.read_bytes()
+    assert main(args) == 2
+    assert gap.read_bytes() == original
     (record,) = read_inventory(gap)
     assert record.counts_by_source["gap-source"].decks == 1
 
 
-def test_mapping_rule_change_replaces_stale_gap_checkpoint(tmp_path, monkeypatch):
+def test_mapping_rule_change_writes_a_new_run_specific_gap_report(
+    tmp_path, monkeypatch
+):
     class GapSource:
         @staticmethod
         def iter_decks(**_kwargs):
@@ -211,32 +232,36 @@ def test_mapping_rule_change_replaces_stale_gap_checkpoint(tmp_path, monkeypatch
     changed_rules = tmp_path / "changed-rules"
     changed_rules.mkdir()
     (changed_rules / "inactive.json").write_text(json.dumps({
-        "schema_version": 1,
+        "schema_version": 2,
         "rules": [{
             "rule_id": "known-rejection", "source_name": "Some Other Card",
-            "source_set": None, "source_number": None, "source_rule": None,
+            "source_set": "PAL", "source_number": "185", "source_rule": None,
             "source_stage": "Supporter", "source_previous_stage": None,
-            "targets": [{"card_id": 1213, "expected_name": "Judge"}],
-            "active": False,
-            "review": {"status": "rejected", "reviewer": "Stef", "reviewed_at": "2026-08-02"},
-            "rationale": "Kept inactive after review.", "family_id": None,
+            "targets": [{
+                "card_id": 1213, "expected_name": "Judge",
+                "mapping_confidence": 4,
+                "rationale": "Reviewed deterministic substitution.",
+            }],
+            "family_id": None,
             "allow_cross_subtype": False,
         }],
     }), encoding="utf-8")
-    gap = tmp_path / "gaps.jsonl.gz"
-
-    def run(rule_dir):
+    def run(rule_dir, job_id):
+        monkeypatch.setenv("SLURM_JOB_ID", job_id)
         return main([
             "--source", "changed-gap-source", "--card-swap-strategy", "mapping",
-            "--card-swap-map", str(rule_dir), "--mapping-gap-out", str(gap),
+            "--card-swap-map", str(rule_dir),
             "--out", str(tmp_path / "decks"),
         ])
 
-    assert run(empty_rules) == 0
-    old_label = _gap_checkpoint_label(gap)
-    assert run(changed_rules) == 0
-    assert _gap_checkpoint_label(gap) != old_label
-    (record,) = read_inventory(gap)
+    assert run(empty_rules, "first") == 0
+    first = tmp_path / "decks" / "mapping-gaps-first.jsonl.gz"
+    assert run(changed_rules, "second") == 0
+    second = tmp_path / "decks" / "mapping-gaps-second.jsonl.gz"
+    assert first.exists()
+    assert second.exists()
+    assert _gap_checkpoint_label(first) != _gap_checkpoint_label(second)
+    (record,) = read_inventory(second)
     assert record.counts_by_source["changed-gap-source"].decks == 1
 
 

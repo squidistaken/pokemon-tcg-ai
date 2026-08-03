@@ -66,8 +66,8 @@ sbatch slurm-conf/discover_cards.sh
 # outputs/card_discovery/seen_cards.jsonl.gz
 ```
 
-Download that inventory, complete proposer/reviewer mapping work, and obtain Stef
-or Teun's approval before submitting production.
+Download that inventory and complete the proposer/reviewer mapping work before
+submitting production.
 
 `scrape_all.sh` submits a 48-hour job to the regular CPU partition and runs every
 network-backed deck source concurrently via `--source all` (Limitless and

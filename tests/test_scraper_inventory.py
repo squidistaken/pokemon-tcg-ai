@@ -14,7 +14,9 @@ from scraper.inventory import (
     CanonicalPrinting,
     InventoryCheckpointMismatch,
     SeenCardInventory,
+    inventory_content_sha256,
     read_inventory,
+    resolve_inventory_path,
 )
 from scraper.models import RawCard, RawDeck
 
@@ -205,6 +207,51 @@ def test_write_is_deterministic_sorted_gzip_jsonl(tmp_path: Path):
         "Z Card",
     ]
     assert all(line["schema_version"] == 1 for line in lines)
+
+
+def test_plain_and_gzip_inventory_reads_and_hashes_are_equivalent(tmp_path: Path):
+    compressed = tmp_path / "seen_cards.jsonl.gz"
+    plain = tmp_path / "seen_cards.jsonl"
+    inventory = SeenCardInventory(CardIndex(), _canonicalize)
+    inventory.observe(_deck("limitless", "One", [RawCard(1, "Iono")], "one"))
+    inventory.write(compressed)
+    plain.write_bytes(gzip.decompress(compressed.read_bytes()))
+
+    assert read_inventory(plain) == read_inventory(compressed)
+    assert inventory_content_sha256(plain) == inventory_content_sha256(compressed)
+    assert resolve_inventory_path(tmp_path / "seen_cards") == compressed
+
+
+def test_inventory_reader_uses_magic_bytes_instead_of_suffix(tmp_path: Path):
+    compressed = tmp_path / "compressed.jsonl"
+    plain = tmp_path / "plain.jsonl.gz"
+    inventory = SeenCardInventory(CardIndex(), _canonicalize)
+    inventory.observe(_deck("limitless", "One", [RawCard(1, "Iono")], "one"))
+    actual = tmp_path / "actual.jsonl.gz"
+    inventory.write(actual)
+    payload = gzip.decompress(actual.read_bytes())
+    compressed.write_bytes(actual.read_bytes())
+    plain.write_bytes(payload)
+
+    assert read_inventory(compressed) == read_inventory(plain)
+
+
+def test_inventory_path_resolver_falls_back_to_available_form(tmp_path: Path):
+    plain = tmp_path / "seen_cards.jsonl"
+    plain.write_text("", encoding="utf-8")
+
+    assert resolve_inventory_path(tmp_path / "seen_cards.jsonl.gz") == plain
+
+
+def test_inventory_path_resolver_rejects_mismatched_copies(tmp_path: Path):
+    plain = tmp_path / "seen_cards.jsonl"
+    compressed = tmp_path / "seen_cards.jsonl.gz"
+    plain.write_text("plain\n", encoding="utf-8")
+    with gzip.open(compressed, "wt", encoding="utf-8") as handle:
+        handle.write("different\n")
+
+    with pytest.raises(ValueError, match="plain and gzip inventory copies differ"):
+        resolve_inventory_path(tmp_path / "seen_cards")
 
 
 def test_failed_atomic_replace_preserves_previous_checkpoint(
