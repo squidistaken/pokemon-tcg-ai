@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import datetime
+from pathlib import Path
 
 from rich.panel import Panel
 
@@ -51,6 +52,34 @@ from .similarity import (
 )
 from .structure import deck_structure_stats
 
+OUTPUT_ROOT = REPO_ROOT / "outputs" / "deck_analysis"
+
+
+def discover_corpora(deck_dir: Path) -> list[Path]:
+    """Return the manifest-backed corpora represented by ``deck_dir``.
+
+    A directory with its own manifest is one corpus.  Otherwise, each immediate
+    child with a manifest is a separate corpus; this is the standard
+    ``decks/{mapping,heuristic}-resolved`` layout.  A legacy flat directory with
+    no manifest-backed children remains a single corpus.
+    """
+    if (deck_dir / "manifest.json").is_file():
+        return [deck_dir]
+    try:
+        children = sorted(
+            child
+            for child in deck_dir.iterdir()
+            if child.is_dir() and (child / "manifest.json").is_file()
+        )
+    except OSError:
+        children = []
+    return children or [deck_dir]
+
+
+def analysis_output_dir(deck_dir: Path) -> Path:
+    """Return the strategy-specific output directory for one corpus."""
+    return OUTPUT_ROOT / deck_dir.name
+
 
 def build_parser() -> argparse.ArgumentParser:
     """
@@ -91,10 +120,26 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
 
     deck_dir = (REPO_ROOT / args.dir).resolve()
+    corpora = discover_corpora(deck_dir)
 
     if args.prune:
-        prune_near_duplicates(deck_dir, args.dupe_threshold)
+        if len(corpora) != 1:
+            names = ", ".join(path.name for path in corpora)
+            sys.exit(
+                f"--prune must target one corpus explicitly with --dir; found: {names}"
+            )
+        prune_near_duplicates(corpora[0], args.dupe_threshold)
         return
+
+    for corpus_dir in corpora:
+        _analyze_corpus(corpus_dir, args)
+
+
+def _analyze_corpus(deck_dir: Path, args: argparse.Namespace) -> None:
+    """Analyze one corpus and write its artifacts to its own subdirectory."""
+    # ``save_report`` clears Rich's recording before printing its confirmation.
+    # Clear that confirmation before starting the next corpus's report.
+    console.export_text(clear=True)
 
     console.print(f"[dim]Loading decks from[/] {deck_dir} ...")
     names, decks = load_all_decks(deck_dir)
@@ -167,7 +212,7 @@ def main(argv: list[str] | None = None) -> None:
         report_meta(decks, names, archetypes, load_manifest(deck_dir), db=db)
 
     # Plots
-    out_dir = (REPO_ROOT / "outputs" / "deck_analysis").resolve()
+    out_dir = analysis_output_dir(deck_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     console.print()
     console.rule("[bold]Plots[/]")

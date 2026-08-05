@@ -251,21 +251,26 @@ dropped.
 
 ## Analysing the corpus (`analysis/`)
 
-Once decks are scraped, `python -m scraper.analysis` reads a deck directory and
-reports pairwise similarity (set / weighted Jaccard / card-semantic), clustering
-agreement against the manifest's archetype labels, corpus diversity, deck
-structure, and a metagame summary, then writes a plot suite and a captured
-report to `outputs/deck_analysis/`.
+Once decks are scraped, `uv run python -m scraper.analysis` reads each manifest-backed
+corpus under `decks/` separately and reports pairwise similarity (set / weighted
+Jaccard / card-semantic), clustering agreement against the manifest's archetype
+labels, corpus diversity, deck structure, and a metagame summary. Each corpus's
+plots and captured report are written to
+`outputs/deck_analysis/<corpus-directory>/`.
 
 ```bash
-# Full report over decks/ (writes plots + a text report to outputs/deck_analysis/)
-python -m scraper.analysis
+# Analyze both strategies separately. Writes mapping-resolved/ and
+# heuristic-resolved/ under outputs/deck_analysis/.
+uv run python -m scraper.analysis
+
+# Analyze only one strategy, writing to outputs/deck_analysis/mapping-resolved/.
+uv run python -m scraper.analysis --dir decks/mapping-resolved
 
 # Collapse near-duplicate lists (weighted-Jaccard >= threshold) to one each.
 # This DELETES the redundant deck files (and their manifest entries), but first
 # folds their observations into the surviving list, tagged `merged_from`, so the
 # popularity signal isn't destroyed along with the files.
-python -m scraper.analysis --prune --dupe-threshold 0.9
+uv run python -m scraper.analysis --dir decks/mapping-resolved --prune --dupe-threshold 0.9
 ```
 
 The metric functions are also importable (`from scraper.analysis import
