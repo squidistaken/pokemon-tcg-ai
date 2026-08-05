@@ -138,6 +138,7 @@ scripts/                     Standalone dev scripts (not part of the training en
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
   make_submission.py           Build a Kaggle .tar.gz and optionally submit it through the Kaggle CLI
   run_selfplay_compile.sh      1M-frame self-play run with torch.compile (caps Inductor's compile workers)
+submission_analysis/          Kaggle submission tooling: `python -m submission_analysis <status|episodes|deck-report|scout>` (see its own README)
 submission/
   main.py                      Kaggle entryfile template; `agent` is deliberately its final callable
   cg_api.py                    Pure-Python observation parser (no native simulator dependency)
@@ -315,14 +316,21 @@ uv run python scripts/make_submission.py \
   --force
 ```
 
-Check the resulting Kaggle status with:
+**[`submission_analysis/`](submission_analysis/README.md)** covers the rest
+of the Kaggle workflow: live submission status and leaderboard rank
+(`status`), episode outcomes and replay download (`episodes`), a
+replay-driven deck-refinement report with a prioritized "worth looking into"
+list (`deck-report`), and scouting the top leaderboard teams' decks
+(`scout`).
 
 ```bash
-uv run dotenv run -- \
-  kaggle competitions submissions pokemon-tcg-ai-battle --csv
+uv run python -m submission_analysis status --most-recent-n 2
+uv run python -m submission_analysis episodes --download-replays --most-recent-n 2
+uv run python -m submission_analysis deck-report --deck decks/example.csv
+uv run python -m submission_analysis scout --deck decks/example.csv
 ```
 
-The command reads `.env`, resolves `latest` from `CHECKPOINT_KEYS_FILE` (default
+Building a submission reads `.env`, resolves `latest` from `CHECKPOINT_KEYS_FILE` (default
 `logs/checkpoint_keys.csv`), and verifies the recorded SHA-256 before building.
 An explicit hash is resolved from the registry first; path/name lookup under
 `CHECKPOINTS_DIR` remains available for legacy or unregistered checkpoints. It
