@@ -192,6 +192,7 @@ class DeckWriter:
             placing=raw.placing,
             url=raw.url,
             external_ids=dict(raw.external_ids),
+            substitutions=[swap.to_json() for swap in resolved.swaps],
         )
 
     def classify(self, resolved: ResolvedDeck, *, date: str | None = None) -> WriteResult:
@@ -244,10 +245,18 @@ class DeckWriter:
         slug = self.find_slug(ids)
         if slug is not None:
             entry = self.manifest.decks[slug]
+            existing = next(
+                (item for item in entry.observations if item.key() == obs.key()),
+                None,
+            )
+            provenance_added = False
+            if existing is not None and not existing.substitutions and obs.substitutions:
+                existing.substitutions = list(obs.substitutions)
+                provenance_added = True
             added = entry.add_observation(obs)
             new_warnings = [w for w in warnings or [] if w not in entry.warnings]
             entry.warnings.extend(new_warnings)
-            if added or new_warnings:  # don't rewrite the file for a pure re-scrape
+            if added or new_warnings or provenance_added:
                 self._save()
             return WriteResult(slug=slug, new_deck=False, new_observation=added)
 
@@ -277,3 +286,8 @@ class DeckWriter:
         Persist the manifest atomically (see :func:`scraper.manifest.save`).
         """
         manifest_mod.save(self.manifest, self.decks_dir)
+
+    def ensure_manifest(self) -> None:
+        """Create an empty manifest when a completed run wrote no valid decks."""
+        if not os.path.exists(self.manifest_path):
+            self._save()
