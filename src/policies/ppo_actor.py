@@ -121,7 +121,11 @@ def build_actor_critic(
     # tuple) form directly so tensordict key lookups resolve.
     backbone.in_keys = in_keys
     policy_head = instantiate(cfg.model.head, in_features=embed_dim, n_actions=n_actions)
-    value_head = ValueHead(in_features=embed_dim, num_cells=list(cfg.model.value_head.num_cells))
+    value_head = ValueHead(
+        in_features=embed_dim,
+        num_cells=list(cfg.model.value_head.num_cells),
+        activation=cfg.model.value_head.get("activation", "tanh"),
+    )
 
     if getattr(policy_head, "requires_option_repr", False) and not backbone.produces_option_repr:
         raise ValueError(

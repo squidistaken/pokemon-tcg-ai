@@ -163,9 +163,30 @@ class PPOTrainer(Trainer):
             ActorValueOperator,
             build_ppo_operator(actor_critic, action_spec).to(device),
         )
+        # Nothing downstream reads `hidden`, `option_repr` or `logits` back
+        # from the collected batch -- `state_value` is written by GAE, not by
+        # the policy -- yet `option_repr` alone is ~64.5 KiB/frame at
+        # production sizes (~258 MiB per 4096-frame batch collected), and
+        # `_update`'s `data_shuffled = data_flat[perm]` copies whatever
+        # survives once again per epoch. Trimming it here at the policy
+        # boundary, rather than via a Collector `postproc=ExcludeTransform`,
+        # also avoids the Collector's own preallocation for these keys; a
+        # postproc would only discard them after they were already written
+        # into the carrier.
+        #
+        # This is safe because `get_policy_operator()` builds a fresh wrapper
+        # over the shared backbone/policy-head submodules on every call: the
+        # GAE and `ClipPPOLoss` below each call it (or `get_value_operator()`)
+        # again for their own separate instances, so pruning *this* instance's
+        # out_keys does not touch theirs, and the pointer head still consumes
+        # `option_repr` *within this same forward*, before collection ever
+        # sees it -- it just never leaves the policy's output tensordict.
+        collection_policy = self._operator.get_policy_operator().select_out_keys(
+            "action", "action_log_prob"
+        )
         super().__init__(
             env_factories=env_factories,
-            policy=self._operator.get_policy_operator(),
+            policy=collection_policy,
             frames_per_batch=frames_per_batch,
             total_frames=total_frames,
             use_parallel_env=use_parallel_env,
