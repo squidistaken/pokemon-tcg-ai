@@ -28,7 +28,7 @@ from submission_analysis.submissions import (
 )
 
 REPLAYS_DIR = "logs/replays"
-MANIFEST_FILENAME = "manifest.json"
+REPLAY_MANIFEST_FILENAME = "manifest.json"
 
 
 @dataclass(frozen=True)
@@ -198,7 +198,7 @@ def download_replays(
     submission_dir = directory / str(submission_ref)
     submission_dir.mkdir(parents=True, exist_ok=True)
     manifest: dict[str, dict[str, Any]] = {}
-    manifest_path = submission_dir / MANIFEST_FILENAME
+    manifest_path = submission_dir / REPLAY_MANIFEST_FILENAME
     if manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     downloaded = 0

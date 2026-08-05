@@ -10,7 +10,7 @@ from typing import NamedTuple
 from cg.api import Attack, CardData, all_attack, all_card_data
 from submission_analysis.parser import ParsedEpisode, parse_replay
 
-MANIFEST_FILENAME = "manifest.json"
+REPLAY_MANIFEST_FILENAME = "manifest.json"
 
 
 class RatingHistoryRow(NamedTuple):
@@ -90,7 +90,7 @@ def discover_submission_dirs(replays_dir: Path) -> list[Path]:
     return sorted(
         child
         for child in replays_dir.iterdir()
-        if child.is_dir() and (child / MANIFEST_FILENAME).is_file()
+        if child.is_dir() and (child / REPLAY_MANIFEST_FILENAME).is_file()
     )
 
 
@@ -102,7 +102,7 @@ def load_manifest(submission_dir: Path) -> dict[int, dict]:
     :return: Episode ID -> outcome dict (as written by
         ``episodes.download_replays``), or empty if there's no manifest yet.
     """
-    manifest_path = submission_dir / MANIFEST_FILENAME
+    manifest_path = submission_dir / REPLAY_MANIFEST_FILENAME
     if not manifest_path.is_file():
         return {}
     raw = json.loads(manifest_path.read_text(encoding="utf-8"))
