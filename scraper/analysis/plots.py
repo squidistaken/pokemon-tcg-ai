@@ -114,7 +114,7 @@ def plot_card_inclusion(presence: np.ndarray, out_path: Path) -> None:
     :return: None.
     """
     plt = _pyplot()
-    from matplotlib.ticker import PercentFormatter
+    from matplotlib.ticker import FuncFormatter
 
     incl = presence.astype(np.float64).mean(axis=0)
     incl = incl[incl > 0]  # cards used by at least one deck
@@ -124,8 +124,10 @@ def plot_card_inclusion(presence: np.ndarray, out_path: Path) -> None:
         bins = np.geomspace(incl.min(), incl.max(), 51)
     plt.hist(incl, bins=bins, color="#8172b3", edgecolor="white", linewidth=0.3)
     plt.xscale("log")
-    plt.gca().xaxis.set_major_formatter(PercentFormatter(xmax=1.0))
-    plt.xlabel("decks running the card (log scale)")
+    plt.gca().xaxis.set_major_formatter(
+        FuncFormatter(lambda value, _: f"{value:.1E}")
+    )
+    plt.xlabel("fraction of decks running the card (log scale)")
     plt.ylabel("cards")
     plt.title(f"Card inclusion rate ({incl.size} cards used)")
     plt.tight_layout()
