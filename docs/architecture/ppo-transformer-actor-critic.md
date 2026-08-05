@@ -72,14 +72,31 @@ TorchRL assembly are identical across all implementations, so backbones are swap
   pairing is the baseline every richer, permutation-invariant backbone below must beat (Vieira et
   al.), not a placeholder blocked on Phase 2.
 - **`TransformerBackbone`** (`src/models/transformer.py`) — **implemented** (Issue #45). Attention
-  over the *feature groups within one observation*, not over time. Each `StructuredObsAdapter`
+  over the *features within one observation*, not over time. Each `StructuredObsAdapter`
   group (`globals`, `options`, `pokemon`, the zone tables, …) becomes one token via its own linear
   projection plus a learned per-group type embedding; `nn.TransformerEncoder` attends across the
-  ~10 tokens; mean-pooling the result gives `state_repr`. Deliberately shallow (default 1 layer,
-  4 heads) — the sequence is short and the MLP is still the control to beat. Emits no
-  `option_repr`, so it pairs with the same `LinearPolicyHead`/`ValueHead` as the MLP. This is the
-  intermediate step to the per-option-token backbones below, which is why the adapter grew
-  `encode_groups()`/`group_feature_widths` (per-group vectors instead of one concatenation).
+  ~10 tokens; the readout gives `state_repr`. Deliberately shallow by default (1 layer, 4 heads) —
+  the sequence is short and the MLP is still the control to beat.
+
+  The **first run of this backbone underperformed**, and the diagnosis added knobs for each
+  candidate cause (`conf/experiment/tf_*.yaml`, one arm each; see the sweep in
+  `scripts/run_tf_diagnosis.sh`). Defaults reproduce that first run exactly:
+
+  | knob | default | alternative |
+  |---|---|---|
+  | `pooling` | `mean` over tokens | `cls` (learned query token) or `attention` |
+  | `norm_first` / `final_norm` | `false` — torch's post-LN, which wants an LR warmup the PPO config lacks | `true` — pre-LN, trains without warmup |
+  | `token_groups` | `[]` — attention sees only pooled group summaries | e.g. `[pokemon]`, expanding a group into per-entity tokens |
+  | `option_tokens` | `false` | `true` — emits `option_repr` for the pointer head |
+
+  `token_groups` is the important one. The adapter's `encode_groups()` masked-mean-pools each
+  group *before* the trunk sees it, so with the default `[]` the transformer attends over ten
+  group averages — the same 824 features the MLP consumes, merely un-concatenated — and cannot
+  represent "this Pokémon threatens that one". `encode_entity_tokens()` returns the unpooled
+  entities instead. It is opt-in per group because the padded slot counts are large (434 tokens
+  in total, `options` alone being `max_options + 1`) and attention is quadratic, while the league
+  opponent forward runs on CPU inside every worker — already 46% of throughput
+  (`docs/training-performance.md`).
 - **`DeepSetsBackbone`** — permutation-**invariant** pooling (shared per-token MLP → sum/mean pool)
   over entity/hand/option tokens. The lightweight permutation-equivariant option named alongside
   Set Transformers in the literature; far cheaper than attention, order-invariant over cards.
@@ -98,11 +115,21 @@ TorchRL assembly are identical across all implementations, so backbones are swap
 
 ### 3. Heads (`src/models/heads.py`)
 
-- **`PointerPolicyHead`** — pointer/attention-style logits: score each `option_repr` token against
-  a query derived from `state_repr` (dot-product or per-option MLP) → one logit per option, plus a
-  learned **stop** logit → `(..., (max_options + 1))`. Naturally handles the variable-length option set;
-  `MaskedCategorical` + `action_mask` zeroes illegal indices. (The MLP baseline uses a plain
-  `Linear((max_options + 1))` head instead.)
+- **`PointerPolicyHead`** — **implemented** (`model/head=pointer`). Scaled dot product between each
+  `option_repr` token and a query derived from `state_repr` → one logit per option. The option table
+  already carries one row per action slot *including* the synthetic stop at `max_options`, so
+  scoring every row yields exactly `(..., (max_options + 1))` logits and no separate stop logit is
+  needed. Naturally handles the variable-length option set; `MaskedCategorical` + `action_mask`
+  zeroes illegal indices. Cost is linear in the option count — one dot product each — unlike
+  routing the 129 option tokens through the trunk's self-attention.
+
+  This matters more than it looks. `LinearPolicyHead` reads only the pooled `state_repr`, by which
+  point option identity has been averaged away twice (the adapter's masked mean over option rows,
+  then the trunk's mean over tokens), so it can only learn *positional* preferences — "pick slot
+  3" — never "pick the option that KOs". That is a ceiling on the MLP baseline too, and a candidate
+  explanation for both arms flattening out near 0.85 against the random opponent.
+
+  Needs a backbone emitting `option_repr`; `build_actor_critic` raises at construction otherwise.
 - **`ValueHead`** — MLP on `state_repr` → scalar `state_value`.
 - *Alternative (not Phase 1):* the Hearthstone ByteRL work factors the action **auto-regressively**
   as `(type, target)` with a per-step mask instead of one flat softmax. The `Backbone`/`ActorCritic`

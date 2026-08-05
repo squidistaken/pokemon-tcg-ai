@@ -358,6 +358,7 @@ def make_env_factories(
     deck_split: str = "train",
     curriculum: Any = None,
     sampler_spec: dict[str, Any] | None = None,
+    seed_offset: int = 0,
 ) -> list[Callable[[], EnvBase]]:
     """
     Build one environment factory per worker from the Hydra config.
@@ -376,6 +377,10 @@ def make_env_factories(
         a caller that already built one for this exact ``deck_split``.
         Built fresh when ``None``. Ignored when a ``curriculum`` drives the
         train split, which supplies its own spec.
+    :param seed_offset: Added to every worker's seed. Non-zero only when a
+        replacement set of factories is built for a restarted collector, where
+        reusing the original seeds would re-deal the same sequence of matchups,
+        seat assignments and opponent draws each worker already played.
     :return: List of ``cfg.env.num_workers`` picklable environment factories.
     """
     if curriculum is not None and deck_split != "eval":
@@ -400,7 +405,7 @@ def make_env_factories(
             make_env,
             sampler_spec,
             cfg.env.max_options,
-            cfg.seed + worker,
+            cfg.seed + seed_offset + worker,
             opponent_factory,
             encoder,
             deck_switch_steps,

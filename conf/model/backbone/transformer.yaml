@@ -12,6 +12,26 @@ num_layers: 1
 ff_dim: 256
 dropout: 0.0
 activation: gelu
+# Everything below preserves the as-shipped behaviour of the first Issue-45
+# run, so this file stays the reference arm. conf/experiment/tf_*.yaml turn
+# them on one at a time; see src/models/transformer.py for what each does.
+#
+# norm_first=false is torch's default post-LN, the variant that conventionally
+# needs an LR warmup the PPO config does not have. true switches to pre-LN.
+norm_first: false
+# LayerNorm on the encoder output; conventional alongside pre-LN.
+final_norm: false
+# Readout over the token sequence: mean | cls | attention. mean averages
+# semantically incomparable group summaries together.
+pooling: mean
+# Groups to expand into per-entity tokens instead of one pooled summary, e.g.
+# [pokemon] (+18 tokens). Empty means the trunk attends over the adapter's
+# masked-mean group vectors only -- the same features the MLP consumes. Costs
+# adapter.group_slot_counts[name] tokens each, and attention is quadratic.
+token_groups: []
+# Emit per-option tokens as option_repr for model/head=pointer. Linear in the
+# option count, unlike routing options through self-attention.
+option_tokens: false
 # Observation keys to consume, nested under the env's "observation" key.
 # These are StructuredObservationEncoder's top-level groups (see its .spec()),
 # each handled by the adapter and kept as its own token (not flattened).

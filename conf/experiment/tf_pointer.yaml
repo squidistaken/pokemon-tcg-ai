@@ -1,0 +1,32 @@
+# @package _global_
+# Diagnosis arm: score options individually instead of by slot index.
+#
+# LinearPolicyHead maps the pooled state to 129 logits, one per action slot.
+# Option identity has by then been averaged away twice — once by the adapter's
+# masked mean over option rows, once by the trunk's mean over tokens — so the
+# policy can only learn "prefer slot k", never "prefer the option that KOs".
+# That is a ceiling on the MLP baseline too, and is a candidate explanation for
+# both arms flattening out around 0.85 against the random opponent.
+#
+# The pointer head scores each option's own token against a query derived from
+# the state: one dot product per option, linear rather than the quadratic cost
+# of routing 129 option tokens through self-attention. This is the Phase-2 head
+# from docs/architecture/ppo-transformer-actor-critic.md §3.
+defaults:
+  - override /model/head: pointer
+
+model:
+  backbone:
+    # Emits option_repr; the head raises at build time without it.
+    option_tokens: true
+
+wandb:
+  name: tf-pointer-s42
+  tags:
+    - issue-45
+    - tf-diagnosis
+    - pointer-head
+  notes: >-
+    Transformer diagnosis: PointerPolicyHead scoring per-option tokens against
+    a state query, replacing the flat 129-way linear head that could only learn
+    positional slot preferences.

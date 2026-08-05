@@ -156,6 +156,19 @@ class Curriculum:
                 anchors[row],
             )
 
+    def abandon_open_episodes(self) -> None:
+        """
+        Discard every partially observed episode without scoring it.
+
+        Called when the collector's worker pool is rebuilt after one of its
+        processes died: the replacement pool starts every row on a fresh
+        battle, so the residuals banked against the old rows belong to games
+        that will never report ``done``. Clearing them keeps that evidence from
+        being committed under whichever level lands in the row next.
+        """
+        for accumulator in self._open:
+            accumulator.reset()
+
     def publish(self) -> None:
         """
         Recompute the sampling distribution and hand it to the workers.

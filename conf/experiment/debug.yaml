@@ -25,6 +25,9 @@ collector:
   # snapshot -> eval -> shutdown) runs end to end without a long wait.
   frames_per_batch: 256
   total_frames: 512
+  # Never rebuild a dead worker pool. Restarting is for finishing a long run
+  # unattended; here it would swallow the failure this config exists to show.
+  max_restarts: 0
 
 agent:
   frames_per_batch: 256
@@ -39,9 +42,12 @@ agent:
 
 model:
   # A small trunk keeps shape errors legible and the step fast on CPU.
+  # Only backbone-agnostic keys belong here: this experiment has to compose
+  # with whichever `model/backbone` is selected, and a backbone-specific key
+  # (`num_cells`, say) would be merged into the chosen backbone's node and
+  # forwarded by `instantiate` as an unexpected kwarg. embed_dim already does
+  # the shrinking that matters, since every backbone reads it as out_features.
   embed_dim: 32
-  backbone:
-    num_cells: [64, 64]
   value_head:
     num_cells: [64, 64]
 
@@ -57,9 +63,10 @@ train:
 hydra:
   # Debug runs stay out of the dated outputs/ tree, but keep a per-run
   # subdirectory: checkpoint_dir is relative, so a shared directory would let
-  # one debug run inherit the previous run's opponent snapshots.
+  # one debug run inherit the previous run's opponent snapshots. run_uid is
+  # what makes it per-run rather than per-second (see conf/config.yaml).
   run:
-    dir: outputs/debug/${now:%Y-%m-%d_%H-%M-%S}
+    dir: outputs/debug/${now:%Y-%m-%d_%H-%M-%S}-${run_uid:}
   job_logging:
     root:
       level: DEBUG

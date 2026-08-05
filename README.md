@@ -373,7 +373,16 @@ the extracted upload bytes. Any failure aborts before the optional CLI submit.
 Slurm support is kept separately in [`slurm-conf/`](slurm-conf/README.md). The
 profiles select a normal Hydra config and add scheduler-specific overrides;
 they do not participate in local Hydra composition. Complete launch configs are
-available as `baseline`, `ppo`, and `ppo_selfplay`.
+available as `baseline`, `ppo`, `ppo_selfplay`, and `ppo_transformer` (the
+Issue-45 self-attention backbone).
+
+The first `ppo_transformer` run underperformed, so the candidate causes are
+split into one `conf/experiment/tf_*.yaml` overlay each — optimizer steps,
+trunk capacity, LR/entropy schedule, pre-LN, CLS readout, per-entity tokens,
+pointer head — plus `tf_combined` stacking them all.
+[`scripts/run_tf_diagnosis.sh`](scripts/run_tf_diagnosis.sh) submits the sweep,
+one A100 job per arm sharing a W&B group; `--dry-run` prints without
+submitting, and naming an arm submits just that one.
 
 ## CI
 

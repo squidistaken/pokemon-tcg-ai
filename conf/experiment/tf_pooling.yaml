@@ -1,0 +1,28 @@
+# @package _global_
+# Diagnosis arm: read out a CLS token instead of averaging the tokens.
+#
+# The shipped readout is `encoded.mean(dim=-2)` over the ~10 group tokens.
+# Those tokens hold semantically incomparable things — turn counters, prize
+# contents, the option summary, the board — so averaging them is a strictly
+# weaker readout than the MLP's concatenation, which keeps every group in its
+# own coordinates. With num_layers=1 there is exactly one attention op in
+# which to copy the relevant group into every token before the mean destroys
+# that distinction.
+#
+# A learned CLS token instead *queries* the sequence: attention decides which
+# groups to read for this state. `pooling: attention` is the lighter variant
+# (a learned query, no extra sequence position) if this one is unstable.
+model:
+  backbone:
+    pooling: cls
+
+wandb:
+  name: tf-pooling-s42
+  tags:
+    - issue-45
+    - tf-diagnosis
+    - readout
+  notes: >-
+    Transformer diagnosis: CLS-token readout instead of mean-pooling the group
+    tokens, so the trunk can preferentially read one group rather than
+    averaging heterogeneous summaries together.

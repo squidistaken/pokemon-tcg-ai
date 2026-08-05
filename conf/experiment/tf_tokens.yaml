@@ -1,0 +1,32 @@
+# @package _global_
+# Diagnosis arm: let attention see individual Pokemon, not a pooled summary.
+#
+# This is the headline finding. build_actor_critic constructs the adapter from
+# cfg.model.adapter, which never sets `pool`, so it keeps its default True and
+# `encode_groups()` returns the masked-mean-pooled group vectors — byte for
+# byte the same 824 features the MLP consumes, merely un-concatenated. The
+# transformer has therefore never attended over entities; it attends over ten
+# group averages. Attending over pooled summaries cannot express "this Pokemon
+# threatens that one", which is the whole premise of Issue #45.
+#
+# `pokemon` is the group to start with: 18 padded rows (2 seats x (1 active +
+# 8 bench)), so the sequence goes 10 -> 28 tokens. The full unpooled sequence
+# would be 434 tokens (options 129, hand 30, discards 60 each, deck 60,
+# looking 60); attention is quadratic and the league opponent forward runs on
+# CPU inside every worker, where it is already 46% of throughput
+# (docs/training-performance.md). Options are better served by the pointer
+# head, which scores them in linear time — see +experiment=tf_pointer.
+model:
+  backbone:
+    token_groups: [pokemon]
+
+wandb:
+  name: tf-tokens-s42
+  tags:
+    - issue-45
+    - tf-diagnosis
+    - entity-tokens
+  notes: >-
+    Transformer diagnosis: expand the pokemon group into 18 per-entity tokens
+    so attention relates individual Pokemon, instead of attending over the
+    adapter's masked-mean group summary. 10 -> 28 tokens.

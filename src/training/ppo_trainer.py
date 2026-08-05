@@ -85,6 +85,8 @@ class PPOTrainer(Trainer):
             evaluator: Evaluator | MultiEvaluator | None = None,
             eval_interval: int = 0,
             curriculum: Curriculum | None = None,
+            max_collector_restarts: int = 0,
+            rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]] | None = None,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -149,6 +151,10 @@ class PPOTrainer(Trainer):
         :param curriculum: Level curriculum scored from each collected batch and
             republished to the environment workers. None trains on whatever
             distribution the deck sampler already provides.
+        :param max_collector_restarts: Dead worker pools to survive, forwarded
+            to :class:`~src.training.trainer.Trainer`.
+        :param rebuild_env_factories: Per-restart factory builder, forwarded to
+            :class:`~src.training.trainer.Trainer`.
         """
         self._actor_critic = actor_critic
         self._curriculum = curriculum
@@ -169,6 +175,8 @@ class PPOTrainer(Trainer):
             run_config=run_config,
             evaluator=evaluator,
             eval_interval=eval_interval,
+            max_collector_restarts=max_collector_restarts,
+            rebuild_env_factories=rebuild_env_factories,
         )
         self._device = torch.device(device)
         self._num_epochs = num_epochs
@@ -281,6 +289,23 @@ class PPOTrainer(Trainer):
         if self._compile_policy:
             kwargs["compile_policy"] = True
         return kwargs
+
+    def _prepare_restart(self, restart_index: int) -> None:
+        """
+        Drop the curriculum's half-finished episodes before the pool is rebuilt.
+
+        The curriculum accumulates a residual sum per collector row and commits
+        it when that row reports ``done``. A replacement pool starts every row
+        on a fresh battle, so the residuals banked against the dead pool belong
+        to games that will never finish. Left in place they would be committed
+        under the *next* episode's level, scoring a matchup with another
+        matchup's evidence.
+
+        :param restart_index: 1-based index of the restart about to happen.
+        """
+        super()._prepare_restart(restart_index)
+        if self._curriculum is not None:
+            self._curriculum.abandon_open_episodes()
 
     def _set_entropy_coeff(self, value: float) -> None:
         """

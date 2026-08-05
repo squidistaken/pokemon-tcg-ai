@@ -1,0 +1,25 @@
+# @package _global_
+# Diagnosis arm: give the trunk depth comparable to the MLP it must beat.
+#
+# The shipped defaults are num_layers=1 and ff_dim=256. That means the only
+# nonlinearity applied to the observation is a single 128->256->128 feed-forward
+# block on a 128-d token, whereas the MLP baseline runs [256, 256] over the full
+# 824-feature concatenation. The transformer arm was competing with less
+# effective depth than its control, which confounds "attention doesn't help"
+# with "this network is smaller".
+#
+# ff_dim 512 is the conventional 4x d_model; the shipped 256 is 2x.
+model:
+  backbone:
+    num_layers: 2
+    ff_dim: 512
+
+wandb:
+  name: tf-capacity-s42
+  tags:
+    - issue-45
+    - tf-diagnosis
+    - capacity
+  notes: >-
+    Transformer diagnosis: num_layers 1 -> 2 and ff_dim 256 -> 512 (the standard
+    4x d_model), so the trunk is not shallower than the MLP baseline.

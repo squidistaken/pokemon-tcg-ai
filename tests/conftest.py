@@ -80,6 +80,14 @@ class PPOTrainerForTests(PPOTrainer):
         """
         return float(self._loss.entropy_coeff)
 
+    def prepare_restart_for_test(self, restart_index: int) -> None:
+        """
+        Run the pre-restart hook the trainer calls before rebuilding a pool.
+
+        :param restart_index: 1-based index of the restart being simulated.
+        """
+        self._prepare_restart(restart_index)
+
 
 @pytest.fixture
 def structured_obs_spec() -> Composite:

@@ -1,0 +1,9 @@
+# Pointer head: one logit per option, scored from that option's own token
+# rather than from the pooled state (see src/models/heads.py). in_features and
+# n_actions are injected by build_actor_critic from the specs.
+#
+# Needs a backbone that emits option_repr — with the transformer trunk that
+# means `model.backbone.option_tokens=true`. build_actor_critic raises a clear
+# error if the pairing is wrong, so a mismatch fails at construction rather
+# than at the first forward.
+_target_: src.models.heads.PointerPolicyHead

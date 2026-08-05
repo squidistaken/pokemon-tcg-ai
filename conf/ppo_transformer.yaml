@@ -1,0 +1,82 @@
+# Transformer-backbone self-play PPO over the PLR curriculum (Issue #45).
+#
+# The transformer arm of a backbone ablation: identical to the MLP arm in every
+# respect except `model/backbone`, so the W&B group holds two runs whose only
+# difference is the trunk. Launch the counterpart with
+# `model/backbone=mlp` appended; `wandb.name` interpolates the backbone choice,
+# so the two runs label themselves apart automatically.
+#
+# Usage:
+#   ./slurm-conf/train.sh --config ppo_transformer --slurm-config train_gpu
+#   ./slurm-conf/train.sh --config ppo_transformer --slurm-config train_gpu \
+#     model/backbone=mlp                      # matched baseline arm
+defaults:
+  - config
+  - override /agent: ppo
+  - override /train: ppo_selfplay
+  - override /env: curriculum_v2
+  - override /model/backbone: transformer
+  - _self_
+
+# Fixed seed so the two arms see the same deck split, curriculum bootstrap and
+# initialization schedule; the ablation is otherwise unreadable.
+set_seed: true
+seed: 42
+
+paths:
+  # Snapshots dominate the run's footprint (~110 files at the interval below).
+  # Home is quota-limited on Habrok; scratch is not.
+  output_dir: /scratch/${oc.env:USER}/pokemon-tcg-ai/outputs
+
+collector:
+  # 15M was the original budget; the a100 run measured 463 fps, which puts 15M
+  # at ~9h -- inside the 12h wall clock, but it never got there. It died at
+  # 1,323,008 frames (8.8%) when the engine aborted a worker process
+  # ("invalid index 0 >= 0" out of FixedList::checkIndex, reaching
+  # std::terminate where nothing on the Python side can catch it).
+  #
+  # collector.max_restarts now rebuilds the pool and resumes, so that fault is
+  # survivable and no longer caps the budget. 4M is chosen for turnaround
+  # instead: ~2.5h an arm, so the whole diagnosis sweep clears in one queue
+  # round rather than one arm per day. It is also what curriculum-experiment-01
+  # §5 recommends for a readable result at this level count. Raise it once the
+  # sweep has identified which arms are worth a long run.
+  total_frames: 4000000
+
+env:
+  # docs/training-performance.md measured +42% over the default 16. The
+  # train_gpu profile allocates 16 CPUs, so this oversubscribes 2x -- which is
+  # the point: workers sit inside the engine and on ParallelEnv's lockstep
+  # barrier rather than burning CPU, and the profile measured throughput still
+  # climbing at 8x oversubscription.
+  num_workers: 32
+
+train:
+  # pool_size is 5, so the league spans snapshot_interval * 5 frames. At the
+  # inherited 50k that is 250k frames -- under 2% of this budget, i.e. a league
+  # of near-copies of the current policy. 200k spans 1M and lets PFSP's
+  # per-member win rates mature.
+  snapshot_interval: 200000
+  # Measurement only. Fewer, better-averaged points: the reference run's
+  # 20-episode evaluations swung 0.42-0.60 between neighbours.
+  eval_interval: 250000
+  eval_episodes: 40
+  # Off: it costs a series every eval round plus an end-of-run round-robin, and
+  # it ranks checkpoints *within* one run. Turn on for a submission run, not for
+  # an ablation whose comparison is across runs.
+  cross_play: false
+
+wandb:
+  # Shared by every diagnosis arm, so they stack in one group in the UI.
+  # scripts/run_tf_diagnosis.sh overrides this per sweep.
+  group: transformer-diagnosis-45
+  job_type: train
+  tags:
+    - issue-45
+    - backbone-ablation
+    - curriculum
+    - selfplay
+  notes: >-
+    Issue #45: self-attention trunk over the ~10 structured observation groups
+    (one token per group, learned type embedding, shallow) against the flat MLP
+    baseline, at matched hyperparameters on the PLR curriculum.

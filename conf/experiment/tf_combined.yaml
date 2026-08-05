@@ -1,0 +1,47 @@
+# @package _global_
+# Diagnosis arm: every change at once — the "does any of this help?" probe.
+#
+# Deliberately confounded, and that is the point. The single-change arms
+# attribute an effect; this one asks whether there is an effect worth
+# attributing before eight arms of budget go into isolating it. If this loses
+# to the reference run, the problem is not on this list.
+#
+# Run it first if you only have room for one job.
+defaults:
+  - override /model/head: pointer
+
+agent:
+  # 4 -> 64 optimizer steps per collected batch (tf_subbatch).
+  sub_batch_size: 256
+  # Lower start, linear decay, entropy annealed after halfway (tf_schedule).
+  lr: 1.0e-4
+  lr_anneal: true
+  ent_anneal: true
+  ent_warm_frac: 0.5
+
+model:
+  backbone:
+    # Depth comparable to the MLP control (tf_capacity).
+    num_layers: 2
+    ff_dim: 512
+    # Trains without the warmup post-LN would need (tf_preln).
+    norm_first: true
+    final_norm: true
+    # Query the sequence instead of averaging it (tf_pooling).
+    pooling: cls
+    # Attention over individual Pokemon (tf_tokens).
+    token_groups: [pokemon]
+    # Per-option tokens for the pointer head (tf_pointer).
+    option_tokens: true
+
+wandb:
+  name: tf-combined-s42
+  tags:
+    - issue-45
+    - tf-diagnosis
+    - combined
+  notes: >-
+    Transformer diagnosis: all arms stacked (sub_batch 256, lr 1e-4 annealed,
+    entropy annealed, 2 layers, ff_dim 512, pre-LN + final norm, CLS readout,
+    per-entity pokemon tokens, pointer head). Confounded by design — an
+    upper-bound probe, not an attribution.

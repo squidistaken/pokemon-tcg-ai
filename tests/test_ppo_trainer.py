@@ -1,5 +1,6 @@
 import math
 
+import pytest
 import torch
 from torchrl.collectors import Collector
 from torchrl.envs import SerialEnv
@@ -9,6 +10,8 @@ from src.env.random_opponent import RandomOpponent
 from src.policies.ppo_actor import build_actor_critic
 from src.training.env_factory import make_env_factories
 from tests.conftest import PPOTrainerForTests, structured_env_cfg
+from tests.test_curriculum import STEPS, WORKERS, make_curriculum
+from tests.test_curriculum import batch as curriculum_batch
 
 
 def make_random_pool() -> OpponentPool:
@@ -170,3 +173,40 @@ def test_lr_and_entropy_anneal_decrease(structured_model_cfg, structured_obs_spe
     trainer.train()
     assert trainer.current_lr_for_test < 1.0e-3
     assert trainer.current_entropy_coeff_for_test < 0.05
+
+
+def test_restart_abandons_open_curriculum_episodes(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    Rebuilding a dead worker pool must clear the curriculum's row accumulators.
+
+    The trainer owns the wiring; without it the residuals banked against the
+    dead pool's rows are committed under whatever matchup the replacement pool
+    deals into that row next.
+    """
+    curriculum = make_curriculum()
+    trainer = _make_trainer(
+        build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec),
+        action_spec,
+        curriculum=curriculum,
+    )
+
+    curriculum.observe(
+        curriculum_batch(
+            levels=[[0] * STEPS] * WORKERS,
+            residuals=[[3.0] * STEPS] * WORKERS,
+            done=[[False] * STEPS] * WORKERS,
+        )
+    )
+    trainer.prepare_restart_for_test(1)
+    curriculum.observe(
+        curriculum_batch(
+            levels=[[1] * STEPS] * WORKERS,
+            residuals=[[1.0] * STEPS] * WORKERS,
+            done=[[False] * (STEPS - 1) + [True]] * WORKERS,
+        )
+    )
+
+    assert curriculum.buffer.entries[0].visits == 0
+    assert curriculum.buffer.entries[1].mean_residual == pytest.approx(1.0)

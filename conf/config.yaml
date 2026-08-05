@@ -41,9 +41,15 @@ wandb:
 # Keep Hydra's own logs and multirun artifacts under the configured output
 # location as well. The default expands to Hydra's usual outputs/date/time
 # layout; Slurm profiles can redirect the root to scratch storage.
+#
+# run_uid (the Slurm job id, or the pid when unscheduled) is part of the path
+# because the timestamp alone is not unique: Slurm starts the arms of a sweep
+# together, and arms landing in the same second would share one directory,
+# hence one checkpoints/ — overwriting each other's snapshots and loading each
+# other's policies as self-play opponents.
 hydra:
   run:
-    dir: ${paths.output_dir}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${paths.output_dir}/${now:%Y-%m-%d}/${now:%H-%M-%S}-${run_uid:}
   sweep:
-    dir: ${paths.output_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${paths.output_dir}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}-${run_uid:}
     subdir: ${hydra.job.num}
