@@ -68,6 +68,16 @@ window, so no date range avoids this — expect to fetch ~3x the decks you keep,
 bound runs with `--max-decks` rather than assuming a page count. Requests are
 rate-limited to 1/s, so a deep walk is measured in hours.
 
+Bulbapedia hits that ceiling head-on and resolves at **0%**: its `Deck archetypes`
+category is a historical archive rather than a current-meta feed. A full walk of the
+category fetched 111 lists and dropped all 111, blocked by cards from Base Set, Neo
+Genesis, Great Encounters, Legends Awakened, Boundaries Crossed, Phantom Forces and
+similar pre-Scarlet & Violet sets. Unlike the `CRI`/`PBL` drops on the Limitless side,
+these are not a mapping gap to close — a rule can only redirect a name onto a card that
+exists in the pool, and Base Set `Professor Oak` has no `SVI`-onward counterpart. So
+Bulbapedia contributes no decks to the corpus and only permanent noise to the rejection
+ranking; use `--source limitless` when that noise is in the way.
+
 Text-import format (one card per line; set/number optional):
 
 ```

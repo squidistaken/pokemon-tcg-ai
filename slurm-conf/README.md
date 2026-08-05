@@ -88,6 +88,12 @@ through `SCRAPER_LIMIT`, `SCRAPER_MAX_PAGES`, `SCRAPER_PER_TOURNAMENT`,
 an explicit `--max-decks` may still be appended for a smaller run. Discovery also
 accepts `SCRAPER_MAX_DECKS` (default 15000) and `CARD_DISCOVERY_OUT`.
 
+Expect the resulting corpus to be Limitless-only. Bulbapedia's `Deck archetypes`
+pages are historical decks built from pre-Scarlet & Violet sets that are not in
+`EN_Card_Data.csv` and never will be, so all of them drop as unresolved — see the card
+pool section of `scraper/README.md`. The source is still worth running for the card
+research inventory, but it adds no training decks.
+
 Multi-deck training and evaluation use the heuristic corpus by default. Select the
 mapping corpus with the top-level Hydra override:
 
