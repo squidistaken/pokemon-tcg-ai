@@ -85,11 +85,11 @@ src/
     curriculum_deck_sampler.py  DeckSampler drawing each episode's matchup from that channel
     random_opponent.py          Uniform-random opponent baseline
   models/                     Actor-critic network, independent of the policy/training wiring
-    backbone.py                  Backbone ABC + MLPBackbone (DeepSets/SetTransformer/TemporalTransformer/Recurrent planned)
-    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, pools zones for the MLP
-    heads.py                     LinearPolicyHead (flat logits over actions) + ValueHead (scalar critic)
+    backbone.py                  Backbone ABC + MLPBackbone (DeepSets/TemporalTransformer/Recurrent planned)
+    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, pools zones/emits per-entity tokens
+    heads.py                     LinearPolicyHead (flat logits) + PointerPolicyHead (per-option token scoring) + ValueHead (scalar critic)
     actor_critic.py              ActorCritic: shared trunk feeding both heads, tensordict-in/tensordict-out
-    transformer.py                Set-transformer building blocks (placeholder, not yet implemented)
+    transformer.py                TransformerBackbone: self-attention trunk with pooling modes, per-entity token groups, and pointer-head option tokens
   policies/
     random_masked_policy.py     Uniform random policy over the action mask (stand-in for the future PPO actor)
     greedy_policy_opponent.py   Greedy opponent baseline built on a saved ActorCritic checkpoint
@@ -354,11 +354,13 @@ distribution by default, matching training behavior. Pass
 modes re-encode the partial selection before each subsequent choice.
 
 The current portable runtime supports structured-observation checkpoints using
-`MLPBackbone` and `LinearPolicyHead`. The builder strictly reconstructs both the
-training model and portable model, so an unsupported architecture or mismatched
-config fails before an archive is produced. For an old bare state-dict
-checkpoint without embedded config, pass its Hydra config with
-`--config path/to/.hydra/config.yaml`.
+`MLPBackbone` or `TransformerBackbone` (every pooling mode, per-entity token
+groups, learned segment embeddings, and the optional per-option tokens a
+pointer head needs) paired with `LinearPolicyHead` or `PointerPolicyHead`. The
+builder strictly reconstructs both the training model and portable model, so
+an unsupported architecture or mismatched config fails before an archive is
+produced. For an old bare state-dict checkpoint without embedded config, pass
+its Hydra config with `--config path/to/.hydra/config.yaml`.
 
 Every build performs a fail-closed Kaggle preflight before producing output. It
 checks all bundled Python as Python 3.11, rejects dynamic imports, permits only
