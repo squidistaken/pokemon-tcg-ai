@@ -151,6 +151,69 @@ def test_immature_levels_are_never_evicted() -> None:
     assert buffer.insert(2) is not None
 
 
+def test_commit_on_unknown_pair_id_enters_probation_not_the_buffer() -> None:
+    """
+    Lazy discovery must not touch the scored buffer before a level matures.
+    """
+    buffer = make_buffer(capacity=4, min_visits=3)
+
+    buffer.commit(99, 0.5)
+
+    assert buffer.size == 0
+    assert buffer.stats()["curriculum/probation_size"] == 1
+
+
+def test_probation_entry_promotes_at_min_visits() -> None:
+    """
+    A level graduates into the scored buffer only once trustworthy.
+    """
+    buffer = make_buffer(capacity=4, min_visits=3)
+
+    for value in (0.2, 0.4, 0.6):
+        buffer.commit(7, value)
+
+    assert buffer.size == 1
+    assert buffer.stats()["curriculum/probation_size"] == 0
+    entry = buffer.entries[0]
+    assert entry.pair_id == 7
+    assert entry.visits == 3
+    assert entry.mean_residual == pytest.approx(0.4)
+
+
+def test_promotion_evicts_the_weakest_matured_entry_when_full() -> None:
+    """
+    A newly matured discovery must displace the lowest-scoring entry, not stall.
+    """
+    buffer = make_buffer(capacity=1, min_visits=1)
+    buffer.commit(0, 0.1)
+    assert {entry.pair_id for entry in buffer.entries} == {0}
+
+    buffer.commit(1, 0.9)
+
+    assert {entry.pair_id for entry in buffer.entries} == {1}
+    assert buffer.stats()["curriculum/evictions"] == 1
+
+
+def test_lazy_discovery_never_reenters_coverage_mode() -> None:
+    """
+    An in-flight probation entry must not force distribution() back to
+    coverage: that would starve prioritized replay for as long as discovery
+    keeps running, which for a corpus larger than capacity is the whole run.
+    """
+    buffer = make_buffer(capacity=2, min_visits=2)
+    for _ in range(2):
+        buffer.commit(0, 0.1)
+    for _ in range(2):
+        buffer.commit(1, 0.9)
+    assert buffer.size == 2
+
+    buffer.commit(2, 0.5)  # a brand-new pair_id, still immature -> probation only
+
+    assert buffer.size == 2, "the probationary level must not enter the scored buffer yet"
+    distribution = buffer.distribution()
+    assert distribution[1] > distribution[0], "prioritization must survive an in-flight discovery"
+
+
 def test_staleness_lifts_neglected_levels() -> None:
     """
     Without the staleness term a low-scoring level would never be re-measured.
@@ -432,14 +495,45 @@ def test_build_curriculum_disabled_by_default(tmp_path: Path) -> None:
     assert build_curriculum(cfg) is None
 
 
-def test_build_curriculum_rejects_undersized_capacity(tmp_path: Path) -> None:
+def test_build_curriculum_rejects_undersized_capacity_without_exploration(
+    tmp_path: Path,
+) -> None:
     """
-    Silently covering part of the level space would bias the curriculum.
+    A corpus bigger than capacity needs explore_prob, or coverage silently stops.
     """
     cfg = curriculum_cfg(tmp_path, capacity=2)
 
-    with pytest.raises(ValueError, match="capacity"):
+    with pytest.raises(ValueError, match="explore_prob"):
         build_curriculum(cfg)
+
+
+def test_build_curriculum_rejects_out_of_range_explore_prob(tmp_path: Path) -> None:
+    """
+    A probability outside [0, 1] is a config mistake, not a value to clamp.
+    """
+    cfg = curriculum_cfg(tmp_path, explore_prob=1.5)
+
+    with pytest.raises(ValueError, match="explore_prob"):
+        build_curriculum(cfg)
+
+
+def test_build_curriculum_over_capacity_with_exploration_starts_empty(
+    tmp_path: Path,
+) -> None:
+    """
+    An oversized corpus with exploration enabled must not prefill or raise.
+
+    Prefilling would immediately overflow `capacity`; the buffer instead starts
+    empty and relies on lazy discovery through commit()'s probation path,
+    driven by the workers' explore_prob.
+    """
+    cfg = curriculum_cfg(tmp_path, capacity=2, explore_prob=0.5)
+
+    curriculum = build_curriculum(cfg)
+
+    assert curriculum is not None
+    assert curriculum.buffer.size == 0
+    assert curriculum.explore_prob == pytest.approx(0.5)
 
 
 def test_build_curriculum_rejects_spawn(tmp_path: Path) -> None:

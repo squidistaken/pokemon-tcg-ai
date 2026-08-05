@@ -146,7 +146,10 @@ def _load_manifest_for(paths: list[str]) -> dict[str, dict]:
             seen.add(candidate)
             if candidate.exists():
                 try:
-                    manifest.update(json.loads(candidate.read_text()))
+                    data = json.loads(candidate.read_text())
+                    decks = data.get("decks", data)
+                    if isinstance(decks, dict):
+                        manifest.update(decks)
                 except (OSError, json.JSONDecodeError):
                     continue
     return manifest
@@ -390,6 +393,7 @@ def make_env_factories(
             "decks": decks,
             "archetypes": curriculum.archetypes,
             "handles": curriculum.handles,
+            "explore_prob": curriculum.explore_prob,
         }
     elif sampler_spec is None:
         sampler_spec = _build_sampler_spec(cfg, deck_split)

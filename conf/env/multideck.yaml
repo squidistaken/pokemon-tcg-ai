@@ -13,7 +13,7 @@ defaults:
   - default
   - _self_
 
-deck_pool: decks
+deck_pool: ${paths.data_dir}/${deck_corpus}
 deck_matchup: independent
 # Evaluate on mirror matchups so the eval curve tracks piloting skill on the
 # held-out decks, uncoupled from the deck-vs-deck luck that independent (the

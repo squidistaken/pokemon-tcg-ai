@@ -5,7 +5,7 @@ from collections.abc import Iterable
 
 from ..http import HttpClient
 from ..models import RawCard, RawDeck
-from .base import DeckSource
+from .base import DeckSource, SourceFetchError
 
 API_BASE = "https://play.limitlesstcg.com/api"
 
@@ -131,12 +131,9 @@ class LimitlessSource(DeckSource):
         """
         tid = t.get("id")
         day = (t.get("date") or "")[:10]
-        try:
-            standings = self.client.get_json(
-                f"{API_BASE}/tournaments/{tid}/standings", headers=self._headers()
-            )
-        except Exception:  # noqa: BLE001 - one unreachable event shouldn't end the run
-            return
+        standings = self.client.get_json(
+            f"{API_BASE}/tournaments/{tid}/standings", headers=self._headers()
+        )
         taken = 0
         for player in standings:
             decklist = player.get("decklist")
@@ -206,6 +203,7 @@ class LimitlessSource(DeckSource):
         :return: An iterable of :class:`~scraper.models.RawDeck`.
         """
         yielded = 0
+        failures: list[str] = []
         current = max(1, page)
         pages_walked = 0
 
@@ -230,14 +228,33 @@ class LimitlessSource(DeckSource):
                     break
                 if not self._in_window(t.get("date"), since, until):
                     continue  # newer than `until` (or undated with a window set)
-                for deck in self._decks_from_tournament(
-                    t, fmt=fmt, per_tournament=per_tournament
-                ):
-                    yield deck
-                    yielded += 1
-                    if max_decks is not None and yielded >= max_decks:
-                        return
+                try:
+                    decks = self._decks_from_tournament(
+                        t, fmt=fmt, per_tournament=per_tournament
+                    )
+                    for deck in decks:
+                        yield deck
+                        yielded += 1
+                        if max_decks is not None and yielded >= max_decks:
+                            if failures:
+                                raise _source_fetch_error(failures)
+                            return
+                except SourceFetchError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - retain other events
+                    failures.append(
+                        f"tournament {t.get('id')}: {type(exc).__name__}: {exc}"
+                    )
 
             if exhausted_window or len(tournaments) < limit:
                 break  # past the window, or that was the last page
             current += 1
+        if failures:
+            raise _source_fetch_error(failures)
+
+
+def _source_fetch_error(failures: list[str]) -> SourceFetchError:
+    sample = "; ".join(failures[:3])
+    return SourceFetchError(
+        f"{len(failures)} Limitless standings request(s) failed: {sample}"
+    )

@@ -55,10 +55,18 @@ deck_split_seed: 0
 # critic still misjudges. Requires deck_pool and mp_start_method=fork.
 curriculum:
   enabled: false
-  # Maximum matchups scored at once. Must be at least the square of the
-  # archetype count; above it, nothing is ever evicted and the buffer simply
-  # holds the whole level space.
+  # Maximum matchups scored at once. When it covers the whole corpus (>= the
+  # square of the archetype count) every matchup is prefilled up front and
+  # nothing is ever evicted. Below that, the corpus is too large to fit -- set
+  # explore_prob > 0 so the rest is discovered lazily instead of raising.
   capacity: 4000
+  # Probability a worker draws a fresh, uniformly random matchup instead of
+  # replaying from the published distribution, so matchups beyond `capacity`
+  # keep getting discovered and scored throughout the run rather than only
+  # once, before the first publish. Required (> 0) whenever the corpus has
+  # more archetype pairs than `capacity`; 0 (default) is the old
+  # everything-prefilled behaviour, appropriate when it fits.
+  explore_prob: 0.0
   # Rank-distribution temperature; lower is greedier toward top-scoring levels.
   score_temperature: 0.9
   # Weight of the staleness term in the sampling mixture. Set above the PLR

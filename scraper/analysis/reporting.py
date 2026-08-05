@@ -507,11 +507,11 @@ def report_diversity(
 
     :param presence: Boolean deck x card presence matrix.
     :param counts: Integer deck x card copy-count matrix.
-    :param count_sim: Weighted-Jaccard pairwise similarity matrix.
-    :param archetypes: Optional per-deck archetype labels.
+    :param count_sim: Weighted-Jaccard matrix for the pairwise-analysis sample.
+    :param archetypes: Optional archetype labels for that pairwise sample.
     :return: None. Results are printed.
     """
-    n = presence.shape[0]
+    n = count_sim.shape[0]
     iu = np.triu_indices(n, k=1)
     pair_similarities = count_sim[iu]
     mean_dist = float(1.0 - pair_similarities.mean()) if pair_similarities.size else None

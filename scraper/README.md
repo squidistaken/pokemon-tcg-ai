@@ -22,7 +22,7 @@ python -m scraper --source limitless --format standard --limit 20 --verbose
 # --limit is the page size, --max-pages how many pages (0 = until exhausted),
 # --per-tournament 0 takes every published list instead of just the top 8.
 python -m scraper --source limitless --limit 50 --max-pages 0 \
-    --per-tournament 0 --since 2026-01-01 --max-decks 5000 --verbose
+    --per-tournament 0 --since 2026-01-01 --max-decks 15000 --verbose
 
 # Wiki decklists (best effort; older-set cards get dropped as unavailable)
 python -m scraper --source bulbapedia --pages "Abyss (TCG),Aurora Blast (TCG)"
@@ -30,8 +30,15 @@ python -m scraper --source bulbapedia --pages "Abyss (TCG),Aurora Blast (TCG)"
 # Import a decklist you pasted into a file
 python -m scraper --source text --input mylist.txt --name my-deck
 
-# Run every source
-python -m scraper --source all --limit 20
+# Run every network source concurrently (text still requires --source text --input)
+python -m scraper --source all --limit 20 --bulbapedia-max-pages 20
+
+# Fetch card research data only; no deck CSVs or strategy manifests are written
+python -m scraper.discovery --source all --max-decks 15000 \
+    --bulbapedia-max-pages 600
+
+# Fetch once and write isolated mapping/heuristic corpora with separate manifests
+python -m scraper --source all --card-swap-strategy all --out decks
 ```
 
 ### How much a run can find
@@ -43,6 +50,9 @@ Three things bound the yield, and they multiply:
 | Tournaments per page | `--limit` | The API does not cap this; 500 works. |
 | Pages walked | `--max-pages` | Newest-first; paging reaches back years. `0` = until exhausted. |
 | Decks per tournament | `--per-tournament` | Best finish first. `0` = every published list. |
+
+Bulbapedia has its own `--bulbapedia-max-pages` bound. Set it to `0` to follow
+MediaWiki continuation until the configured category is exhausted.
 
 Every player who publishes a list is available — a 220-player event exposes 220
 decklists — so the default `--per-tournament 8` takes about **10%** of what's there.
@@ -57,6 +67,16 @@ resolve at roughly **0-33%**; walking further back instead hits `PAR`, `MEW` and
 window, so no date range avoids this — expect to fetch ~3x the decks you keep, and
 bound runs with `--max-decks` rather than assuming a page count. Requests are
 rate-limited to 1/s, so a deep walk is measured in hours.
+
+Bulbapedia hits that ceiling head-on and resolves at **0%**: its `Deck archetypes`
+category is a historical archive rather than a current-meta feed. A full walk of the
+category fetched 111 lists and dropped all 111, blocked by cards from Base Set, Neo
+Genesis, Great Encounters, Legends Awakened, Boundaries Crossed, Phantom Forces and
+similar pre-Scarlet & Violet sets. Unlike the `CRI`/`PBL` drops on the Limitless side,
+these are not a mapping gap to close — a rule can only redirect a name onto a card that
+exists in the pool, and Base Set `Professor Oak` has no `SVI`-onward counterpart. So
+Bulbapedia contributes no decks to the corpus and only permanent noise to the rejection
+ranking; use `--source limitless` when that noise is in the way.
 
 Text-import format (one card per line; set/number optional):
 
@@ -76,6 +96,9 @@ Energy: 35
   header. This matches `main.read_deck_csv()` and the engine loader exactly, so
   a generated deck can be dropped in as `deck.csv` and submitted unchanged.
 - `decks/manifest.json` — the corpus's provenance record (see below).
+- `decks/mapping-gaps-<run-id>.jsonl.gz` — a fresh, run-specific report of source
+  printings not covered by the reviewed mapper. Production never appends to a
+  previous gap inventory.
 
 Decks are **deduplicated** by card multiset, and any deck that references a card
 outside our card database (unavailable expansion) is **dropped** with a logged
@@ -228,21 +251,36 @@ dropped.
 
 ## Analysing the corpus (`analysis/`)
 
-Once decks are scraped, `python -m scraper.analysis` reads a deck directory and
-reports pairwise similarity (set / weighted Jaccard / card-semantic), clustering
-agreement against the manifest's archetype labels, corpus diversity, deck
-structure, and a metagame summary, then writes a plot suite and a captured
-report to `outputs/deck_analysis/`.
+Once decks are scraped, `uv run python -m scraper.analysis` reads each manifest-backed
+corpus under `decks/` separately and reports pairwise similarity (set / weighted
+Jaccard / card-semantic), clustering agreement against the manifest's archetype
+labels, corpus diversity, deck structure, and a metagame summary. Each corpus's
+plots and captured report are written to
+`outputs/deck_analysis/<corpus-directory>/`. Card usage, archetypes, deck
+structure, set usage, diversity, and metagame statistics use every deck. Only
+the quadratic pairwise similarity, clustering, heatmap, and near-duplicate
+sections use a deterministic random sample, calculated with 99% confidence and
+a ±2% margin of error by default. The calculation uses the conservative 50%
+proportion and finite-population correction.
 
 ```bash
-# Full report over decks/ (writes plots + a text report to outputs/deck_analysis/)
-python -m scraper.analysis
+# Analyze both strategies separately. Writes mapping-resolved/ and
+# heuristic-resolved/ under outputs/deck_analysis/.
+uv run python -m scraper.analysis
+
+# Analyze only one strategy, writing to outputs/deck_analysis/mapping-resolved/.
+uv run python -m scraper.analysis --dir decks/mapping-resolved
+
+# Override the confidence, sample size, or request the full corpus.
+uv run python -m scraper.analysis --confidence-level 0.95
+uv run python -m scraper.analysis --max-decks 5000
+uv run python -m scraper.analysis --max-decks 0
 
 # Collapse near-duplicate lists (weighted-Jaccard >= threshold) to one each.
 # This DELETES the redundant deck files (and their manifest entries), but first
 # folds their observations into the surviving list, tagged `merged_from`, so the
 # popularity signal isn't destroyed along with the files.
-python -m scraper.analysis --prune --dupe-threshold 0.9
+uv run python -m scraper.analysis --dir decks/mapping-resolved --prune --dupe-threshold 0.9
 ```
 
 The metric functions are also importable (`from scraper.analysis import

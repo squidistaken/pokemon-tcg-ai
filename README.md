@@ -56,6 +56,10 @@ Publish a new corpus (auto-increments to the next `decks-vN`):
 `fetch_decks.sh` picks up the highest-numbered release automatically. `build_decks_release.sh` is
 the low-level builder it wraps if you only want the local tarball.
 
+Every deck in a release comes from Limitless. The scraper also walks Bulbapedia, but its
+archetype pages are historical lists whose cards predate the engine's pool, so all of them drop
+as unresolved and none reach the corpus — see the card pool section of `scraper/README.md`.
+
 ## Code structure
 
 ```

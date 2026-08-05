@@ -12,8 +12,13 @@ SOURCES: dict[str, type[DeckSource]] = {
     BulbapediaSource.name: BulbapediaSource,
     TextSource.name: TextSource,
 }
+NETWORK_SOURCES: dict[str, type[DeckSource]] = {
+    LimitlessSource.name: LimitlessSource,
+    BulbapediaSource.name: BulbapediaSource,
+}
 
 __all__ = [
+    "NETWORK_SOURCES",
     "SOURCES",
     "BulbapediaSource",
     "DeckSource",

@@ -77,6 +77,18 @@ class LevelBuffer:
       the optimistic score makes unvisited levels get picked up early without
       needing a separate explore/replay branch.
 
+    That optimistic-score trick is what :meth:`prefill` relies on for a corpus
+    that fits entirely within ``capacity``: every level starts unmeasured
+    together, so the buffer sweeps the whole space once and then prioritizes.
+    It does not work for a corpus *larger* than ``capacity`` (see
+    :meth:`commit`): a level discovered lazily after that initial sweep would
+    sit at ``score() == inf`` next to an already-prioritizing buffer and pull
+    :meth:`distribution` back into full-coverage mode -- for as long as
+    discovery keeps running, i.e. permanently. Levels discovered after
+    construction instead mature in a side table (:meth:`commit`'s "probation"),
+    invisible to :meth:`distribution`, and only enter the scored buffer once
+    trustworthy, evicting the weakest entry already there.
+
     The buffer also tallies win/loss on episodes played against a fixed anchor
     opponent. Those counters take no part in the curriculum; they accumulate
     the matchup matrix that deck selection reads after training.
@@ -123,6 +135,10 @@ class LevelBuffer:
         self._seed = seed
         self._entries: list[LevelEntry] = []
         self._slots: dict[int, int] = {}
+        # Levels seen via commit() but not yet in _entries/_slots: maturing
+        # outside the scored buffer so they never fool distribution() into
+        # full-coverage mode. See the class docstring and commit().
+        self._probation: dict[int, LevelEntry] = {}
         self._episodes = 0
         self._stats = _Stats()
 
@@ -201,18 +217,30 @@ class LevelBuffer:
         """
         Fold one completed episode into a matchup's statistics.
 
+        A ``pair_id`` the buffer has never registered is only possible when the
+        corpus is larger than ``capacity`` and levels are discovered lazily
+        rather than prefilled (see :class:`~src.training.curriculum.Curriculum`
+        and this class's docstring). Such a level accumulates in a probation
+        table -- invisible to :meth:`distribution` -- until it reaches
+        ``min_visits`` and is promoted into the scored buffer via
+        :meth:`_promote`, evicting the weakest entry already there.
+
         :param pair_id: Matchup the episode was played on.
         :param mean_residual: Mean signed critic residual over the episode.
         :param outcome: Result of an anchor episode from the learner's
             perspective (1 win, 0.5 draw, 0 loss), or None when the opponent was
             not the anchor and the game should not enter the matchup matrix.
-        :return: True if the matchup was in the buffer and was updated.
+        :return: True if the episode was recorded, whether into the scored
+            buffer or into probation. False only if a matured probation entry
+            failed to promote because every scored entry was somehow still
+            immature -- kept as a defensive fallback; it cannot happen once the
+            buffer holds any entry, since only already-matured entries ever
+            enter it under lazy discovery.
         """
         self._episodes += 1
         slot = self._slots.get(pair_id)
         if slot is None:
-            self._stats.orphan_commits += 1
-            return False
+            return self._commit_probation(pair_id, mean_residual, outcome)
         entry = self._entries[slot]
         alpha = 1.0 / (entry.visits + 1)
         entry.mean_residual = (1.0 - alpha) * entry.mean_residual + alpha * mean_residual
@@ -223,6 +251,65 @@ class LevelBuffer:
             entry.games += 1.0
             self._stats.anchor_games += 1
         self._stats.commits += 1
+        return True
+
+    def _commit_probation(
+            self,
+            pair_id: int,
+            mean_residual: float,
+            outcome: float | None,
+    ) -> bool:
+        """
+        Fold an episode into a not-yet-scored level's probation record.
+
+        :param pair_id: Matchup identifier not currently held in the buffer.
+        :param mean_residual: Mean signed critic residual over the episode.
+        :param outcome: Anchor-episode outcome, or None.
+        :return: True once recorded; False if maturing it could not be
+            promoted (see :meth:`commit`).
+        """
+        entry = self._probation.setdefault(pair_id, LevelEntry(pair_id=pair_id))
+        alpha = 1.0 / (entry.visits + 1)
+        entry.mean_residual = (1.0 - alpha) * entry.mean_residual + alpha * mean_residual
+        entry.visits += 1
+        if outcome is not None:
+            entry.wins += outcome
+            entry.games += 1.0
+            self._stats.anchor_games += 1
+        self._stats.commits += 1
+        if entry.visits < self._min_visits:
+            return True
+        del self._probation[pair_id]
+        if self._promote(entry):
+            return True
+        self._stats.orphan_commits += 1
+        return False
+
+    def _promote(self, entry: LevelEntry) -> bool:
+        """
+        Insert a matured probation entry into the scored buffer.
+
+        Unlike :meth:`insert`, this never places a level at zero visits: it is
+        only ever called with an entry that already cleared ``min_visits`` in
+        probation, so it is immediately eligible to be an eviction victim
+        itself once matured further.
+
+        :param entry: Matured entry to insert.
+        :return: True once placed; False if the buffer was full and every held
+            entry was somehow still immature (see :meth:`commit`).
+        """
+        entry.last_visit = self._episodes
+        if self.size < self._capacity:
+            self._entries.append(entry)
+            self._slots[entry.pair_id] = self.size - 1
+            return True
+        victim = self._eviction_candidate()
+        if victim is None:
+            return False
+        del self._slots[self._entries[victim].pair_id]
+        self._entries[victim] = entry
+        self._slots[entry.pair_id] = victim
+        self._stats.evictions += 1
         return True
 
     def score(self, entry: LevelEntry) -> float:
@@ -353,6 +440,7 @@ class LevelBuffer:
             "curriculum/orphan_commits": float(self._stats.orphan_commits),
             "curriculum/evictions": float(self._stats.evictions),
             "curriculum/anchor_games": float(self._stats.anchor_games),
+            "curriculum/probation_size": float(len(self._probation)),
         }
         if matured:
             scores = np.array([abs(entry.mean_residual) for entry in matured])
