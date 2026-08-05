@@ -256,7 +256,12 @@ corpus under `decks/` separately and reports pairwise similarity (set / weighted
 Jaccard / card-semantic), clustering agreement against the manifest's archetype
 labels, corpus diversity, deck structure, and a metagame summary. Each corpus's
 plots and captured report are written to
-`outputs/deck_analysis/<corpus-directory>/`.
+`outputs/deck_analysis/<corpus-directory>/`. Card usage, archetypes, deck
+structure, set usage, diversity, and metagame statistics use every deck. Only
+the quadratic pairwise similarity, clustering, heatmap, and near-duplicate
+sections use a deterministic random sample, calculated with 99% confidence and
+a ±2% margin of error by default. The calculation uses the conservative 50%
+proportion and finite-population correction.
 
 ```bash
 # Analyze both strategies separately. Writes mapping-resolved/ and
@@ -265,6 +270,11 @@ uv run python -m scraper.analysis
 
 # Analyze only one strategy, writing to outputs/deck_analysis/mapping-resolved/.
 uv run python -m scraper.analysis --dir decks/mapping-resolved
+
+# Override the confidence, sample size, or request the full corpus.
+uv run python -m scraper.analysis --confidence-level 0.95
+uv run python -m scraper.analysis --max-decks 5000
+uv run python -m scraper.analysis --max-decks 0
 
 # Collapse near-duplicate lists (weighted-Jaccard >= threshold) to one each.
 # This DELETES the redundant deck files (and their manifest entries), but first

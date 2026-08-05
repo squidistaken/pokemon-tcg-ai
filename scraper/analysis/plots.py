@@ -48,7 +48,8 @@ def save_heatmap(
 
     plt.figure(figsize=(10, 8))
     sns.heatmap(sim, cmap="YlGnBu", xticklabels=False, yticklabels=False, square=True)
-    plt.title(title + (" (ordered by archetype)" if archetypes is not None else ""))
+    suffix = "ordered by archetype; " if archetypes is not None else ""
+    plt.title(f"{title} ({suffix}{sim.shape[0]} decks considered)")
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
@@ -96,7 +97,7 @@ def plot_similarity_histogram(count_sim: np.ndarray, threshold: float, out_path:
     plt.axvline(threshold, color="#c44e52", linestyle="--", label=f"near-dup >= {threshold:.2f}")
     plt.xlabel("weighted-Jaccard similarity")
     plt.ylabel("deck pairs")
-    plt.title("Pairwise deck similarity")
+    plt.title(f"Pairwise deck similarity ({count_sim.shape[0]} decks considered)")
     plt.legend()
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
@@ -113,11 +114,18 @@ def plot_card_inclusion(presence: np.ndarray, out_path: Path) -> None:
     :return: None.
     """
     plt = _pyplot()
+    from matplotlib.ticker import PercentFormatter
+
     incl = presence.astype(np.float64).mean(axis=0)
     incl = incl[incl > 0]  # cards used by at least one deck
     plt.figure(figsize=(8, 5))
-    plt.hist(incl, bins=50, color="#8172b3", edgecolor="white", linewidth=0.3)
-    plt.xlabel("fraction of decks running the card")
+    bins: int | np.ndarray = 1
+    if incl.size > 1 and incl.min() < incl.max():
+        bins = np.geomspace(incl.min(), incl.max(), 51)
+    plt.hist(incl, bins=bins, color="#8172b3", edgecolor="white", linewidth=0.3)
+    plt.xscale("log")
+    plt.gca().xaxis.set_major_formatter(PercentFormatter(xmax=1.0))
+    plt.xlabel("decks running the card (log scale)")
     plt.ylabel("cards")
     plt.title(f"Card inclusion rate ({incl.size} cards used)")
     plt.tight_layout()
