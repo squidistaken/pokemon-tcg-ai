@@ -8,6 +8,9 @@ visible that the walk does not keep requesting pages once it is provably done.
 
 from __future__ import annotations
 
+import pytest
+
+from scraper.sources.base import SourceFetchError
 from scraper.sources.limitless import LimitlessSource
 
 
@@ -240,6 +243,8 @@ def test_an_unreachable_tournament_does_not_end_the_run():
     client = Flaky(pages, {"fine": [standing(1, "a")]})
     src = LimitlessSource(client)  # type: ignore[arg-type]
 
-    decks = list(src.iter_decks(limit=2, max_pages=1))
+    decks = iter(src.iter_decks(limit=2, max_pages=1))
 
-    assert [d.event for d in decks] == ["Event fine"]
+    assert next(decks).event == "Event fine"
+    with pytest.raises(SourceFetchError, match="boom"):
+        next(decks)

@@ -6,6 +6,10 @@ from collections.abc import Iterable
 from ..models import RawDeck
 
 
+class SourceFetchError(RuntimeError):
+    """A source completed partially because one or more remote requests failed."""
+
+
 class DeckSource(abc.ABC):
     """Common interface for deck sources: something that yields ``RawDeck``s."""
 

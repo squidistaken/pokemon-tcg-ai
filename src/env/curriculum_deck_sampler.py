@@ -34,6 +34,15 @@ class CurriculumDeckSampler:
     sampler falls back to a uniformly random archetype pair. That is the
     correct behaviour rather than an error: collection starts before the first
     update, so the first batch is necessarily uncurated.
+
+    ``explore_prob`` extends that same fallback into an ongoing mechanism: with
+    that probability, every episode (not just ones before the first publish)
+    draws a uniformly random pair instead of one from the published
+    distribution. This is what lets the learner-side buffer discover matchups
+    lazily (:meth:`~src.env.level_buffer.LevelBuffer.commit`) when the corpus
+    is larger than the buffer's capacity -- without it, only whatever handful
+    of pairs happened to be drawn before the very first publish would ever be
+    scored, and the buffer would never grow past that.
     """
 
     def __init__(
@@ -42,6 +51,7 @@ class CurriculumDeckSampler:
             archetypes: ArchetypeIndex,
             handles: CurriculumHandles,
             seed: int | None = None,
+            explore_prob: float = 0.0,
     ) -> None:
         """
         :param decks: The deck pool, indexed by the positions ``archetypes``
@@ -49,8 +59,13 @@ class CurriculumDeckSampler:
         :param archetypes: Grouping of ``decks`` into archetypes.
         :param handles: Shared channel the learner publishes the distribution to.
         :param seed: Seed for the within-archetype list draw and the fallback.
-        :raises ValueError: If the pool is empty or an archetype references a
-            deck position the pool does not contain.
+        :param explore_prob: Probability of drawing a fresh, uniformly random
+            archetype pair instead of one from the published distribution, so
+            unseen matchups keep being discovered even after publishing starts.
+            0 (default) never explores, matching the pre-existing behaviour.
+        :raises ValueError: If the pool is empty, an archetype references a
+            deck position the pool does not contain, or ``explore_prob`` is out
+            of ``[0, 1]``.
         """
         if not decks:
             raise ValueError("CurriculumDeckSampler requires a non-empty deck pool")
@@ -61,10 +76,13 @@ class CurriculumDeckSampler:
                         f"archetype {archetypes.names[archetype]!r} references deck "
                         f"position {position}, but the pool holds {len(decks)} decks"
                     )
+        if not 0.0 <= explore_prob <= 1.0:
+            raise ValueError(f"explore_prob must be in [0, 1], got {explore_prob}")
         self._decks = [list(deck) for deck in decks]
         self._archetypes = archetypes
         self._handles = handles
         self._rng = random.Random(seed)
+        self._explore_prob = explore_prob
         self._level_id = NO_LEVEL
 
     @property
@@ -110,10 +128,15 @@ class CurriculumDeckSampler:
 
     def _draw_pair(self) -> tuple[int, int]:
         """
-        Draw an archetype pair from the published distribution.
+        Draw an archetype pair, from the published distribution or fresh.
 
         :return: ``(agent archetype, opponent archetype)``.
         """
+        if self._explore_prob > 0.0 and self._rng.random() < self._explore_prob:
+            return (
+                self._rng.randrange(self._archetypes.count),
+                self._rng.randrange(self._archetypes.count),
+            )
         size = int(self._handles.size[0].item())
         if size <= 0:
             return (

@@ -45,6 +45,52 @@ class RawDeck:
         return sum(c.count for c in self.cards)
 
 
+@dataclass(frozen=True)
+class CardSwap:
+    """One auditable source-printing to competition-card substitution."""
+
+    source_name: str
+    source_set: str | None
+    source_number: str | None
+    count: int
+    target_id: int
+    target_name: str
+    kind: str  # "variant" | "mapping"
+    confidence: float | None
+    rationale: str
+    mapping_confidence: int | None = None
+    rule_id: str | None = None
+    family_id: str | None = None
+    source_stage: str | None = None
+    source_previous_stage: str | None = None
+
+    def to_json(self) -> dict[str, str | int | float | None]:
+        """Return the stable representation stored on a manifest observation."""
+        result: dict[str, str | int | float | None] = {
+            "source_name": self.source_name,
+            "source_set": self.source_set,
+            "source_number": self.source_number,
+            "count": self.count,
+            "target_id": self.target_id,
+            "target_name": self.target_name,
+            "kind": self.kind,
+            "rationale": self.rationale,
+        }
+        if self.confidence is not None:
+            result["confidence"] = self.confidence
+        if self.mapping_confidence is not None:
+            result["mapping_confidence"] = self.mapping_confidence
+        if self.rule_id is not None:
+            result["rule_id"] = self.rule_id
+        if self.family_id is not None:
+            result["family_id"] = self.family_id
+        if self.source_stage is not None:
+            result["source_stage"] = self.source_stage
+        if self.source_previous_stage is not None:
+            result["source_previous_stage"] = self.source_previous_stage
+        return result
+
+
 @dataclass
 class ResolvedDeck:
     """The result of resolving a RawDeck against the card index."""
@@ -54,6 +100,10 @@ class ResolvedDeck:
     unresolved_cards: list[RawCard] = field(default_factory=list)
     # Fuzzy substitutions applied, for auditing: (scraped name -> matched name, score).
     fuzzy_matches: list[tuple[str, str, float]] = field(default_factory=list)
+    # Structured swaps applied, retained per source observation in the manifest.
+    swaps: list[CardSwap] = field(default_factory=list)
+    # Candidates rejected by post-resolution copy-count or ACE SPEC guards.
+    swap_failures: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:

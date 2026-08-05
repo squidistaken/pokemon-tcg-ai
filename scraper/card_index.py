@@ -33,6 +33,15 @@ COL_NUMBER = "Collection No."
 COL_STAGE = "Stage (Pokémon)/Type (Energy and Trainer)"
 COL_RULE = "Rule"
 COL_PREV = "Previous stage"
+COL_HP = "HP"
+COL_TYPE = "Type"
+COL_WEAKNESS = "Weakness"
+COL_RESISTANCE = "Resistance (Type)"
+COL_RETREAT = "Retreat"
+COL_MOVE = "Move Name"
+COL_COST = "Cost"
+COL_DAMAGE = "Damage"
+COL_EFFECT = "Effect Explanation"
 
 _ENERGY_WORDS = {
     "G": ["grass"],
@@ -94,6 +103,33 @@ def _power_markers(normalized: str) -> frozenset[str]:
     return frozenset(t for t in normalized.split() if t in _POWER_MARKERS)
 
 
+def _optional_int(value: str | None) -> int | None:
+    match = re.search(r"\d+", value or "")
+    return int(match.group()) if match else None
+
+
+@dataclass
+class CardProfile:
+    """Gameplay fields aggregated across every CSV row for one Card ID."""
+
+    card_id: int
+    name: str
+    stage: str
+    rule: str
+    previous_stage: str | None
+    hp: int | None
+    energy_type: str | None
+    weakness: str | None
+    resistance: str | None
+    retreat: int | None
+    moves: list[tuple[str, str, str, str]]
+
+    @property
+    def searchable_text(self) -> str:
+        """Flatten attacks, abilities, costs, damage, and effects for auditing."""
+        return " ".join(part for move in self.moves for part in move if part)
+
+
 @dataclass
 class CardInfo:
     """One card's identity and the per-ID flags the deck validator needs."""
@@ -102,6 +138,7 @@ class CardInfo:
     name: str
     set_code: str
     number: str | None
+    stage: str
     is_basic_energy: bool
     is_basic_pokemon: bool
     is_ace_spec: bool
@@ -112,9 +149,10 @@ class MatchResult(NamedTuple):
     """Outcome of resolving one scraped card, for auditability."""
 
     card_id: int | None
-    method: str  # "exact" | "energy" | "fuzzy" | "unresolved"
+    method: str  # "exact" | "variant" | "energy" | "fuzzy" | "ambiguous" | "unresolved"
     matched_name: str | None = None
     score: float | None = None  # similarity ratio for fuzzy matches
+    candidate_ids: tuple[int, ...] = ()
 
 
 class CardIndex:
@@ -128,6 +166,7 @@ class CardIndex:
         """
         self.csv_path = csv_path
         self.by_id: dict[int, CardInfo] = {}
+        self.profiles: dict[int, CardProfile] = {}
         self.available_sets: set[str] = set()
         self._by_name_set_no: dict[tuple[str, str, str | None], int] = {}
         self._by_name_set: dict[tuple[str, str], list[int]] = {}
@@ -149,9 +188,6 @@ class CardIndex:
                 if not raw_id.isdigit():
                     continue
                 cid = int(raw_id)
-                if cid in self.by_id:
-                    continue  # multi-attack cards repeat the ID; keep the first row
-
                 stage = (row.get(COL_STAGE) or "").strip()
                 rule = (row.get(COL_RULE) or "").strip()
                 name = (row.get(COL_NAME) or "").strip()
@@ -159,11 +195,37 @@ class CardIndex:
                 number = normalize_number(row.get(COL_NUMBER))
                 prev = (row.get(COL_PREV) or "").strip()
 
+                profile = self.profiles.setdefault(
+                    cid,
+                    CardProfile(
+                        card_id=cid,
+                        name=name,
+                        stage=stage,
+                        rule=rule,
+                        previous_stage=prev if prev and prev.lower() != "n/a" else None,
+                        hp=_optional_int(row.get(COL_HP)),
+                        energy_type=(row.get(COL_TYPE) or "").strip() or None,
+                        weakness=(row.get(COL_WEAKNESS) or "").strip() or None,
+                        resistance=(row.get(COL_RESISTANCE) or "").strip() or None,
+                        retreat=_optional_int(row.get(COL_RETREAT)),
+                        moves=[],
+                    ),
+                )
+                profile.moves.append(
+                    tuple(
+                        (row.get(column) or "").strip()
+                        for column in (COL_MOVE, COL_COST, COL_DAMAGE, COL_EFFECT)
+                    )
+                )
+                if cid in self.by_id:
+                    continue  # multi-attack cards repeat the ID; keep the first row
+
                 info = CardInfo(
                     card_id=cid,
                     name=name,
                     set_code=set_code,
                     number=number,
+                    stage=stage,
                     is_basic_energy=(stage == "Basic Energy"),
                     is_basic_pokemon=(stage == "Basic Pokémon"),
                     is_ace_spec=(rule == "ACE SPEC"),
@@ -222,6 +284,10 @@ class CardIndex:
         """
         return self.match(name, set_code, number).card_id
 
+    def candidates_for_name(self, name: str) -> tuple[int, ...]:
+        """Return every competition Card ID with this normalized name."""
+        return tuple(self._by_name.get(normalize_name(name), ()))
+
     def match(
         self,
         name: str,
@@ -250,9 +316,12 @@ class CardIndex:
                 hit = self._by_name_set_no.get((nm, skey, num))
                 if hit is not None:
                     return MatchResult(hit, "exact", nm)
-            hits = self._by_name_set.get((nm, skey))
-            if hits:
-                return MatchResult(hits[0], "exact", nm)
+            hits = self._by_name_set.get((nm, skey), [])
+            if len(hits) == 1:
+                method = "exact" if num is None else "variant"
+                return MatchResult(hits[0], method, nm)
+            if len(hits) > 1:
+                return MatchResult(None, "ambiguous", nm, candidate_ids=tuple(hits))
 
         # The card table carries one printing per card, so the set a source
         # reports is usually a reprint that is not in it. Treating the set as a
@@ -261,10 +330,13 @@ class CardIndex:
         hits = self._by_name.get(nm)
         if hits:
             if num is not None:
-                for cid in hits:
-                    if self.by_id[cid].number == num:
-                        return MatchResult(cid, "exact", nm)
-            return MatchResult(hits[0], "exact", nm)
+                numbered = [cid for cid in hits if self.by_id[cid].number == num]
+                if len(numbered) == 1:
+                    return MatchResult(numbered[0], "variant", nm)
+            if len(hits) == 1:
+                method = "variant" if skey or num is not None else "exact"
+                return MatchResult(hits[0], method, nm)
+            return MatchResult(None, "ambiguous", nm, candidate_ids=tuple(hits))
 
         return self._fuzzy_match(nm, skey)
 
@@ -306,6 +378,14 @@ class CardIndex:
             )
             if not hits:
                 return MatchResult(None, "unresolved")
+            if len(hits) > 1:
+                return MatchResult(
+                    None,
+                    "ambiguous",
+                    best_name,
+                    round(best_score, 3),
+                    tuple(hits),
+                )
             return MatchResult(
                 hits[0], "fuzzy", best_name, round(best_score, 3)
             )

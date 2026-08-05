@@ -22,7 +22,7 @@ from scraper.analysis.loading import count_unique_decks
 from scraper.analysis.prune import prune_near_duplicates
 from scraper.card_index import CardIndex
 from scraper.manifest import DeckEntry, Manifest, ManifestError, Observation
-from scraper.models import RawCard, RawDeck, ResolvedDeck
+from scraper.models import CardSwap, RawCard, RawDeck, ResolvedDeck
 from scraper.pipeline import RunSummary, process_deck
 from scraper.writer import DeckWriter, deck_hash, read_deck_ids
 from src.env.deck import load_deck
@@ -565,11 +565,79 @@ def test_manifest_round_trips_through_json():
             placing=4,
             url="https://example.test/e",
             external_ids={"tournament_id": "t"},
+            substitutions=[
+                {
+                    "source_name": "Charmeleon",
+                    "source_set": "OBF",
+                    "source_number": "27",
+                    "count": 2,
+                    "target_id": 927,
+                    "target_name": "Charmeleon",
+                    "kind": "variant",
+                    "confidence": 0.9,
+                    "rationale": "same-name gameplay profile",
+                }
+            ],
             merged_from="a-2",
         )
     )
     restored = Manifest.from_json(Manifest(decks={"a": entry}).to_json())
     assert restored.decks["a"] == entry
+
+
+def test_v2_observations_load_without_substitution_provenance():
+    restored = Manifest.from_json(
+        {
+            "schema_version": 2,
+            "decks": {
+                "a": {
+                    "file": "a.csv",
+                    "id_hash": "abc",
+                    "archetype": "A",
+                    "observations": [{"source": "limitless"}],
+                }
+            },
+        }
+    )
+
+    assert restored.read_version == 2
+    assert restored.decks["a"].observations[0].substitutions == []
+
+
+def test_rescrape_backfills_missing_substitution_provenance(tmp_path):
+    resolved = make_deck(sixty(), external_ids={"event": "1"})
+    writer = DeckWriter(str(tmp_path))
+    writer.write(resolved)
+    resolved.swaps.append(
+        CardSwap(
+            source_name="Charmeleon",
+            source_set="OBF",
+            source_number="27",
+            count=2,
+            target_id=927,
+            target_name="Charmeleon",
+            kind="mapping",
+            confidence=None,
+            rationale="reviewed mapping fixture",
+            mapping_confidence=4,
+            rule_id="reviewed-rule-1",
+            family_id="family-1",
+            source_stage="Stage 1 Pokémon",
+            source_previous_stage="Charmander",
+        )
+    )
+
+    result = writer.write(resolved)
+
+    assert result.new_observation is False
+    observation = next(iter(writer.manifest.decks.values())).observations[0]
+    assert observation.substitutions[0]["target_id"] == 927
+    assert observation.substitutions[0]["rule_id"] == "reviewed-rule-1"
+    assert observation.substitutions[0]["family_id"] == "family-1"
+    assert observation.substitutions[0]["source_stage"] == "Stage 1 Pokémon"
+    assert observation.substitutions[0]["source_previous_stage"] == "Charmander"
+    assert observation.substitutions[0]["mapping_confidence"] == 4
+    assert "confidence" not in observation.substitutions[0]
 
 
 def test_missing_manifest_is_an_empty_one(tmp_path):
@@ -603,7 +671,15 @@ def raw_from_ids(ids: list[int], index: CardIndex, **kwargs) -> RawDeck:
     :return: The :class:`~scraper.models.RawDeck`.
     """
     counts = Counter(ids)
-    cards = [RawCard(count=n, name=index.by_id[cid].name) for cid, n in counts.items()]
+    cards = [
+        RawCard(
+            count=n,
+            name=index.by_id[cid].name,
+            set_code=index.by_id[cid].set_code,
+            number=index.by_id[cid].number,
+        )
+        for cid, n in counts.items()
+    ]
     fields = {"source": "test", "archetype": "Example Deck", "cards": cards} | kwargs
     return RawDeck(**fields)
 
