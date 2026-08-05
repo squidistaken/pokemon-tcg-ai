@@ -1,0 +1,40 @@
+# @package _global_
+# pointer-transfer-45, gap-fill arm — the readout variant nobody ran.
+#
+# transformer-diagnosis-45 §9 "Still untested": "`pooling: attention` — the
+# lighter variant `tf_pooling`'s own header names as a fallback was never
+# run." `tf_pooling` tested `pooling: cls` instead, and that arm was refuted
+# cleanly (-0.153 snap, third-worst in the sweep, entropy re-inflating late —
+# §2's "the signature of a policy being pushed around by a strengthening
+# league rather than converging"). CLS forces every readout through one added
+# sequence position competing with real tokens for attention; the attention
+# variant instead scores the *existing* encoder output against a learned query
+# (`(encoded @ pool_query) / sqrt(out_features)`, softmax, weighted sum —
+# transformer.py's `pooling="attention"` branch), so it adds one parameter
+# vector instead of a token, and it was never given the chance CLS's clean
+# refutation might have unfairly foreclosed.
+#
+# One change on the pointer baseline, matching arms 3/4's isolation
+# discipline rather than arm 5's bundling: mean -> attention pooling only, at
+# num_layers=1 like the reference and every other single-change arm. If this
+# also loses to arm 4, both non-mean readouts are refuted and `mean` stops
+# being merely the default — it becomes the tested winner among three.
+defaults:
+  - override /model/head: pointer
+
+model:
+  backbone:
+    option_tokens: true
+    pooling: attention
+
+wandb:
+  name: ptr-tf-poolattn-s${seed}
+  tags:
+    - issue-45
+    - ptr-sweep
+    - pointer-head
+    - pooling
+  notes: >-
+    Pointer-transfer sweep: mean -> attention pooling on top of the pointer
+    head, the lighter CLS alternative transformer-diagnosis-45 flagged as
+    still untested. One change, isolated on the pointer baseline like arms 3/4.

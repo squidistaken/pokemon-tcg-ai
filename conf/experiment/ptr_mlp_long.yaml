@@ -1,0 +1,62 @@
+# @package _global_
+# pointer-transfer-45, follow-up tier — the long run this sweep was missing a
+# counterpart for.
+#
+# ptr_tf_long asks how far the pointer head goes on the transformer trunk at
+# 12M frames. If ptr_mlp_pointer (arm 2) reproduces the effect at 4M — the
+# decisive question this whole sweep exists to answer — nothing tells you
+# whether that holds at the longer horizon too, and the original diagnosis's
+# gap list is explicit that no budget beyond 4M has ever had a matched MLP
+# control: "whether the transformer beats the MLP at any budget — no matched
+# control at any frame count" is on transformer-diagnosis-45 §9's "still
+# untested" list, unqualified by run length. Without this arm, that gap would
+# still be open past 4M even after the rest of the sweep lands.
+#
+# Same total_frames (12M) as ptr_tf_long rather than a wall-clock-matched
+# frame count, deliberately: the point of a shared frame budget is an
+# overlayable win-rate-vs-frames curve between the two backbones, the same
+# read arm 1 vs arm 3 and arm 2 vs arm 4 give at 4M. The 2.4x throughput gap
+# is already quantified elsewhere (transformer-diagnosis-45 §3); this arm
+# doesn't need to re-litigate it by chasing equal wall clock instead of equal
+# frames.
+#
+# Cost note, unmeasured rather than guessed: MLP + option_tokens has no
+# attention and one extra Linear over the option rows, so its throughput
+# should sit close to the plain MLP+linear reference's measured 1068 fps —
+# call it ~950-1068 once actually measured. At that range, 12M frames is
+# roughly 3-3.5h against the train_gpu profile's 12:00:00, leaving several
+# hours of the SLURM window unused. That's fine for a first matched-frames
+# read; if ptr_mlp_pointer's fps comes back in that range, raising
+# total_frames here (e.g. to 30-35M, matching ptr_tf_long's wall clock rather
+# than its frame count) is the natural next step, but is left for whoever
+# reads that number rather than assumed here.
+#
+# NOTE: the backbone swap is NOT done here via `override /model/backbone: mlp`
+# in this file's defaults list, same reason as ptr_mlp_linear.yaml/
+# ptr_mlp_pointer.yaml — ppo_transformer.yaml's own defaults already override
+# /model/backbone to `transformer`, and a second override of the same group
+# from an appended +experiment config is silently dropped. Append
+# `model/backbone=mlp` as a plain CLI group swap instead; run_ptr_sweep.sh
+# does this for every mlp_* arm including this one.
+defaults:
+  - override /model/head: pointer
+
+model:
+  backbone:
+    option_tokens: true
+
+collector:
+  total_frames: 12000000
+
+wandb:
+  name: ptr-mlp-long-s${seed}
+  tags:
+    - issue-45
+    - ptr-sweep
+    - pointer-head
+    - mlp-backbone
+    - long-run
+  notes: >-
+    Pointer-transfer sweep follow-up: MLP + pointer head at 12M frames, the
+    matched counterpart to ptr_tf_long. Closes the "no matched MLP control at
+    any frame count" gap past 4M.

@@ -12,6 +12,23 @@
 # the state: one dot product per option, linear rather than the quadratic cost
 # of routing 129 option tokens through self-attention. This is the Phase-2 head
 # from docs/architecture/ppo-transformer-actor-critic.md §3.
+#
+# What this run could not have tested (found after the fact, fixed since —
+# see docs/architecture/transformer-diagnosis-45.md's "what changed since"
+# note). Two defects, both in option validity: (1) a slot's realness was
+# `options.card_id != 0`, but `card_id` is 0 for YES/NO/NUMBER/RETREAT/END
+# options — which includes the stop action itself — so the stop slot's raw
+# row was structurally identical to a padded row's, and the pointer head gave
+# both the exact same logit (measured 0.056268 for each). The head could not
+# have learned any identity-based preference for "the stop action"
+# specifically, only whatever the state-derived query happened to produce
+# against that shared constant vector. (2) The same rule fed the pooled
+# `options` group this arm's `state_repr` also depends on: any turn offering
+# only those option types made that pooled vector exactly zero. Fixed now —
+# validity is `cats[..., 0] != 0` plus an always-true stop slot, and the stop
+# slot gets its own learned segment embedding distinct from every real option
+# and from padding. See conf/experiment/ptr_tf_pointer.yaml, the same config
+# with both fixes, re-run at 3 seeds.
 defaults:
   - override /model/head: pointer
 

@@ -7,6 +7,21 @@
 # to the reference run, the problem is not on this list.
 #
 # Run it first if you only have room for one job.
+#
+# What this run could not have tested (found after the fact, fixed since —
+# see docs/architecture/transformer-diagnosis-45.md's "what changed since"
+# note). It inherits both defects the single-change arms hit separately:
+# `token_groups: [pokemon]` was seat-blind (swapping the two players' pokemon
+# rows left `state_repr` bit-identical, see tf_tokens.yaml's note) and
+# `option_tokens: true` gave the stop slot a representation identical to
+# padding (same logit, 0.056268, for both — see tf_pointer.yaml's note), on
+# top of the pooled `options` vector going exactly zero on yes/no/end-only
+# turns. Both are fixed now (unconditional segment embeddings; option
+# validity is `cats[..., 0] != 0` plus an always-true stop slot). There is no
+# single re-run of this exact "everything at once" arm in the ptr_* sweep —
+# it deliberately decomposes into ptr_tf_pointer, ptr_tf_capacity,
+# ptr_tf_entities and ptr_tf_setattn instead, each isolating one change on
+# the pointer baseline rather than repeating an eight-way confound.
 defaults:
   - override /model/head: pointer
 

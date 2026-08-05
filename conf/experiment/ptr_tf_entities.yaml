@@ -1,0 +1,63 @@
+# @package _global_
+# pointer-transfer-45, arm 6/8 — the Issue #45 premise, redesigned.
+#
+# transformer-diagnosis-45 §9.10 asks for `tf_tokens` to be redesigned rather
+# than re-run. Its negative result (-0.029 rand, -0.119 snap, awr_min 0.00) was
+# the sweep's cleanest, and it landed directly on the Issue #45 hypothesis — but
+# the arm could not have tested that hypothesis fairly, for three reasons. All
+# three are fixed here:
+#
+#   (a) It *appended* the 18 per-entity pokemon tokens while keeping the pooled
+#       `pokemon` token (src/models/transformer.py#L240-244 as it stood then),
+#       so it added capacity rather than replacing pooling. `replace_pooled:
+#       true` drops the pooled summary for every group in token_groups, making
+#       entity tokens the only route by which Pokemon reach the trunk. This is
+#       the honest form of "attention over entities instead of over group
+#       averages".
+#
+#       It also needed a second fix this arm's design did not originally name:
+#       the per-entity pokemon tokens carried no seat identity at all.
+#       TransformerBackbone added a learned per-*group* type embedding but
+#       nothing per-slot, so swapping the two players' pokemon rows left
+#       `state_repr` bit-identical (measured 0.000e+00). Without that identity,
+#       "this Pokemon threatens that one" was not almost-untestable, it was
+#       *structurally* untestable — attention over undifferentiated rows cannot
+#       express "mine" vs "theirs", let alone a threat relation conditioned on
+#       it. Every per-entity token now carries a learned segment embedding
+#       (seat, for `pokemon`) unconditionally — not a flag here, always on —
+#       measured to move the seat-swap delta to 4.857e-02.
+#   (b) It ran at num_layers: 1. One attention op is the bare minimum for a
+#       relational claim: with a single layer, "this Pokemon threatens that one"
+#       has to be computed and consumed in the same step. Two layers, matching
+#       arm 5 so the comparison isolates the tokens.
+#   (c) It ran at n=1 against a 0.084 noise floor while the effect it hunted was
+#       ~0.03. Three seeds, and on the pointer baseline where eval/random is no
+#       longer compressed against the flat head's 0.85-0.90 plateau (§4).
+#
+# Cost is not the obstacle the config header feared: 10 -> 28 tokens measured
+# -7% fps then, and remeasured since at 1.90 ms -> 2.30 ms unbatched CPU
+# forward (MLP: 1.53 ms) — see conf/model/backbone/transformer.yaml.
+defaults:
+  - override /model/head: pointer
+
+model:
+  backbone:
+    option_tokens: true
+    num_layers: 2
+    ff_dim: 512
+    # 18 padded rows (2 seats x (1 active + 8 bench)): 10 -> 27 tokens once the
+    # pooled `pokemon` token it replaces is removed.
+    token_groups: [pokemon]
+    replace_pooled: true
+
+wandb:
+  name: ptr-tf-entities-s${seed}
+  tags:
+    - issue-45
+    - ptr-sweep
+    - pointer-head
+    - entity-tokens
+  notes: >-
+    Pointer-transfer sweep: per-entity pokemon tokens *replacing* the adapter's
+    masked-mean pokemon summary, at 2 layers, on the pointer head. The redesigned
+    test of the Issue #45 premise that tf_tokens could not deliver.

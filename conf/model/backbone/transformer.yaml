@@ -24,14 +24,76 @@ final_norm: false
 # Readout over the token sequence: mean | cls | attention. mean averages
 # semantically incomparable group summaries together.
 pooling: mean
+#
+# Entity identity (not a flag -- always on). Every per-entity token, whatever
+# token_groups/option_tokens below expand into the sequence, gets a learned
+# embedding added for its StructuredObsAdapter.group_segment_ids: which seat a
+# Pokemon belongs to, which zone a card sits in, whether an option slot is the
+# synthetic stop action. Before this existed, swapping the two players'
+# pokemon rows left state_repr bit-identical (measured 0.000e+00); the same
+# card in my.hand[0] vs my.discard[0] produced identical tokens too. Measured
+# after: a seat swap now moves state_repr by 4.857e-02.
+#
+# This does NOT reach the pooled path. With token_groups: [] (this file's
+# default) the trunk still only ever sees adapter.encode_groups()'s
+# masked-mean-pooled group vectors, and pooling erases the same identity
+# segments encode -- a seat swap still leaves that pooled `pokemon` vector
+# unchanged. Same limitation for every model/backbone=mlp config, in every
+# configuration: MLPBackbone has no per-entity token path for anything but
+# option_tokens' option_repr (see model/backbone/mlp.yaml), so its pooled
+# `pokemon`/zone features stay seat/zone-blind regardless of option_tokens.
+# Fixing that would change the observation-side feature widths and is out of
+# scope here; see conf/experiment/tf_tokens.yaml and ptr_tf_entities.yaml for
+# where the entity-token path (and this fix) actually applies.
+#
 # Groups to expand into per-entity tokens instead of one pooled summary, e.g.
-# [pokemon] (+18 tokens). Empty means the trunk attends over the adapter's
-# masked-mean group vectors only -- the same features the MLP consumes. Costs
-# adapter.group_slot_counts[name] tokens each, and attention is quadratic.
+# [pokemon] (+18 tokens). Empty means the trunk attends only over the
+# adapter's masked-mean group vectors -- the same features the MLP consumes.
+# Costs adapter.group_slot_counts[name] tokens each.
+#
+# Measured unbatched CPU forward cost (1 thread -- the path the league
+# opponent runs on inside every environment worker): MLP 1.53 ms; this file's
+# defaults (10 tokens) 1.90 ms; token_groups: [pokemon] (28 tokens) 2.30 ms;
+# every option routed through attention too (139 tokens, token_groups:
+# [options] + encoded_option_repr: true) 2.88 ms. Attention is not what costs
+# here: of the 1.90 ms default-arm forward, adapter.encode_groups is 1.36 ms
+# and nn.TransformerEncoder itself is 0.24 ms -- the adapter's per-entity
+# encoders dominate, not attention. So routing the full 129-slot option table
+# through attention is roughly +50% on a ~2 ms forward, not the quadratic
+# blowup earlier revisions of this comment assumed. See
+# docs/architecture/transformer-diagnosis-45.md and the ptr_tf_setattn /
+# ptr_tf_entities arms this measurement unblocked.
 token_groups: []
-# Emit per-option tokens as option_repr for model/head=pointer. Linear in the
-# option count, unlike routing options through self-attention.
+# Emit per-option tokens as option_repr for model/head=pointer. By default
+# (encoded_option_repr: false below) this is one Linear projection per option
+# row plus its segment embedding, not routed through the encoder -- linear in
+# the option count, unlike self-attention over the option tokens.
 option_tokens: false
+# If true, read option_repr from the encoder's attended output rows at the
+# options tokens' sequence offset, instead of the cheap pre-attention
+# projection option_tokens uses by default. Requires option_tokens: true and
+# "options" in token_groups -- the offsets only exist once option tokens
+# actually enter the sequence; construction raises if this is set without
+# them, or if "options" is in token_groups with option_tokens: true and this
+# left false (that combination would pay the 129^2 attention cost and then
+# discard the result, reading the cheap projection anyway).
+# Reference-preserving default: false keeps the cheap path untouched, so
+# every config and checkpoint predating this key is unaffected by its
+# existence. See conf/experiment/ptr_tf_setattn.yaml, the arm this exists for
+# -- the only configuration in this repo that can credit attention, rather
+# than option identity alone, for the pointer head's gain.
+encoded_option_repr: false
+# If true, drop -- for every group named in token_groups -- that group's
+# pooled encode_groups() token, along with its token_projections entry and
+# token_type_embedding row, so the per-entity tokens are the only route by
+# which that group reaches the trunk rather than an addition alongside a
+# pooled summary that already saw the same rows.
+# Reference-preserving default: false leaves token_projections /
+# token_type_embedding with exactly one entry per registered group (10), so
+# an existing checkpoint's backbone.token_projections.0..9 indices keep
+# meaning what they meant; only the shorter-list arms enabling this flag are
+# new. See conf/experiment/ptr_tf_entities.yaml, the arm this exists for.
+replace_pooled: false
 # Observation keys to consume, nested under the env's "observation" key.
 # These are StructuredObservationEncoder's top-level groups (see its .spec()),
 # each handled by the adapter and kept as its own token (not flattened).

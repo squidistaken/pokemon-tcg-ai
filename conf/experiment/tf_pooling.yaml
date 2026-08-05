@@ -12,6 +12,21 @@
 # A learned CLS token instead *queries* the sequence: attention decides which
 # groups to read for this state. `pooling: attention` is the lighter variant
 # (a learned query, no extra sequence position) if this one is unstable.
+#
+# What this run could not have tested. Unlike tf_tokens/tf_pointer/
+# tf_combined, this arm never touches entity tokens or option_tokens
+# (`token_groups: []`, no head override), so the segment-embedding and
+# stop-slot fixes (docs/architecture/transformer-diagnosis-45.md's "what
+# changed since" note) do not change what it measured — it has no per-entity
+# path to be seat-blind or stop-blind *in*. It does read the pooled `options`
+# group like every arm in the sweep, which at the time used the old
+# `card_id != 0` validity rule (finding 8): the pooled vector went exactly
+# zero on turns offering only yes/no/end options. But the reference arm this
+# one is compared against read the identically-buggy vector, so the CLS-vs-
+# mean comparison itself is not invalidated by that fix — it shifted (if at
+# all) in the same direction on both sides. No arm in conf/experiment/ptr_*
+# re-runs this specific comparison: every ptr_* arm leaves `pooling` at its
+# `mean` default while varying other things instead.
 model:
   backbone:
     pooling: cls
