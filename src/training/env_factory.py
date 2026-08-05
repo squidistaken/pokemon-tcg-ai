@@ -393,6 +393,7 @@ def make_env_factories(
             "decks": decks,
             "archetypes": curriculum.archetypes,
             "handles": curriculum.handles,
+            "explore_prob": curriculum.explore_prob,
         }
     elif sampler_spec is None:
         sampler_spec = _build_sampler_spec(cfg, deck_split)

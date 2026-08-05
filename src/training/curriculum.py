@@ -67,6 +67,7 @@ class Curriculum:
             buffer: LevelBuffer,
             num_workers: int,
             anchor_only_scoring: bool = False,
+            explore_prob: float = 0.0,
     ) -> None:
         """
         :param archetypes: Grouping of the deck pool into archetypes.
@@ -78,11 +79,16 @@ class Curriculum:
             strengthening league induces in level scores, at the cost of
             discarding most episodes' scoring signal. Enable only if the
             logged diagnostic shows that drift is material.
+        :param explore_prob: Forwarded to the workers' deck samplers, which
+            read it off :attr:`explore_prob`; kept here only so it travels with
+            the rest of the curriculum's construction. See
+            :class:`~src.env.curriculum_deck_sampler.CurriculumDeckSampler`.
         """
         self._archetypes = archetypes
         self._handles = handles
         self._buffer = buffer
         self._anchor_only_scoring = anchor_only_scoring
+        self._explore_prob = explore_prob
         self._open = [_OpenEpisode() for _ in range(num_workers)]
         # Probability the live distribution assigns to each pair_id, kept so
         # observe() can check the episodes that came back against the weights
@@ -91,8 +97,23 @@ class Curriculum:
         self._published_collision = 0.0
         self._drawn_fidelity_sum = 0.0
         self._drawn_episodes = 0
-        self._buffer.prefill(range(archetypes.pair_count))
+        # Only when the whole space fits: above capacity, prefilling every
+        # matchup would immediately overflow it, and every level starting
+        # unmeasured together is exactly the coverage sweep discovery relies on
+        # not needing (see LevelBuffer.commit()). Larger corpora instead
+        # discover levels lazily through commit()'s probation path, driven by
+        # the workers' explore_prob.
+        if archetypes.pair_count <= buffer.capacity:
+            self._buffer.prefill(range(archetypes.pair_count))
         self.publish()
+
+    @property
+    def explore_prob(self) -> float:
+        """
+        :return: Probability a worker draws a fresh matchup instead of
+            replaying from the published distribution.
+        """
+        return self._explore_prob
 
     @property
     def buffer(self) -> LevelBuffer:
@@ -353,8 +374,8 @@ def build_curriculum(cfg: DictConfig) -> Curriculum | None:
     :param cfg: Hydra configuration with ``env`` and top-level ``seed``.
     :return: A curriculum, or None when disabled.
     :raises ValueError: If enabled without a deck pool, under a worker start
-        method that cannot share memory, or with a capacity below the number of
-        matchups the corpus produces.
+        method that cannot share memory, or if the corpus exceeds ``capacity``
+        without ``explore_prob`` set to discover the rest lazily.
     """
     settings = cfg.env.get("curriculum")
     if not settings or not settings.get("enabled", False):
@@ -375,12 +396,18 @@ def build_curriculum(cfg: DictConfig) -> Curriculum | None:
     _decks, paths = load_deck_pool(cfg, deck_split="train")
     archetypes = ArchetypeIndex.from_paths(paths)
     capacity = int(settings.get("capacity", 2000))
-    if archetypes.pair_count > capacity:
+    explore_prob = float(settings.get("explore_prob", 0.0))
+    if not 0.0 <= explore_prob <= 1.0:
+        raise ValueError(f"env.curriculum.explore_prob must be in [0, 1], got {explore_prob}")
+    oversized = archetypes.pair_count > capacity
+    if oversized and explore_prob <= 0.0:
         raise ValueError(
             f"the corpus yields {archetypes.count} archetypes and therefore "
             f"{archetypes.pair_count} matchups, above env.curriculum.capacity="
-            f"{capacity}. Raise the capacity, or group the corpus more coarsely; "
-            f"silently covering part of the level space would bias the curriculum."
+            f"{capacity}. Either raise the capacity to cover every matchup, or set "
+            f"env.curriculum.explore_prob > 0 so the workers keep sampling fresh "
+            f"matchups and unseen ones are discovered and scored lazily (see "
+            f"LevelBuffer.commit()) instead of the whole space needing to fit up front."
         )
     buffer = LevelBuffer(
         capacity=capacity,
@@ -390,10 +417,11 @@ def build_curriculum(cfg: DictConfig) -> Curriculum | None:
         seed=int(cfg.seed),
     )
     logger.info(
-        "Level curriculum over %d archetypes (%d matchups), capacity %d",
+        "Level curriculum over %d archetypes (%d matchups), capacity %d%s",
         archetypes.count,
         archetypes.pair_count,
         capacity,
+        "" if not oversized else f", discovering lazily (explore_prob={explore_prob})",
     )
     return Curriculum(
         archetypes=archetypes,
@@ -401,4 +429,5 @@ def build_curriculum(cfg: DictConfig) -> Curriculum | None:
         buffer=buffer,
         num_workers=int(cfg.env.num_workers),
         anchor_only_scoring=bool(settings.get("anchor_only_scoring", False)),
+        explore_prob=explore_prob,
     )

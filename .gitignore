@@ -12,6 +12,7 @@ slurm-conf/logs/*
 # Decks
 /decks/*
 !/decks/example.csv
+/decks-intermediate-*/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
