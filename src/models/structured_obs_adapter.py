@@ -21,8 +21,9 @@ class StructuredObsAdapter(nn.Module):
     Three kinds of input, handled differently:
 
     ── card IDs (context_card_ids, stadium_id, every card in a zone) ──
-        ID → nn.Embedding(8, padding_idx=0) + static features(12) → [20]
-        [20] → Linear(20→entity_dim) → [entity_dim]
+        ID → nn.Embedding(8, padding_idx=0) + static features(12)
+           + card_cats(4 fields, Embed(4) each) + pooled attack_repr(22) → [58]
+        [58] → Linear(58→entity_dim) → [entity_dim]
 
     ── table rows (options, pokemon) ──
         concat all row fields → [87] or [101] → Linear(→entity_dim) → [entity_dim]
@@ -77,9 +78,12 @@ class StructuredObsAdapter(nn.Module):
         once.  ``globals`` and ``select_cats`` have no entity axis and are
         rejected — they are already one token each via :meth:`encode_groups`.
 
-        Face-down cards (prizes) have ID=0.  Embedding returns zeros, so the
-        token is all zeros, but the slot is still present and *valid* — the
-        model knows how many prizes remain even though it can't see them.
+        Face-down cards (prizes) have ID=0.  The learned embedding and static
+        features are zero for ID 0, leaving only the fixed "absent category"
+        vector from :meth:`_card_repr`'s categorical block — the same
+        constant for every unknown card, so no identity leaks — but the slot
+        is still present and *valid*: the model knows how many prizes remain
+        even though it can't see them.
 
     **MLP path (pool=True) — one flat vector**
 
@@ -126,9 +130,13 @@ class StructuredObsAdapter(nn.Module):
     #: Rows reserved per categorical field in the shared category table.
     CATEGORY_VOCAB_SIZE = 64
     #: Field order in the shared category table: selection type, selection
-    #: context, then the option table's four category columns.
+    #: context, then the option table's four category columns, then the
+    #: static per-card category columns.
     SELECT_CATEGORY_FIELD_COUNT = 2
     OPTION_CATEGORY_FIELD_COUNT = 4
+    #: ``CardDatabase.card_cats`` columns: card type, energy type, weakness,
+    #: resistance.
+    CARD_CATEGORY_FIELD_COUNT = 4
     #: ``options.owner`` values: 0 = none, 1 = agent, 2 = opponent.
     OWNER_VALUE_COUNT = 3
     #: Scale for the option scalar columns (zone indices/counts, cap 60).
@@ -151,8 +159,11 @@ class StructuredObsAdapter(nn.Module):
     #: types them as ``Tensor | Module``, which drops shape/operator info.
     _card_static: torch.Tensor
     _attack_static: torch.Tensor
+    _card_cats: torch.Tensor
+    _card_attack_ids: torch.Tensor
     _select_category_offsets: torch.Tensor
     _option_category_offsets: torch.Tensor
+    _card_category_offsets: torch.Tensor
     _global_scales: torch.Tensor
     _pokemon_feature_scales: torch.Tensor
 
@@ -212,21 +223,34 @@ class StructuredObsAdapter(nn.Module):
         database = card_database if card_database is not None else CardDatabase()
         card_static = database.card_features
         attack_static = database.attack_features
+        card_cats = database.card_cats
+        card_attack_ids = database.card_attack_ids
         self.register_buffer(
             "_card_static", card_static / card_static.abs().amax(dim=0).clamp(min=1.0)
         )
         self.register_buffer(
             "_attack_static", attack_static / attack_static.abs().amax(dim=0).clamp(min=1.0)
         )
-        self._card_repr_dim = card_embed_dim + card_static.shape[1]
+        self.register_buffer("_card_cats", card_cats)
+        self.register_buffer("_card_attack_ids", card_attack_ids)
         self._attack_repr_dim = attack_embed_dim + attack_static.shape[1]
+        self._card_repr_dim = (
+            card_embed_dim
+            + card_static.shape[1]
+            + self.CARD_CATEGORY_FIELD_COUNT * category_embed_dim
+            + self._attack_repr_dim
+        )
         self._category_embed_dim: int = category_embed_dim
         self._entity_dim: int | None = entity_dim
         self._pool: bool = pool and entity_dim is not None
 
         self._card_embedding = nn.Embedding(card_static.shape[0], card_embed_dim, padding_idx=0)
         self._attack_embedding = nn.Embedding(attack_static.shape[0], attack_embed_dim, padding_idx=0)
-        field_count = self.SELECT_CATEGORY_FIELD_COUNT + self.OPTION_CATEGORY_FIELD_COUNT
+        field_count = (
+            self.SELECT_CATEGORY_FIELD_COUNT
+            + self.OPTION_CATEGORY_FIELD_COUNT
+            + self.CARD_CATEGORY_FIELD_COUNT
+        )
         self._category_embedding = nn.Embedding(
             field_count * self.CATEGORY_VOCAB_SIZE, category_embed_dim
         )
@@ -238,6 +262,11 @@ class StructuredObsAdapter(nn.Module):
             "_option_category_offsets",
             (torch.arange(self.OPTION_CATEGORY_FIELD_COUNT, dtype=torch.int64)
              + self.SELECT_CATEGORY_FIELD_COUNT) * self.CATEGORY_VOCAB_SIZE,
+        )
+        self.register_buffer(
+            "_card_category_offsets",
+            (torch.arange(self.CARD_CATEGORY_FIELD_COUNT, dtype=torch.int64)
+             + self.SELECT_CATEGORY_FIELD_COUNT + self.OPTION_CATEGORY_FIELD_COUNT) * self.CATEGORY_VOCAB_SIZE,
         )
         global_scales = self.GAME_SCALES + self.SELECT_SCALES + 2 * self.PLAYER_SCALES
         self.register_buffer("_global_scales", torch.tensor(global_scales, dtype=torch.float32))
@@ -680,8 +709,20 @@ class StructuredObsAdapter(nn.Module):
     # ── Card / attack / category helpers ──────────────────────────────
 
     def _card_repr(self, card_ids: torch.Tensor) -> torch.Tensor:
-        """Learned + static card representation, shape ``(*ids, card_repr_dim)``."""
-        return torch.cat([self._card_embedding(card_ids), self._card_static[card_ids]], dim=-1)
+        """
+        Learned + static + categorical + attack-pool card representation,
+        shape ``(*ids, card_repr_dim)``.
+        """
+        attack_ids = self._card_attack_ids[card_ids]
+        return torch.cat(
+            [
+                self._card_embedding(card_ids),
+                self._card_static[card_ids],
+                self._embed_categories(self._card_cats[card_ids], self._card_category_offsets),
+                self._masked_mean(self._attack_repr(attack_ids), attack_ids != 0),
+            ],
+            dim=-1,
+        )
 
     def _attack_repr(self, attack_ids: torch.Tensor) -> torch.Tensor:
         """Learned + static attack representation."""

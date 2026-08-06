@@ -515,12 +515,18 @@ class StructuredObsAdapter(nn.Module):
 
     _card_static: torch.Tensor
     _attack_static: torch.Tensor
+    _card_cats: torch.Tensor
+    _card_attack_ids: torch.Tensor
     _select_category_offsets: torch.Tensor
     _option_category_offsets: torch.Tensor
+    _card_category_offsets: torch.Tensor
     _global_scales: torch.Tensor
     _pokemon_feature_scales: torch.Tensor
 
     CATEGORY_VOCAB_SIZE = 64
+    SELECT_CATEGORY_FIELD_COUNT = 2
+    OPTION_CATEGORY_FIELD_COUNT = 4
+    CARD_CATEGORY_FIELD_COUNT = 4
     OWNER_VALUE_COUNT = 3
     OPTION_SCALAR_SCALE = 60.0
     GAME_SCALES = (50.0, 20.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
@@ -579,13 +585,23 @@ class StructuredObsAdapter(nn.Module):
         self._emit_option_tokens = emit_option_tokens
         card_static = state_dict["backbone.adapter._card_static"]
         attack_static = state_dict["backbone.adapter._attack_static"]
+        card_cats = state_dict["backbone.adapter._card_cats"]
+        card_attack_ids = state_dict["backbone.adapter._card_attack_ids"]
         self.register_buffer("_card_static", torch.zeros_like(card_static))
         self.register_buffer("_attack_static", torch.zeros_like(attack_static))
+        self.register_buffer("_card_cats", torch.zeros_like(card_cats))
+        self.register_buffer("_card_attack_ids", torch.zeros_like(card_attack_ids))
         self.register_buffer(
-            "_select_category_offsets", torch.zeros(2, dtype=torch.int64)
+            "_select_category_offsets",
+            torch.zeros(self.SELECT_CATEGORY_FIELD_COUNT, dtype=torch.int64),
         )
         self.register_buffer(
-            "_option_category_offsets", torch.zeros(4, dtype=torch.int64)
+            "_option_category_offsets",
+            torch.zeros(self.OPTION_CATEGORY_FIELD_COUNT, dtype=torch.int64),
+        )
+        self.register_buffer(
+            "_card_category_offsets",
+            torch.zeros(self.CARD_CATEGORY_FIELD_COUNT, dtype=torch.int64),
         )
         self.register_buffer(
             "_global_scales",
@@ -604,8 +620,13 @@ class StructuredObsAdapter(nn.Module):
         self._attack_embedding = nn.Embedding(
             attack_static.shape[0], attack_embed_dim, padding_idx=0
         )
+        field_count = (
+            self.SELECT_CATEGORY_FIELD_COUNT
+            + self.OPTION_CATEGORY_FIELD_COUNT
+            + self.CARD_CATEGORY_FIELD_COUNT
+        )
         self._category_embedding = nn.Embedding(
-            6 * self.CATEGORY_VOCAB_SIZE, category_embed_dim
+            field_count * self.CATEGORY_VOCAB_SIZE, category_embed_dim
         )
         # Per-entity projection + masked-mean pooling, detected from the saved
         # weights rather than the config: checkpoints trained before the pooling
@@ -649,11 +670,7 @@ class StructuredObsAdapter(nn.Module):
             if name == "globals":
                 parts.append(value / self._global_scales)
             elif name == "select_cats":
-                parts.append(
-                    self._flatten_rows(
-                        self._category_embedding(value + self._select_category_offsets)
-                    )
-                )
+                parts.append(self._embed_categories(value, self._select_category_offsets))
             elif name in ("context_card_ids", "stadium_id"):
                 parts.append(self._encode_card_ids(value))
             elif name == "options":
@@ -722,9 +739,27 @@ class StructuredObsAdapter(nn.Module):
     ) -> torch.Tensor:
         return torch.cat(self.encode_groups(observation, group_names), dim=-1)
 
+    def _embed_categories(
+        self, values: torch.Tensor, field_offsets: torch.Tensor
+    ) -> torch.Tensor:
+        """Embed categorical fields through the shared table, flattening the result."""
+        return self._flatten_rows(self._category_embedding(values + field_offsets))
+
     def _card_repr(self, card_ids: torch.Tensor) -> torch.Tensor:
+        """
+        Learned + static + categorical + attack-pool card representation.
+
+        Mirrors the training adapter's ``_card_repr``.
+        """
+        attack_ids = self._card_attack_ids[card_ids]
         return torch.cat(
-            [self._card_embedding(card_ids), self._card_static[card_ids]], dim=-1
+            [
+                self._card_embedding(card_ids),
+                self._card_static[card_ids],
+                self._embed_categories(self._card_cats[card_ids], self._card_category_offsets),
+                self._masked_mean(self._attack_repr(attack_ids), attack_ids != 0),
+            ],
+            dim=-1,
         )
 
     def _attack_repr(self, attack_ids: torch.Tensor) -> torch.Tensor:
@@ -845,9 +880,7 @@ class StructuredObsAdapter(nn.Module):
                 nn_functional.one_hot(options["owner"], self.OWNER_VALUE_COUNT).to(
                     torch.float32
                 ),
-                self._category_embedding(
-                    options["cats"] + self._option_category_offsets
-                ).flatten(-2),
+                self._embed_categories(options["cats"], self._option_category_offsets),
                 scaled,
             ],
             dim=-1,
