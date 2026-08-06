@@ -4,7 +4,7 @@
 # lists held out for evaluation) and enables the curriculum on top.
 #
 # The settings below are chosen against a ~2M-frame budget (~15,000 episodes)
-# over 15 archetypes = 225 matchups, i.e. ~67 episodes per matchup. The
+# over 19 archetypes = 361 matchups, i.e. ~42 episodes per matchup. The
 # governing constraint is that this is a *tournament* agent: concentrating hard
 # on a few matchups would raise mean learning progress while leaving the policy
 # fragile against the rest of the field, so the sampler is deliberately kept
@@ -23,10 +23,11 @@ curriculum:
   # Episodes before a level's score is trusted. Every matchup below this floor
   # scores `inf` and so outranks every measured one, which is what drives
   # initial coverage -- but it also means the buffer is still filling rather
-  # than prioritizing until the floor is cleared across the space. At 225
-  # matchups the default 5 costs 225*5 ~ 1,100 episodes, about 7% of the run,
-  # so there is no reason to lower it here: a handful of terminal +/-1 outcomes
-  # says almost nothing about a matchup.
+  # than prioritizing until the floor is cleared across the space. At 361
+  # matchups the default 5 costs 361*5 ~ 1,800 episodes, about 12% of the run.
+  # That is a larger share than the 15-archetype pool it replaced, but still
+  # worth paying: a handful of terminal +/-1 outcomes says almost nothing about
+  # a matchup, so lowering the floor would just prioritize on noise.
   min_visits: 5
   # Rank-distribution temperature; the sampler draws proportional to
   # (1/rank)^(1/T). At 0.9 the top decile of matchups takes ~6x its uniform

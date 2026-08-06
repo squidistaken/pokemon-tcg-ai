@@ -1,0 +1,30 @@
+# @package _global_
+# pointer-transfer-45, arm 3/8 — the transformer control, re-run at three seeds.
+#
+# Byte-identical to conf/ppo_transformer.yaml's own defaults; the overlay exists
+# only to name the arm and tag it into this sweep, so the reference is submitted
+# by the same code path as everything else.
+#
+# transformer-diagnosis-45 already has four effective replicates of this config
+# (the reference arm, `ppo-transformer-linear-s42`, and both `tf-schedule`
+# duplicates); they span 0.452-0.614 on snap mean, which is where the sweep's
+# sigma = 0.084 measurement came from. Three fresh seeds here turn that spread
+# from a nuisance into the denominator: with n=3 per cell, the 95% interval on a
+# difference of cell means falls from +/-0.234 to about +/-0.135, and the
+# backbone and head main effects of the 2x2 (6 runs vs 6 runs) resolve to
+# about +/-0.095.
+#
+# Cell (transformer, linear) of the 2x2 backbone x head factorial.
+
+wandb:
+  name: ptr-tf-linear-s${seed}
+  tags:
+    - issue-45
+    - ptr-sweep
+    - control
+    - transformer-backbone
+    - linear-head
+  notes: >-
+    Pointer-transfer sweep: transformer trunk + flat linear head, unchanged from
+    the ppo_transformer defaults. Control for both the head comparison and the
+    backbone comparison.

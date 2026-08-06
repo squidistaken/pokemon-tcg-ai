@@ -35,7 +35,7 @@ def checkpoint_config() -> dict:
         "model": {
             "embed_dim": 8,
             "backbone": {
-                "_target_": "src.models.backbone.MLPBackbone",
+                "_target_": "src.models.mlp.MLPBackbone",
                 "num_cells": [8],
                 "activation": "tanh",
             },
@@ -72,6 +72,64 @@ def write_checkpoint(path: Path, marker: int, *, frames: int = 100) -> Path:
             "format_version": 1,
             "state_dict": actor_critic.state_dict(),
             "config": checkpoint_config(),
+            "frames": frames,
+        },
+        path,
+    )
+    return path
+
+
+def transformer_checkpoint_config() -> dict:
+    """Minimal portable transformer+pointer config for packager tests.
+
+    Pointer-head shape is the interesting case: unlike ``checkpoint_config``'s
+    MLP+linear-head baseline, this exercises ``option_tokens`` (per-option
+    tokens feeding ``PointerPolicyHead``) through the actual bundled runtime.
+    """
+    return {
+        "model": {
+            "embed_dim": 8,
+            "backbone": {
+                "_target_": "src.models.transformer.TransformerBackbone",
+                "num_heads": 2,
+                "num_layers": 1,
+                "ff_dim": 8,
+                "activation": "gelu",
+                "option_tokens": True,
+            },
+            "head": {"_target_": "src.models.heads.PointerPolicyHead"},
+            "value_head": {"num_cells": [8]},
+        },
+        "env": {
+            "encoder": "structured",
+            "max_options": 96,
+            "deck0": "decks/example.csv",
+        },
+    }
+
+
+def write_transformer_checkpoint(path: Path, marker: int, *, frames: int = 100) -> Path:
+    """Write a small self-describing transformer+pointer checkpoint."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cfg = OmegaConf.create(transformer_checkpoint_config())
+    max_options = int(cfg.env.max_options)
+    encoder = StructuredObservationEncoder(max_options=max_options)
+    obs_spec = Composite(
+        observation=encoder.spec(),
+        action_mask=Binary(n=max_options + 1, dtype=torch.bool),
+    )
+    actor_critic = build_actor_critic(
+        cfg,
+        obs_spec,
+        Categorical(max_options + 1, dtype=torch.int64),
+    )
+    with torch.no_grad():
+        next(actor_critic.parameters()).fill_(marker)
+    torch.save(
+        {
+            "format_version": 1,
+            "state_dict": actor_critic.state_dict(),
+            "config": transformer_checkpoint_config(),
             "frames": frames,
         },
         path,
@@ -206,6 +264,37 @@ def test_build_submission_has_kaggle_root_shape_and_audited_runtime(tmp_path) ->
     with pytest.raises(SubmissionError, match="already exists"):
         build_submission(plan)
     assert len(build_submission(plan, force=True)) == 64
+
+
+def test_build_submission_succeeds_for_transformer_pointer_checkpoint(
+    tmp_path,
+) -> None:
+    """The preflight rebuilds the bundle and runs real inference through the
+    extracted runtime for a transformer trunk + pointer head, not just the
+    MLP + linear-head baseline every other packaging test uses -- this is the
+    only place the packaged ``runtime.py`` (not the in-process module) is
+    exercised for that combination.
+    """
+    root = Path(__file__).parents[1]
+    checkpoint_path = write_transformer_checkpoint(
+        tmp_path / "checkpoints" / "model.pt", 3, frames=123
+    )
+    plan = SubmissionPlan(
+        repo_root=root,
+        checkpoint=inspect_checkpoint(checkpoint_path),
+        deck=root / "decks" / "example.csv",
+        label="transformer-agent",
+        staging_dir=tmp_path / "submissions" / "transformer-agent",
+        archive=tmp_path / "submissions" / "transformer-agent.tar.gz",
+        competition="pokemon-tcg-ai-battle",
+        message="transformer-agent",
+    )
+
+    archive_digest = build_submission(plan)
+
+    assert len(archive_digest) == 64
+    with tarfile.open(plan.archive, "r:gz") as bundle:
+        assert "model.pt" in bundle.getnames()
 
 
 def test_failed_forced_rebuild_preserves_previous_validated_outputs(

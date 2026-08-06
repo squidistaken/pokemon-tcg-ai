@@ -80,6 +80,14 @@ class PPOTrainerForTests(PPOTrainer):
         """
         return float(self._loss.entropy_coeff)
 
+    def prepare_restart_for_test(self, restart_index: int) -> None:
+        """
+        Run the pre-restart hook the trainer calls before rebuilding a pool.
+
+        :param restart_index: 1-based index of the restart being simulated.
+        """
+        self._prepare_restart(restart_index)
+
 
 @pytest.fixture
 def structured_obs_spec() -> Composite:
@@ -111,9 +119,48 @@ def structured_model_cfg() -> DictConfig:
             "model": {
                 "embed_dim": 32,
                 "backbone": {
-                    "_target_": "src.models.backbone.MLPBackbone",
+                    "_target_": "src.models.mlp.MLPBackbone",
                     "num_cells": [32],
                     "activation": "tanh",
+                    "in_keys": [
+                        ["observation", "globals"],
+                        ["observation", "select_cats"],
+                        ["observation", "context_card_ids"],
+                        ["observation", "stadium_id"],
+                        ["observation", "options"],
+                        ["observation", "pokemon"],
+                        ["observation", "my"],
+                        ["observation", "opp"],
+                        ["observation", "select_deck"],
+                        ["observation", "looking"],
+                    ],
+                },
+                "head": {"_target_": "src.models.heads.LinearPolicyHead"},
+                "value_head": {"num_cells": [32]},
+            }
+        }
+    )
+
+
+@pytest.fixture
+def transformer_model_cfg() -> DictConfig:
+    """
+    Minimal ``model`` config selecting the transformer backbone over the
+    structured observation's top-level groups, with a tiny embed dim so unit
+    tests stay fast.
+
+    :return: OmegaConf config with a ``model`` section.
+    """
+    return OmegaConf.create(
+        {
+            "model": {
+                "embed_dim": 32,
+                "backbone": {
+                    "_target_": "src.models.transformer.TransformerBackbone",
+                    "num_heads": 4,
+                    "num_layers": 1,
+                    "ff_dim": 32,
+                    "activation": "gelu",
                     "in_keys": [
                         ["observation", "globals"],
                         ["observation", "select_cats"],

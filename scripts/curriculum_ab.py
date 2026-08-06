@@ -38,6 +38,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parents[1]
 
+#: Wall-clock stamp of this invocation, so re-running an arm at the same seed
+#: writes somewhere fresh. ``src.train`` refuses to reuse a snapshot directory:
+#: a shared one mixes the previous run's league into this one.
+LAUNCH_STAMP = datetime.now(UTC).strftime("%Y-%m-%d_%H-%M-%S")
+
 #: Per-arm environment config. ``curriculum`` is None for arms with no deck
 #: pool, where the curriculum keys do not apply at all.
 #:
@@ -114,7 +119,7 @@ def run_arm(
     :param workers: Environment workers.
     :param eval_interval: Frames between evaluation rounds.
     :param eval_episodes: Episodes per reference opponent per round.
-    :param output_root: Directory the run writes into.
+    :param output_root: Root the run's own directory is created under.
     :param wandb_group: W&B group tying this experiment's arms together; None
         disables W&B for the run.
     :param extra: Additional Hydra overrides.
@@ -122,7 +127,7 @@ def run_arm(
         produced no evaluation.
     """
     spec = ARM_SPECS[arm]
-    run_dir = output_root / f"{arm}_seed{seed}"
+    run_dir = output_root / LAUNCH_STAMP / f"{arm}_seed{seed}"
     command = [
         sys.executable,
         "-m",

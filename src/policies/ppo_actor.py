@@ -70,7 +70,7 @@ def _input_dim(obs_spec: Composite, in_keys: list[str]) -> int:
     :param obs_spec: Observation composite spec of the environment.
     :param in_keys: Observation keys the backbone consumes; an entry may name
         a leaf field or a composite group (see :func:`_feature_width`).
-    :return: Total input width fed to :class:`~src.models.backbone.MLPBackbone`.
+    :return: Total input width fed to :class:`~src.models.mlp.MLPBackbone`.
     """
     return sum(_feature_width(obs_spec[key]) for key in in_keys)
 
@@ -113,12 +113,16 @@ def build_actor_critic(
     # where they disagree is only ever a mistake.
     head_class = get_class(cfg.model.head["_target_"])
     needs_option_repr = bool(getattr(head_class, "requires_option_repr", False))
+    # A trunk configured with option_tokens builds the table itself (projecting
+    # it to the trunk's width and adding a stop-slot segment embedding), so the
+    # adapter must not also emit one -- the backbone rejects both at once.
+    backbone_builds_tokens = bool(cfg.model.backbone.get("option_tokens", False))
 
     backbone_kwargs: dict = {"out_features": embed_dim}
     adapter: StructuredObsAdapter | None = None
     if any(isinstance(obs_spec[key], Composite) for key in in_keys):
         adapter_kwargs = dict(cfg.model.get("adapter", None) or {})
-        adapter_kwargs["emit_option_tokens"] = needs_option_repr
+        adapter_kwargs["emit_option_tokens"] = needs_option_repr and not backbone_builds_tokens
         adapter = StructuredObsAdapter(obs_spec=obs_spec, in_keys=in_keys, **adapter_kwargs)
         backbone_kwargs["adapter"] = adapter
         backbone_kwargs["input_dim"] = adapter.out_features
@@ -136,15 +140,23 @@ def build_actor_critic(
                 f"Head {head_class.__name__} needs per-option tokens, which require the "
                 f"structured observation groups; got backbone in_keys {in_keys}."
             )
-        head_kwargs["option_dim"] = adapter.option_token_dim
+        if not backbone.produces_option_repr:
+            raise ValueError(
+                f"Head {head_class.__name__} needs per-option tokens, but backbone "
+                f"{type(backbone).__name__} does not emit them."
+            )
+        # From the backbone, not the adapter: a trunk may project the adapter's
+        # per-entity encodings to its own width or pass them through untouched,
+        # and only it knows which. Asking the adapter would size the head to the
+        # wrong width on the projecting path.
+        head_kwargs["option_dim"] = backbone.option_repr_dim
     policy_head = instantiate(cfg.model.head, **head_kwargs)
-    value_head = ValueHead(in_features=embed_dim, num_cells=list(cfg.model.value_head.num_cells))
+    value_head = ValueHead(
+        in_features=embed_dim,
+        num_cells=list(cfg.model.value_head.num_cells),
+        activation=cfg.model.value_head.get("activation", "tanh"),
+    )
 
-    if needs_option_repr and not backbone.produces_option_repr:
-        raise ValueError(
-            f"Head {type(policy_head).__name__} needs per-option tokens, but backbone "
-            f"{type(backbone).__name__} does not emit them."
-        )
     return ActorCritic(backbone=backbone, policy_head=policy_head, value_head=value_head)
 
 
