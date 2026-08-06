@@ -11,7 +11,7 @@ from src.env.opponent_pool import OpponentPool
 from src.env.random_opponent import RandomOpponent
 from src.policies.ppo_actor import build_actor_critic
 from src.training.env_factory import make_env_factories
-from tests.conftest import PPOTrainerForTests, structured_env_cfg
+from tests.conftest import N_ACTIONS, PPOTrainerForTests, structured_env_cfg
 from tests.test_curriculum import STEPS, WORKERS, make_curriculum
 from tests.test_curriculum import batch as curriculum_batch
 
@@ -118,8 +118,8 @@ def test_ppo_trainer_trains_without_nans(structured_model_cfg, structured_obs_sp
 
 def test_ppo_update_returns_finite_losses(structured_model_cfg, structured_obs_spec, action_spec) -> None:
     """
-    ``_update`` on a real collected batch returns the three PPO loss terms and
-    a gradient norm, all finite.
+    ``_update`` on a real collected batch returns the three PPO loss terms, a
+    gradient norm and the policy entropy, all finite.
     """
     actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
     trainer = _make_trainer(actor_critic, action_spec)
@@ -138,8 +138,32 @@ def test_ppo_update_returns_finite_losses(structured_model_cfg, structured_obs_s
     # _update returns None only if every minibatch was NaN/Inf; a healthy batch
     # must produce real losses.
     assert losses is not None
-    assert set(losses) >= {"loss_objective", "loss_critic", "loss_entropy", "grad_norm"}
+    assert set(losses) >= {"loss_objective", "loss_critic", "loss_entropy", "grad_norm", "entropy"}
     assert all(math.isfinite(value) for value in losses.values())
+
+
+def test_ppo_update_reports_unweighted_policy_entropy(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    The reported ``entropy`` is the policy's own entropy, not the entropy
+    already scaled by the bonus coefficient.
+
+    Both properties are checked, because a metric that merely exists is not
+    yet the right one: the value must sit in ``(0, log N_ACTIONS]``, the range
+    of a categorical over the action space, and must relate to
+    ``loss_entropy`` by exactly the configured coefficient. Logging
+    ``loss_entropy`` in its place would pass the first check and fail the
+    second, and under entropy annealing it would fall over the run purely
+    because the coefficient does, with a flat policy entropy behind it.
+    """
+    entropy_coeff = 0.02
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    trainer = _make_trainer(actor_critic, action_spec, entropy_coeff=entropy_coeff)
+    losses = trainer.update_for_test(_collect_one_batch(trainer))
+    assert losses is not None
+    assert 0.0 < losses["entropy"] <= math.log(N_ACTIONS)
+    assert losses["loss_entropy"] == pytest.approx(-entropy_coeff * losses["entropy"], rel=1e-5)
 
 
 def test_collected_batch_excludes_option_repr_and_hidden(
@@ -199,7 +223,7 @@ def test_ppo_update_finite_on_pointer_head_batch(
     trainer = _make_trainer(actor_critic, action_spec)
     losses = trainer.update_for_test(_collect_one_batch(trainer))
     assert losses is not None
-    assert set(losses) >= {"loss_objective", "loss_critic", "loss_entropy", "grad_norm"}
+    assert set(losses) >= {"loss_objective", "loss_critic", "loss_entropy", "grad_norm", "entropy"}
     assert all(math.isfinite(value) for value in losses.values())
 
 
