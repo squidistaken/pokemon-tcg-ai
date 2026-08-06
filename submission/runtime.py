@@ -742,6 +742,23 @@ class StructuredObsAdapter(nn.Module):
         weights = mask.to(torch.float32).unsqueeze(-1)
         return (reprs * weights).sum(dim=-2) / weights.sum(dim=-2).clamp(min=1.0)
 
+    def _masked_pool(self, reprs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """
+        Collapse a padded set of entity encodings into a fixed-width summary.
+
+        Mirrors the training adapter's ``_masked_pool``: under ``"mean"``
+        this is the plain centroid; under ``"mean_max_sum"`` the max and a
+        capacity-normalized sum are concatenated alongside it.
+        """
+        mean = self._masked_mean(reprs, mask)
+        if self._zone_pooling == "mean":
+            return mean
+        occupied = mask.unsqueeze(-1)
+        maximum = reprs.masked_fill(~occupied, torch.finfo(reprs.dtype).min).amax(dim=-2)
+        maximum = torch.where(mask.any(dim=-1, keepdim=True), maximum, torch.zeros_like(maximum))
+        total = (reprs * occupied.to(reprs.dtype)).sum(dim=-2) / reprs.shape[-2]
+        return torch.cat([mean, maximum, total], dim=-1)
+
     @staticmethod
     def _option_validity(options: Mapping[str, torch.Tensor]) -> torch.Tensor:
         """
