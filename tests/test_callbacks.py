@@ -195,6 +195,11 @@ class BrokenWandbModule(ModuleType):
         super().__init__("wandb")
 
     @staticmethod
+    def Settings(**kwargs: Any) -> Any:
+        """Return a minimal settings object accepted by the callback."""
+        return type("Settings", (), kwargs)()
+
+    @staticmethod
     def init(**_kwargs: Any) -> Any:
         """
         :param _kwargs: Ignored.
@@ -218,6 +223,11 @@ class FakeWandbModule(ModuleType):
         super().__init__("wandb")
         self.run = run
         self.init_kwargs: dict[str, Any] | None = None
+
+    @staticmethod
+    def Settings(**kwargs: Any) -> Any:
+        """Return a minimal settings object whose fields tests can inspect."""
+        return type("Settings", (), kwargs)()
 
     def init(self, **kwargs: Any) -> FakeRun:
         """
@@ -406,6 +416,7 @@ def test_wandb_callback_records_config_and_namespaces_metrics(
     assert module.init_kwargs["force"] is False
     assert module.init_kwargs["dir"] == "/scratch/runs/one"
     assert module.init_kwargs["config"] == {"seed": 7}
+    assert module.init_kwargs["settings"].console == "redirect"
 
     callback.on_rollout_end(64, {"win_rate": 0.5, "loss_objective": -0.2})
     assert run.logged[-1] == ({"train/win_rate": 0.5, "train/loss_objective": -0.2}, 64)

@@ -102,6 +102,10 @@ class WeightsAndBiases(TrainingCallback):
             dir=self._dir,
             config=dict(run_config),
             force=self._mode == "online",
+            # ParallelEnv workers inherit the parent's file descriptors. Using
+            # low-level redirection captures their stdout and stderr too, while
+            # W&B's default stream wrapping only sees writes in this process.
+            settings=wandb.Settings(console="redirect"),
         )
         logger.info(
             "W&B run started: %s (%s, mode=%s)",
