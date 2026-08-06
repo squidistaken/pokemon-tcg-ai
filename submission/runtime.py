@@ -569,8 +569,14 @@ class StructuredObsAdapter(nn.Module):
         card_embed_dim: int,
         attack_embed_dim: int,
         category_embed_dim: int,
+        zone_pooling: str = "mean",
+        emit_option_tokens: bool = False,
     ) -> None:
         super().__init__()
+        if zone_pooling not in ("mean", "mean_max_sum"):
+            raise ValueError(f"Unsupported zone_pooling: {zone_pooling}")
+        self._zone_pooling = zone_pooling
+        self._emit_option_tokens = emit_option_tokens
         card_static = state_dict["backbone.adapter._card_static"]
         attack_static = state_dict["backbone.adapter._attack_static"]
         self.register_buffer("_card_static", torch.zeros_like(card_static))
@@ -629,8 +635,9 @@ class StructuredObsAdapter(nn.Module):
 
     def forward(
         self, observation: Mapping[str, Any], group_names: Sequence[str]
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         parts: list[torch.Tensor] = []
+        option_tokens: torch.Tensor | None = None
         for name in group_names:
             value = observation[name]
             if name == "globals":
@@ -645,11 +652,16 @@ class StructuredObsAdapter(nn.Module):
                 parts.append(self._encode_card_ids(value))
             elif name == "options":
                 parts.append(self._encode_options(value))
+                if self._emit_option_tokens:
+                    option_tokens = self._option_encoder(self._option_rows(value))
             elif name == "pokemon":
                 parts.append(self._encode_pokemon(value))
             else:
                 parts.append(self._encode_zone_group(name, value))
-        return torch.cat(parts, dim=-1)
+        state = torch.cat(parts, dim=-1)
+        if option_tokens is None:
+            return state
+        return state, option_tokens
 
     def _card_repr(self, card_ids: torch.Tensor) -> torch.Tensor:
         return torch.cat(
@@ -671,10 +683,23 @@ class StructuredObsAdapter(nn.Module):
         weights = mask.to(torch.float32).unsqueeze(-1)
         return (reprs * weights).sum(dim=-2) / weights.sum(dim=-2).clamp(min=1.0)
 
+    def _masked_pool(self, reprs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """Set pooling mirroring the training-side adapter's ``zone_pooling``."""
+        mean = self._masked_mean(reprs, mask)
+        if self._zone_pooling == "mean":
+            return mean
+        occupied = mask.unsqueeze(-1)
+        maximum = reprs.masked_fill(~occupied, torch.finfo(reprs.dtype).min).amax(dim=-2)
+        maximum = torch.where(
+            mask.any(dim=-1, keepdim=True), maximum, torch.zeros_like(maximum)
+        )
+        total = (reprs * occupied.to(reprs.dtype)).sum(dim=-2) / reprs.shape[-2]
+        return torch.cat([mean, maximum, total], dim=-1)
+
     def _encode_card_ids(self, card_ids: torch.Tensor) -> torch.Tensor:
         return self._flatten_rows(self._card_proj(self._card_repr(card_ids)))
 
-    def _encode_options(self, options: Mapping[str, torch.Tensor]) -> torch.Tensor:
+    def _option_rows(self, options: Mapping[str, torch.Tensor]) -> torch.Tensor:
         scalars = options["scalars"]
         scaled = torch.where(
             scalars < 0.0,
@@ -696,6 +721,10 @@ class StructuredObsAdapter(nn.Module):
             ],
             dim=-1,
         )
+        return rows
+
+    def _encode_options(self, options: Mapping[str, torch.Tensor]) -> torch.Tensor:
+        rows = self._option_rows(options)
         if self._pool:
             return self._masked_mean(
                 self._option_encoder(rows), options["card_id"] != 0
@@ -717,7 +746,7 @@ class StructuredObsAdapter(nn.Module):
             dim=-1,
         )
         if self._pool:
-            return self._masked_mean(self._pokemon_encoder(rows), pokemon["mask"])
+            return self._masked_pool(self._pokemon_encoder(rows), pokemon["mask"])
         return self._flatten_rows(rows)
 
     def _encode_zone_group(
@@ -728,7 +757,10 @@ class StructuredObsAdapter(nn.Module):
             mask = zones[mask_name]
             capacity = mask.shape[-1]
             reprs = self._card_proj(self._card_repr(zones[ids_name]))
-            parts.append(self._masked_mean(reprs, mask))
+            parts.append(
+                self._masked_pool(reprs, mask) if self._pool
+                else self._masked_mean(reprs, mask)
+            )
             parts.append(mask.to(torch.float32).sum(dim=-1, keepdim=True) / capacity)
         return torch.cat(parts, dim=-1)
 
@@ -772,12 +804,19 @@ class MLPBackbone(nn.Module):
     ) -> None:
         super().__init__()
         adapter_config = config.get("adapter", {})
+        # Both of these are read off the checkpoint rather than assumed: older
+        # checkpoints predate the pointer head and the richer zone pooling, and
+        # must keep loading exactly as they were trained.
+        emit_option_tokens = "policy_head.scorer.0.weight" in state_dict
         self.adapter = StructuredObsAdapter(
             state_dict,
             card_embed_dim=int(adapter_config.get("card_embed_dim", 8)),
             attack_embed_dim=int(adapter_config.get("attack_embed_dim", 8)),
             category_embed_dim=int(adapter_config.get("category_embed_dim", 4)),
+            zone_pooling=str(adapter_config.get("zone_pooling", "mean")),
+            emit_option_tokens=emit_option_tokens,
         )
+        self.produces_option_repr = emit_option_tokens
         backbone_config = config["backbone"]
         raw_in_keys = backbone_config.get(
             "in_keys",
@@ -806,16 +845,69 @@ class MLPBackbone(nn.Module):
             str(backbone_config.get("activation", "tanh")),
         )
 
-    def forward(self, observation: Mapping[str, Any]) -> torch.Tensor:
-        return self.mlp(self.adapter(observation, self.group_names))
+    def forward(
+        self, observation: Mapping[str, Any]
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        encoded = self.adapter(observation, self.group_names)
+        if self.produces_option_repr:
+            state_features, option_tokens = encoded
+            return self.mlp(state_features), option_tokens
+        return self.mlp(encoded)
 
 
 class LinearPolicyHead(nn.Module):
     """Linear action-logit head with checkpoint-compatible names."""
 
+    requires_option_repr = False
+
     def __init__(self, in_features: int, n_actions: int) -> None:
         super().__init__()
         self.linear = nn.Linear(in_features, n_actions)
+
+    def forward(
+        self, state_repr: torch.Tensor, option_repr: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        del option_repr
+        return self.linear(state_repr)
+
+
+class PointerHead(nn.Module):
+    """
+    Per-option scoring head with checkpoint-compatible names.
+
+    Mirrors :class:`src.models.heads.PointerHead`: one shared scorer over
+    ``[state_repr, option_repr_i]`` for every option slot, plus a state-only
+    branch for the synthetic stop action.
+    """
+
+    requires_option_repr = True
+
+    def __init__(
+        self,
+        in_features: int,
+        n_actions: int,
+        option_dim: int,
+        num_cells: Sequence[int],
+        activation: str,
+    ) -> None:
+        super().__init__()
+        self.n_option_slots = n_actions - 1
+        self.scorer = _mlp(in_features + option_dim, num_cells, 1, activation)
+        self.stop_scorer = _mlp(in_features, num_cells, 1, activation)
+
+    def forward(
+        self, state_repr: torch.Tensor, option_repr: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        if option_repr is None:
+            raise ValueError("PointerHead requires per-option tokens; got None.")
+        options = option_repr[..., : self.n_option_slots, :]
+        broadcast_state = state_repr.unsqueeze(-2).expand(
+            *state_repr.shape[:-1], self.n_option_slots, state_repr.shape[-1]
+        )
+        option_logits = self.scorer(
+            torch.cat([broadcast_state, options], dim=-1)
+        ).squeeze(-1)
+        return torch.cat([option_logits, self.stop_scorer(state_repr)], dim=-1)
 
 
 class ValueHead(nn.Module):
@@ -838,19 +930,43 @@ class ActorCritic(nn.Module):
         super().__init__()
         if config["backbone"].get("_target_") != "src.models.backbone.MLPBackbone":
             raise ValueError("Kaggle runtime supports only MLPBackbone checkpoints")
-        if config["head"].get("_target_") != "src.models.heads.LinearPolicyHead":
+        head_target = config["head"].get("_target_")
+        supported_heads = {
+            "src.models.heads.LinearPolicyHead",
+            "src.models.heads.PointerHead",
+        }
+        if head_target not in supported_heads:
             raise ValueError(
-                "Kaggle runtime supports only LinearPolicyHead checkpoints"
+                f"Kaggle runtime supports only {sorted(supported_heads)} checkpoints, "
+                f"got {head_target}"
             )
         embed_dim = int(config["embed_dim"])
         self.backbone = MLPBackbone(state_dict, config)
-        self.policy_head = LinearPolicyHead(embed_dim, max_options + 1)
+        if head_target == "src.models.heads.PointerHead":
+            head_config = config["head"]
+            # The option width is read off the trained scorer rather than
+            # recomputed, since the sandbox has no obs_spec to size it from.
+            scorer_in = state_dict["policy_head.scorer.0.weight"].shape[1]
+            self.policy_head: nn.Module = PointerHead(
+                embed_dim,
+                max_options + 1,
+                option_dim=scorer_in - embed_dim,
+                num_cells=[int(value) for value in head_config.get("num_cells", [embed_dim])],
+                activation=str(head_config.get("activation", "tanh")),
+            )
+        else:
+            self.policy_head = LinearPolicyHead(embed_dim, max_options + 1)
         self.value_head = ValueHead(
             embed_dim, [int(value) for value in config["value_head"]["num_cells"]]
         )
 
     def policy_logits(self, observation: Mapping[str, Any]) -> torch.Tensor:
-        return self.policy_head.linear(self.backbone(observation))
+        encoded = self.backbone(observation)
+        if self.backbone.produces_option_repr:
+            state_repr, option_repr = encoded
+        else:
+            state_repr, option_repr = encoded, None
+        return self.policy_head(state_repr, option_repr)
 
 
 class Policy:

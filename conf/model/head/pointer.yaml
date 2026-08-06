@@ -1,0 +1,15 @@
+# Per-option scoring head: one shared MLP scores every action slot from
+# [state_repr, option_repr_i], so the logit for a slot depends on what that
+# option *is* rather than on its index.
+#
+# This is the head the structured observation was built for. The flat
+# alternative (model/head=linear) reads only the pooled state, and because the
+# option table reaches it as a permutation-invariant mean it can represent
+# nothing beyond a prior over slot indices -- measurably a ceiling, not a
+# tuning problem. Requires an adapter emitting option tokens, which
+# build_actor_critic switches on automatically for this head.
+_target_: src.models.heads.PointerHead
+# Hidden widths of the shared scorer. Kept small: it is applied once per option
+# slot per forward pass, so width here costs more than width in the trunk.
+num_cells: [128, 128]
+activation: tanh

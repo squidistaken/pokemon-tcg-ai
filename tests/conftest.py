@@ -135,6 +135,25 @@ def structured_model_cfg() -> DictConfig:
 
 
 @pytest.fixture
+def pointer_model_cfg(structured_model_cfg: DictConfig) -> DictConfig:
+    """
+    The structured model config with the pointer head instead of the flat one.
+
+    :param structured_model_cfg: Base structured-observation model config.
+    :return: Config selecting :class:`~src.models.heads.PointerHead`.
+    """
+    cfg = structured_model_cfg.copy()
+    cfg.model.head = OmegaConf.create(
+        {
+            "_target_": "src.models.heads.PointerHead",
+            "num_cells": [16],
+            "activation": "tanh",
+        }
+    )
+    return cfg
+
+
+@pytest.fixture
 def action_spec() -> Categorical:
     """
     Discrete action spec over the option slots plus the stop action.
