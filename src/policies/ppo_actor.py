@@ -1,6 +1,6 @@
 import math
 
-from hydra.utils import instantiate
+from hydra.utils import get_class, instantiate
 from omegaconf import DictConfig, ListConfig
 from tensordict.nn import TensorDictModule
 from torchrl.data import Categorical, Composite, TensorSpec
@@ -108,9 +108,17 @@ def build_actor_critic(
     n_actions = int(action_spec.space.n)
 
     in_keys = _normalize_keys(cfg.model.backbone.get("in_keys", DEFAULT_IN_KEYS))
+    # Whether the adapter emits per-option tokens is derived from the chosen
+    # head rather than configured separately: the two must agree, and a config
+    # where they disagree is only ever a mistake.
+    head_class = get_class(cfg.model.head["_target_"])
+    needs_option_repr = bool(getattr(head_class, "requires_option_repr", False))
+
     backbone_kwargs: dict = {"out_features": embed_dim}
+    adapter: StructuredObsAdapter | None = None
     if any(isinstance(obs_spec[key], Composite) for key in in_keys):
         adapter_kwargs = dict(cfg.model.get("adapter", None) or {})
+        adapter_kwargs["emit_option_tokens"] = needs_option_repr
         adapter = StructuredObsAdapter(obs_spec=obs_spec, in_keys=in_keys, **adapter_kwargs)
         backbone_kwargs["adapter"] = adapter
         backbone_kwargs["input_dim"] = adapter.out_features
@@ -120,14 +128,22 @@ def build_actor_critic(
     # Hydra re-wraps list kwargs as ListConfig; set the normalized (nested-key
     # tuple) form directly so tensordict key lookups resolve.
     backbone.in_keys = in_keys
-    policy_head = instantiate(cfg.model.head, in_features=embed_dim, n_actions=n_actions)
+
+    head_kwargs: dict = {"in_features": embed_dim, "n_actions": n_actions}
+    if needs_option_repr:
+        if adapter is None:
+            raise ValueError(
+                f"Head {head_class.__name__} needs per-option tokens, which require the "
+                f"structured observation groups; got backbone in_keys {in_keys}."
+            )
+        head_kwargs["option_dim"] = adapter.option_token_dim
+    policy_head = instantiate(cfg.model.head, **head_kwargs)
     value_head = ValueHead(in_features=embed_dim, num_cells=list(cfg.model.value_head.num_cells))
 
-    if getattr(policy_head, "requires_option_repr", False) and not backbone.produces_option_repr:
+    if needs_option_repr and not backbone.produces_option_repr:
         raise ValueError(
             f"Head {type(policy_head).__name__} needs per-option tokens, but backbone "
-            f"{type(backbone).__name__} does not emit them. Pair the pointer head with a "
-            f"Deep Sets / Set Transformer backbone, or use LinearPolicyHead."
+            f"{type(backbone).__name__} does not emit them."
         )
     return ActorCritic(backbone=backbone, policy_head=policy_head, value_head=value_head)
 

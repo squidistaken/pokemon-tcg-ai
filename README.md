@@ -89,9 +89,11 @@ src/
     curriculum_deck_sampler.py  DeckSampler drawing each episode's matchup from that channel
     random_opponent.py          Uniform-random opponent baseline
   models/                     Actor-critic network, independent of the policy/training wiring
-    backbone.py                  Backbone ABC + MLPBackbone (DeepSets/SetTransformer/TemporalTransformer/Recurrent planned)
-    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, pools zones for the MLP
-    heads.py                     LinearPolicyHead (flat logits over actions) + ValueHead (scalar critic)
+    backbone.py                  Backbone ABC + MLPBackbone (SetTransformer/TemporalTransformer/Recurrent planned)
+    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, set-pools zones,
+                                   and emits the per-option token table the pointer head scores
+    heads.py                     PointerHead (per-option scoring, the default) + LinearPolicyHead
+                                   (flat slot-indexed logits, the baseline) + ValueHead (scalar critic)
     actor_critic.py              ActorCritic: shared trunk feeding both heads, tensordict-in/tensordict-out
     transformer.py                Set-transformer building blocks (placeholder, not yet implemented)
   policies/
@@ -123,7 +125,8 @@ conf/                        Hydra configs (config.yaml + env/, agent/, model/, 
   model/
     default.yaml                Composes one backbone + one head, holds shared dims (embed_dim, value_head)
     backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
-    head/linear.yaml             Flat logits head (more heads added as separate config files as they land)
+    head/pointer.yaml            Per-option scoring head (default)
+    head/linear.yaml             Flat slot-indexed logits head (the baseline the pointer head replaced)
   train/
     default.yaml                Keys shared by every training variant; the variants below override only what differs
     fixed_opponent.yaml          Default: fixed random opponent, no snapshotting; the control for self-play runs
@@ -155,6 +158,19 @@ slurm-conf/                  Slurm profiles, uv setup, and generic submission/tr
 
 The **backbone** and **head** are independent Hydra config groups, so any backbone can be paired
 with any head from the CLI or a sweep, e.g. `python -m src.train model/backbone=mlp model/head=linear`.
+
+### Policy head: why `pointer` is the default
+
+`model/head=pointer` scores each action slot from `[state_repr, option_repr_i]` with weights shared
+across slots. `model/head=linear` — the original baseline — emits one logit per slot from the pooled
+state alone, and the adapter hands it the option table as a *masked mean*. Mean pooling is
+permutation-invariant, so under the flat head, shuffling the options leaves the logits bit-identical
+while the correct action moves: the policy is structurally unable to condition on what an action
+does, and the most it can represent is a prior over slot indices.
+
+That is not a tuning problem, it is a ceiling, and it was the binding constraint on training — see
+[`docs/architecture/pointer-head.md`](docs/architecture/pointer-head.md) for the measurements. `linear` is
+kept as the control for that comparison; use `pointer` for real runs.
 
 ## Usage
 

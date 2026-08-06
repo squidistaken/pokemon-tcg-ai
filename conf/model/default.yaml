@@ -3,7 +3,7 @@
 #   python -m src.train agent=ppo model/head=linear
 defaults:
   - backbone: mlp        # default backbone; override on the CLI
-  - head: linear         # default head;     override on the CLI
+  - head: pointer        # default head;     override on the CLI (linear = flat baseline)
   - _self_
 
 # Shared token/hidden width; backbones read it as out_features.
@@ -19,3 +19,11 @@ adapter:
   card_embed_dim: 8
   attack_embed_dim: 8
   category_embed_dim: 4
+  # How unordered card sets (hand, discard, prizes, the Pokémon board) are
+  # collapsed. A bare mean is a centroid: it cannot express whether a specific
+  # card is present, only what the average card in the zone looks like, which
+  # is why the critic could not predict outcomes. mean_max_sum adds the
+  # element-wise max (presence) and a capacity-normalized sum (count).
+  zone_pooling: mean_max_sum
+  # emit_option_tokens is not set here: build_actor_critic derives it from the
+  # selected head, so the two can never disagree.

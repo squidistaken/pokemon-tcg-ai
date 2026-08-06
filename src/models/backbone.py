@@ -132,6 +132,13 @@ class MLPBackbone(Backbone):
             )
         self.input_dim = input_dim
         self.adapter = adapter
+        # Instance-level override of the class default: whether this trunk emits
+        # per-option tokens is a property of the attached adapter, not of the
+        # backbone type. The MLP itself only ever sees the pooled state vector;
+        # the tokens pass through untouched for the pointer head to score.
+        self.produces_option_repr = bool(
+            adapter is not None and getattr(adapter, "emits_option_tokens", False)
+        )
         self.mlp = MLP(
             in_features=input_dim,
             out_features=out_features,
@@ -139,7 +146,10 @@ class MLPBackbone(Backbone):
             activation_class=activation_class(activation),
         )
 
-    def forward(self, *inputs: torch.Tensor | TensorDictBase) -> torch.Tensor:
+    def forward(
+            self,
+            *inputs: torch.Tensor | TensorDictBase,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         Vectorize, concatenate and encode the inputs into ``state_repr``.
 
@@ -147,7 +157,9 @@ class MLPBackbone(Backbone):
             feature vector shaped ``(*batch, features)``, or a nested
             tensordict group handed to the adapter (or naively flattened
             leaf by leaf when no adapter is attached).
-        :return: ``state_repr`` of shape ``(*batch, out_features)``.
+        :return: ``state_repr`` of shape ``(*batch, out_features)``, or a
+            ``(state_repr, option_repr)`` pair when the attached adapter emits
+            per-option tokens.
         """
         if len(inputs) != len(self.in_keys):
             raise ValueError(
@@ -155,7 +167,11 @@ class MLPBackbone(Backbone):
                 f"{self.in_keys}, got {len(inputs)}."
             )
         if self.adapter is not None:
-            return self.mlp(self.adapter(*inputs))
+            encoded = self.adapter(*inputs)
+            if self.produces_option_repr:
+                state_features, option_tokens = encoded
+                return self.mlp(state_features), option_tokens
+            return self.mlp(encoded)
         flat_parts: list[torch.Tensor] = []
         for value in inputs:
             if isinstance(value, TensorDictBase):

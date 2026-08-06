@@ -67,6 +67,14 @@ class RecordingCallback(TrainingCallback):
         """
         self.events.append((self.name, "eval", step, dict(metrics)))
 
+    def on_train_error(self, error: BaseException) -> None:
+        """
+        Record a run failure.
+
+        :param error: The exception that ended the run.
+        """
+        self.events.append((self.name, "error", str(error)))
+
     def on_train_end(self, summary: Mapping[str, float]) -> None:
         """
         Record the run end.
@@ -359,6 +367,10 @@ def test_trainer_notifies_train_end_when_the_run_fails() -> None:
     hooks = [hook for _, hook, *_ in recorder.events]
     assert hooks[0] == "start"
     assert hooks[-1] == "end"
+    # The failure is reported before teardown, so a backend can mark the run
+    # crashed rather than closing it as cleanly as a finished one.
+    assert hooks[-2] == "error"
+    assert "update exploded" in recorder.events[-2][2]
 
 
 def test_trainer_without_callbacks_still_trains() -> None:
@@ -509,9 +521,13 @@ def test_wandb_logging_failure_propagates(
         callback.on_rollout_end(64, {"win_rate": 0.5})
 
 
-def test_wandb_start_failure_shuts_down_collector(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wandb_start_failure_creates_no_collector(monkeypatch: pytest.MonkeyPatch) -> None:
     """
-    Strict callback startup still releases the already-created TorchRL collector.
+    A backend that fails at startup costs no environment workers at all.
+
+    Collectors are built inside the run loop, after ``on_train_start``, so a
+    strict backend rejecting the run short-circuits before anything is forked
+    -- there is no collector left to leak rather than one that gets cleaned up.
     """
     created: list[Any] = []
 
@@ -533,5 +549,39 @@ def test_wandb_start_failure_shuts_down_collector(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(RuntimeError, match="wandb is down"):
         trainer.train()
 
-    assert len(created) == 1
-    assert created[0].shutdown_called
+    assert created == []
+
+
+def test_wandb_marks_a_failed_run_crashed(fake_wandb, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    A run that dies mid-collection is finished with a non-zero exit code.
+
+    Otherwise W&B shows it as ``finished``, making a crash indistinguishable
+    from a short successful run.
+    """
+    _, run = fake_wandb
+    exit_codes: list[int | None] = []
+    monkeypatch.setattr(run, "finish", lambda exit_code=None: exit_codes.append(exit_code))
+
+    callback = WeightsAndBiases(project="pokemon-tcg-ai", mode="offline")
+    callback.on_train_start({})
+    callback.on_train_error(RuntimeError("Cannot proceed, worker 20 dead."))
+    callback.on_train_end({"frames": 475136.0})
+
+    assert exit_codes == [1]
+    assert "worker 20 dead" in str(run.summary["summary/error"])
+
+
+def test_wandb_marks_a_clean_run_finished(fake_wandb, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    A run that completes normally is still finished with no exit code.
+    """
+    _, run = fake_wandb
+    exit_codes: list[int | None] = []
+    monkeypatch.setattr(run, "finish", lambda exit_code=None: exit_codes.append(exit_code))
+
+    callback = WeightsAndBiases(project="pokemon-tcg-ai", mode="offline")
+    callback.on_train_start({})
+    callback.on_train_end({"frames": 5000000.0})
+
+    assert exit_codes == [None]

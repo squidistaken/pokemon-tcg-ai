@@ -5,34 +5,52 @@ clip_epsilon: 0.2
 # regularizer against collapsing onto a single action. With this false the term
 # is dropped and entropy_coeff (and ent_anneal below) do nothing.
 entropy_bonus: true
-# Entropy-bonus weight.
-entropy_coeff: 0.01
-# Discount factor for GAE.
-gamma: 0.99
-# GAE trace-decay factor.
-lmbda: 0.95
+# Entropy-bonus weight. At 0.01 the policy collapsed to ~0.07 nats inside the
+# first million frames of the 5M-frame corpus runs and never recovered, so the
+# rest of the run explored nothing.
+entropy_coeff: 0.02
+# Discount factor for GAE. The reward is terminal only (+1/-1), so the quantity
+# to predict is win probability and any gamma < 1 biases the objective towards
+# winning sooner, which is worth nothing here. Held just under 1 because eval
+# episodes do occasionally hit the step cap, and truncation bootstrapping is
+# badly behaved at exactly 1.
+gamma: 0.999
+# GAE trace-decay factor. gamma * lmbda sets the advantage horizon: at 0.95 it
+# was ~19 steps of a 100-190 step episode, so the terminal signal only reached
+# the opening by way of a critic with nothing else to bootstrap from. 0.98 puts
+# it near 48 steps, closer to Monte-Carlo returns that propagate the outcome
+# directly. Variance stays bounded because the reward is only ever +/-1.
+lmbda: 0.98
 # Standardize advantages (zero mean, unit std) over each collected batch. The
 # standard PPO formulation; keeps the surrogate's scale independent of the
 # reward magnitude.
 average_gae: true
 # Adam learning rate.
 lr: 3.0e-4
-# Optimization epochs over each collected batch.
+# Optimization epochs over each collected batch. Kept low because the sixteen
+# minibatches below already give the batch plenty of reuse, and more of it than
+# the KL bound comfortably supports.
 num_epochs: 4
-# Minibatch size drawn from the replay buffer per optimizer step.
-sub_batch_size: 4096  # NOTE: Reduce if not a lot of memory
+# Minibatch size drawn from the replay buffer per optimizer step. This is capped
+# to frames_per_batch in PPOTrainer, so keeping the two equal meant one minibatch
+# per epoch: the 5M-frame runs took 4 optimizer steps per batch and 4884 in
+# total. Sixteen minibatches per epoch brings that to ~19k on the same budget.
+sub_batch_size: 1024  # NOTE: Raise if not a lot of memory
 # Frames collected per collector iteration (overrides collector.frames_per_batch).
-frames_per_batch: 4096
+frames_per_batch: 16384
 # Gradient-norm clipping threshold.
 max_grad_norm: 1.0
 # Device for the model and the PPO update ("cpu" or "cuda"). Environments
 # always step on CPU; the collector moves data to this device for updates.
 device: cpu
 
-# --- Adopted TorchRLTrainer features (all additive; defaults preserve prior behaviour) ---
 # Early-stop the epoch loop once mean approx-KL exceeds
 # target_kl_multiplier * target_kl (null disables; checked between epochs).
-target_kl: null
+# Needed now that a batch gets 64 optimizer steps instead of 4: without a bound
+# the later epochs drift far off-policy and drive the entropy collapse above.
+# Not tighter than this, or it early-stops on every batch and quietly gives back
+# the extra updates the minibatching just bought.
+target_kl: 0.03
 target_kl_multiplier: 1.5
 # Automatic mixed precision for the update step (float16+GradScaler on CUDA,
 # bfloat16 elsewhere).
