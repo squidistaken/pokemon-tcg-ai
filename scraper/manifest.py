@@ -83,7 +83,9 @@ class Observation:
         :return: An opaque string equal for two observations of the same occurrence.
         """
         if self.external_ids:
-            ids = ";".join(f"{k}={self.external_ids[k]}" for k in sorted(self.external_ids))
+            ids = ";".join(
+                f"{k}={self.external_ids[k]}" for k in sorted(self.external_ids)
+            )
             return f"{self.source}|{ids}"
         parts = (self.url, self.event, self.placing, self.record, self.event_date)
         return f"{self.source}|" + "|".join("" if p is None else str(p) for p in parts)
@@ -216,7 +218,9 @@ class DeckEntry:
             archetype=data.get("archetype") or "",
             fmt=data.get("format"),
             warnings=list(data.get("warnings") or []),
-            observations=[Observation.from_json(o) for o in data.get("observations") or []],
+            observations=[
+                Observation.from_json(o) for o in data.get("observations") or []
+            ],
         )
 
     @classmethod
@@ -289,7 +293,9 @@ class Manifest:
         return {
             "schema_version": SCHEMA_VERSION,
             "hash_algo": HASH_ALGO,
-            "decks": {slug: entry.to_json() for slug, entry in sorted(self.decks.items())},
+            "decks": {
+                slug: entry.to_json() for slug, entry in sorted(self.decks.items())
+            },
         }
 
     @classmethod
@@ -306,7 +312,9 @@ class Manifest:
             version than this code understands (writing it would drop fields).
         """
         if not isinstance(data, dict):
-            raise ManifestError(f"manifest must be a JSON object, found {type(data).__name__}")
+            raise ManifestError(
+                f"manifest must be a JSON object, found {type(data).__name__}"
+            )
         version = data.get("schema_version")
         if version is None:
             return cls(

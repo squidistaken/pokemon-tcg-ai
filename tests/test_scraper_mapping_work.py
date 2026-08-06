@@ -414,14 +414,14 @@ def test_tool_alias_is_accepted_but_ordinary_to_ace_spec_is_not():
             "profile": mapping_work._profile_json(source.profile),
         }
     }
-    rule = _rule(
-        "tool-rule", source, card_id=1154, source_stage="Tool"
-    )
+    rule = _rule("tool-rule", source, card_id=1154, source_stage="Tool")
 
     validated = mapping_work._validate_rule(rule, records, CardIndex(), "rule")
 
     assert validated["source_stage"] == "Pokémon Tool"
-    with pytest.raises(mapping_work.MappingWorkError, match="ordinary card to ACE SPEC"):
+    with pytest.raises(
+        mapping_work.MappingWorkError, match="ordinary card to ACE SPEC"
+    ):
         mapping_work._validate_rule(
             _rule("ace-rule", source, card_id=1155, source_stage="Tool"),
             records,
@@ -505,15 +505,11 @@ def test_compile_omits_rejections_and_disagreements(
     )
 
     assert mapping_work.compile_work(argparse.Namespace(run_dir=run_dir)) == 0
-    compiled = json.loads(
-        (run_dir / "compiled_rules.json").read_text(encoding="utf-8")
-    )
+    compiled = json.loads((run_dir / "compiled_rules.json").read_text(encoding="utf-8"))
     rejected_compiled = json.loads(
         (run_dir / "rejected_by_review_agent.json").read_text(encoding="utf-8")
     )
-    summary = json.loads(
-        (run_dir / "compile_summary.json").read_text(encoding="utf-8")
-    )
+    summary = json.loads((run_dir / "compile_summary.json").read_text(encoding="utf-8"))
 
     assert [rule["rule_id"] for rule in compiled["rules"]] == ["agreed"]
     assert [rule["rule_id"] for rule in rejected_compiled["rules"]] == ["rejected"]

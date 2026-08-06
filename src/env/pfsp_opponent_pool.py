@@ -43,16 +43,16 @@ class PFSPOpponentPool(SnapshotOpponentPool):
     """
 
     def __init__(
-            self,
-            checkpoint_dir: str | Path,
-            load_snapshot: Callable[[Path], Callable[[Observation], list[int]]],
-            warmup_opponents: list[Callable[[Observation], list[int]]],
-            pool_size: int = 5,
-            seed: int | None = None,
-            weighting: str = "hard",
-            exponent: float = 2.0,
-            min_weight: float = 0.05,
-            prior_games: float = 2.0,
+        self,
+        checkpoint_dir: str | Path,
+        load_snapshot: Callable[[Path], Callable[[Observation], list[int]]],
+        warmup_opponents: list[Callable[[Observation], list[int]]],
+        pool_size: int = 5,
+        seed: int | None = None,
+        weighting: str = "hard",
+        exponent: float = 2.0,
+        min_weight: float = 0.05,
+        prior_games: float = 2.0,
     ) -> None:
         """
         :param checkpoint_dir: Directory scanned for ``*.pt`` snapshots.

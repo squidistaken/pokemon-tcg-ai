@@ -43,7 +43,13 @@ logger = logging.getLogger(__name__)
 #: tiny or near-constant-target batch. That guard is why they are kept out of
 #: the ``loss_``-prefixed terms :func:`_sum_loss_keys` puts in the backward
 #: pass and out of the finite-loss check.
-_LOGGED_DIAGNOSTICS = ("entropy", "clip_fraction", "ESS", "kl_approx", "explained_variance")
+_LOGGED_DIAGNOSTICS = (
+    "entropy",
+    "clip_fraction",
+    "ESS",
+    "kl_approx",
+    "explained_variance",
+)
 
 
 class PPOTrainer(Trainer):
@@ -70,48 +76,49 @@ class PPOTrainer(Trainer):
     """
 
     def __init__(
-            self,
-            env_factories: list[Callable[[], EnvBase]],
-            actor_critic: ActorCritic,
-            action_spec: Categorical,
-            frames_per_batch: int,
-            total_frames: int,
-            clip_epsilon: float = 0.2,
-            entropy_bonus: bool = True,
-            entropy_coeff: float = 0.01,
-            gamma: float = 0.99,
-            lmbda: float = 0.95,
-            average_gae: bool = True,
-            gae_num_chunks: int | None = None,
-            lr: float = 3.0e-4,
-            num_epochs: int = 4,
-            sub_batch_size: int = 256,
-            max_grad_norm: float = 1.0,
-            device: torch.device | str = "cpu",
-            use_parallel_env: bool = True,
-            mp_start_method: str = "fork",
-            serial_for_single: bool = True,
-            target_kl: float | None = None,
-            target_kl_multiplier: float = 1.5,
-            use_amp: bool = False,
-            compile_loss: bool = False,
-            compile_policy: bool = False,
-            lr_anneal: bool = False,
-            ent_anneal: bool = False,
-            ent_warm_frac: float = 0.5,
-            reward_scaling: float = 1.0,
-            callbacks: Iterable[TrainingCallback] | None = None,
-            run_config: Mapping[str, Any] | None = None,
-            evaluator: Evaluator | MultiEvaluator | None = None,
-            eval_interval: int = 0,
-            curriculum: Curriculum | None = None,
-            max_collector_restarts: int = 0,
-            rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]] | None = None,
-            pipe_timeout: float | None = None,
-            start_frames: int = 0,
-            train_state_path: str | Path | None = None,
-            train_state_interval: int = 0,
-            resume_state: Mapping[str, Any] | None = None,
+        self,
+        env_factories: list[Callable[[], EnvBase]],
+        actor_critic: ActorCritic,
+        action_spec: Categorical,
+        frames_per_batch: int,
+        total_frames: int,
+        clip_epsilon: float = 0.2,
+        entropy_bonus: bool = True,
+        entropy_coeff: float = 0.01,
+        gamma: float = 0.99,
+        lmbda: float = 0.95,
+        average_gae: bool = True,
+        gae_num_chunks: int | None = None,
+        lr: float = 3.0e-4,
+        num_epochs: int = 4,
+        sub_batch_size: int = 256,
+        max_grad_norm: float = 1.0,
+        device: torch.device | str = "cpu",
+        use_parallel_env: bool = True,
+        mp_start_method: str = "fork",
+        serial_for_single: bool = True,
+        target_kl: float | None = None,
+        target_kl_multiplier: float = 1.5,
+        use_amp: bool = False,
+        compile_loss: bool = False,
+        compile_policy: bool = False,
+        lr_anneal: bool = False,
+        ent_anneal: bool = False,
+        ent_warm_frac: float = 0.5,
+        reward_scaling: float = 1.0,
+        callbacks: Iterable[TrainingCallback] | None = None,
+        run_config: Mapping[str, Any] | None = None,
+        evaluator: Evaluator | MultiEvaluator | None = None,
+        eval_interval: int = 0,
+        curriculum: Curriculum | None = None,
+        max_collector_restarts: int = 0,
+        rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]]
+        | None = None,
+        pipe_timeout: float | None = None,
+        start_frames: int = 0,
+        train_state_path: str | Path | None = None,
+        train_state_interval: int = 0,
+        resume_state: Mapping[str, Any] | None = None,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -503,12 +510,16 @@ class PPOTrainer(Trainer):
                 if self._scaler is not None:
                     self._scaler.scale(total_loss).backward()
                     self._scaler.unscale_(self._optim)
-                    grad_norm = nn.utils.clip_grad_norm_(self._clip_params, self._max_grad_norm)
+                    grad_norm = nn.utils.clip_grad_norm_(
+                        self._clip_params, self._max_grad_norm
+                    )
                     self._scaler.step(self._optim)
                     self._scaler.update()
                 else:
                     total_loss.backward()
-                    grad_norm = nn.utils.clip_grad_norm_(self._clip_params, self._max_grad_norm)
+                    grad_norm = nn.utils.clip_grad_norm_(
+                        self._clip_params, self._max_grad_norm
+                    )
                     self._optim.step()
                 self._optim.zero_grad(set_to_none=True)
 
@@ -522,7 +533,9 @@ class PPOTrainer(Trainer):
                         and isinstance(value, torch.Tensor)
                         and value.numel() == 1
                     ):
-                        loss_accum[key] = loss_accum.get(key, 0.0) + float(value.detach())
+                        loss_accum[key] = loss_accum.get(key, 0.0) + float(
+                            value.detach()
+                        )
                 grad_norm_accum += float(grad_norm)
                 loss_counts += 1
 
@@ -536,7 +549,9 @@ class PPOTrainer(Trainer):
                         and value.numel() == 1
                         and torch.isfinite(value)
                     ):
-                        diagnostic_accum[key] = diagnostic_accum.get(key, 0.0) + float(value.detach())
+                        diagnostic_accum[key] = diagnostic_accum.get(key, 0.0) + float(
+                            value.detach()
+                        )
                         diagnostic_counts[key] = diagnostic_counts.get(key, 0) + 1
 
                 if self._target_kl is not None and "kl_approx" in loss_vals:
@@ -546,7 +561,8 @@ class PPOTrainer(Trainer):
             if (
                 self._target_kl is not None
                 and n_minibatches > 0
-                and (epoch_kl / n_minibatches) > self._target_kl_multiplier * self._target_kl
+                and (epoch_kl / n_minibatches)
+                > self._target_kl_multiplier * self._target_kl
             ):
                 logger.info(
                     "Early-stopping epoch loop: mean kl_approx=%.4f exceeded "
@@ -567,12 +583,18 @@ class PPOTrainer(Trainer):
                 loss_counts,
             )
         if loss_counts == 0:
-            logger.warning("Update %d produced no applied minibatches; skipping.", self._updates_done)
+            logger.warning(
+                "Update %d produced no applied minibatches; skipping.",
+                self._updates_done,
+            )
             return None
         result = {key: value / loss_counts for key, value in loss_accum.items()}
         result["grad_norm"] = grad_norm_accum / loss_counts
         result.update(
-            {key: total / diagnostic_counts[key] for key, total in diagnostic_accum.items()}
+            {
+                key: total / diagnostic_counts[key]
+                for key, total in diagnostic_accum.items()
+            }
         )
         if self._curriculum is not None:
             result.update(self._curriculum.metrics())

@@ -46,12 +46,12 @@ class CurriculumDeckSampler:
     """
 
     def __init__(
-            self,
-            decks: Sequence[Sequence[int]],
-            archetypes: ArchetypeIndex,
-            handles: CurriculumHandles,
-            seed: int | None = None,
-            explore_prob: float = 0.0,
+        self,
+        decks: Sequence[Sequence[int]],
+        archetypes: ArchetypeIndex,
+        handles: CurriculumHandles,
+        seed: int | None = None,
+        explore_prob: float = 0.0,
     ) -> None:
         """
         :param decks: The deck pool, indexed by the positions ``archetypes``

@@ -201,7 +201,11 @@ class TCGEnv(EnvBase):
     # this exact override signature, and this env ignores the reset input because it
     # always starts a fresh battle. Suppressed for PyCharm (noinspection) and Ruff (noqa).
     # noinspection PyUnusedLocal
-    def _reset(self, tensordict: TensorDictBase | None = None, **kwargs) -> TensorDictBase:  # noqa: ARG002
+    def _reset(
+        self,
+        tensordict: TensorDictBase | None = None,  # noqa: ARG002
+        **kwargs,  # noqa: ARG002
+    ) -> TensorDictBase:
         """
         Start a new battle and advance it to the agent's first selection.
 
@@ -440,7 +444,9 @@ class TCGEnv(EnvBase):
             mask[self._stop_index] = True
         return mask
 
-    def _set_step_keys(self, tensordict: TensorDict, reward: float, terminated: bool, truncated: bool) -> None:
+    def _set_step_keys(
+        self, tensordict: TensorDict, reward: float, terminated: bool, truncated: bool
+    ) -> None:
         """
         Encode reward and done flags into a step output tensordict.
 

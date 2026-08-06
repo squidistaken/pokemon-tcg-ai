@@ -31,7 +31,9 @@ def _cfg(checkpoint_dir: str) -> DictConfig:
     :param checkpoint_dir: Value for ``train.checkpoint_dir``.
     :return: A config with only that key populated.
     """
-    return cast(DictConfig, OmegaConf.create({"train": {"checkpoint_dir": checkpoint_dir}}))
+    return cast(
+        DictConfig, OmegaConf.create({"train": {"checkpoint_dir": checkpoint_dir}})
+    )
 
 
 @pytest.fixture

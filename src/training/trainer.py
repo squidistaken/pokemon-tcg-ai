@@ -136,7 +136,9 @@ def _deferred_interrupt() -> Generator[None, None, None]:
     finally:
         signal.signal(
             signal.SIGINT,
-            previous_handler if previous_handler is not None else signal.default_int_handler,
+            previous_handler
+            if previous_handler is not None
+            else signal.default_int_handler,
         )
 
 
@@ -155,22 +157,23 @@ class Trainer(BaseTrainer):
     _callbacks: CallbackList
 
     def __init__(
-            self,
-            env_factories: list[Callable[[], EnvBase]],
-            policy: nn.Module,
-            frames_per_batch: int,
-            total_frames: int,
-            use_parallel_env: bool = True,
-            mp_start_method: str = "fork",
-            serial_for_single: bool = True,
-            callbacks: Iterable[TrainingCallback] | None = None,
-            run_config: Mapping[str, Any] | None = None,
-            evaluator: Evaluator | MultiEvaluator | None = None,
-            eval_interval: int = 0,
-            max_collector_restarts: int = 0,
-            rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]] | None = None,
-            pipe_timeout: float | None = None,
-            start_frames: int = 0,
+        self,
+        env_factories: list[Callable[[], EnvBase]],
+        policy: nn.Module,
+        frames_per_batch: int,
+        total_frames: int,
+        use_parallel_env: bool = True,
+        mp_start_method: str = "fork",
+        serial_for_single: bool = True,
+        callbacks: Iterable[TrainingCallback] | None = None,
+        run_config: Mapping[str, Any] | None = None,
+        evaluator: Evaluator | MultiEvaluator | None = None,
+        eval_interval: int = 0,
+        max_collector_restarts: int = 0,
+        rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]]
+        | None = None,
+        pipe_timeout: float | None = None,
+        start_frames: int = 0,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -354,11 +357,11 @@ class Trainer(BaseTrainer):
         return summary
 
     def _collect(
-            self,
-            collector: Collector,
-            progress_bar: tqdm,
-            totals: _RunTotals,
-            start_time: float,
+        self,
+        collector: Collector,
+        progress_bar: tqdm,
+        totals: _RunTotals,
+        start_time: float,
     ) -> None:
         """
         Drain one collector, updating and reporting after every rollout.
@@ -380,7 +383,9 @@ class Trainer(BaseTrainer):
             totals.frames += batch_frames
             done = cast(Tensor, data["next", "done"]).reshape(-1)
             terminated = cast(Tensor, data["next", "terminated"]).reshape(-1)
-            decided_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[terminated]
+            decided_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[
+                terminated
+            ]
             totals.episodes += int(done.sum())
             totals.truncations += int(done.sum()) - int(terminated.sum())
             totals.wins += int((decided_rewards > 0).sum())
@@ -445,8 +450,8 @@ class Trainer(BaseTrainer):
 
     @staticmethod
     def _shutdown_collector(
-            collector: Collector,
-            preexisting_pids: set[int | None] | None = None,
+        collector: Collector,
+        preexisting_pids: set[int | None] | None = None,
     ) -> None:
         """
         Tear a collector down without letting cleanup mask the original failure.
@@ -473,9 +478,7 @@ class Trainer(BaseTrainer):
             try:
                 collector.shutdown()
             except Exception:
-                logger.warning(
-                    "Collector shutdown failed; continuing.", exc_info=True
-                )
+                logger.warning("Collector shutdown failed; continuing.", exc_info=True)
             if preexisting_pids is None:
                 return
             for child in torch_mp.active_children():
@@ -503,14 +506,14 @@ class Trainer(BaseTrainer):
 
     @staticmethod
     def _metrics(
-            frames: int,
-            episodes: int,
-            wins: int,
-            draws: int,
-            elapsed: float,
-            losses: dict[str, float] | None = None,
-            collected_frames: int | None = None,
-            truncations: int = 0,
+        frames: int,
+        episodes: int,
+        wins: int,
+        draws: int,
+        elapsed: float,
+        losses: dict[str, float] | None = None,
+        collected_frames: int | None = None,
+        truncations: int = 0,
     ) -> dict[str, float]:
         """
         Build the metrics mapping for the run so far.
@@ -628,8 +631,9 @@ class Trainer(BaseTrainer):
                 mp_start_method=self._mp_start_method,
                 serial_for_single=self._serial_for_single,
             )
-        return SerialEnv(num_workers=len(self._env_factories),
-                         create_env_fn=self._env_factories)
+        return SerialEnv(
+            num_workers=len(self._env_factories), create_env_fn=self._env_factories
+        )
 
     @staticmethod
     def _log_progress(progress_bar: tqdm, metrics: Mapping[str, float]) -> None:

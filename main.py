@@ -10,7 +10,9 @@ from src.policies.inference import InferenceAgent, load_inference_agent
 # the actual submission bundling (a separate issue) settles on its own layout.
 KAGGLE_AGENT_DIR = os.environ.get("PTCG_KAGGLE_AGENT_DIR", "/kaggle_simulations/agent/")
 CHECKPOINT_PATH = os.environ.get("PTCG_CHECKPOINT_PATH", "checkpoint/model.pt")
-MODEL_CONFIG_PATH = os.environ.get("PTCG_MODEL_CONFIG_PATH", "checkpoint/model_config.yaml")
+MODEL_CONFIG_PATH = os.environ.get(
+    "PTCG_MODEL_CONFIG_PATH", "checkpoint/model_config.yaml"
+)
 
 _agent: InferenceAgent | None = None
 

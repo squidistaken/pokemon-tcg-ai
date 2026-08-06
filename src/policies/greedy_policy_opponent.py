@@ -16,11 +16,11 @@ CHECKPOINT_FORMAT_VERSION = 1
 
 
 def save_actor_critic(
-        actor_critic: ActorCritic,
-        path: str | Path,
-        *,
-        config: Mapping[str, Any] | None = None,
-        frames: int | None = None,
+    actor_critic: ActorCritic,
+    path: str | Path,
+    *,
+    config: Mapping[str, Any] | None = None,
+    frames: int | None = None,
 ) -> Path:
     """
     Snapshot an actor-critic's parameters to disk.
@@ -104,10 +104,10 @@ class GreedyPolicyOpponent:
     """
 
     def __init__(
-            self,
-            actor_critic: ActorCritic,
-            encoder: ObservationEncoder,
-            device: torch.device | str = "cpu",
+        self,
+        actor_critic: ActorCritic,
+        encoder: ObservationEncoder,
+        device: torch.device | str = "cpu",
     ) -> None:
         """
         :param actor_critic: Trained actor-critic to act greedily with; put
@@ -133,7 +133,9 @@ class GreedyPolicyOpponent:
         select = observation.select
         state = observation.current
         if select is None or state is None:
-            raise ValueError("GreedyPolicyOpponent requires an observation with current state and select.")
+            raise ValueError(
+                "GreedyPolicyOpponent requires an observation with current state and select."
+            )
         seat = state.yourIndex
         # Match TCGEnv, which nests the encoder output under "observation".
         encoded = TensorDict(
@@ -160,11 +162,11 @@ class GreedyPolicyOpponent:
         return picks
 
     def _reencode(
-            self,
-            encoded: TensorDict,
-            observation: Observation,
-            seat: int,
-            already_chosen_option_count: int,
+        self,
+        encoded: TensorDict,
+        observation: Observation,
+        seat: int,
+        already_chosen_option_count: int,
     ) -> None:
         """
         Refresh the encoding for the next partial pick, in place where possible.
@@ -183,17 +185,15 @@ class GreedyPolicyOpponent:
             encoded.get("observation"), already_chosen_option_count
         ):
             return
-        refreshed = self._encoder.encode(
-            observation, seat, already_chosen_option_count
-        )
+        refreshed = self._encoder.encode(observation, seat, already_chosen_option_count)
         encoded.set("observation", refreshed.to(self._device))
 
     @staticmethod
     def greedy_pick(
-            logits: torch.Tensor,
-            n_options: int,
-            already_chosen: list[int],
-            stop_allowed: bool,
+        logits: torch.Tensor,
+        n_options: int,
+        already_chosen: list[int],
+        stop_allowed: bool,
     ) -> int | None:
         """
         Take the best legal option, or stop.
@@ -223,10 +223,10 @@ class GreedyPolicyOpponent:
 
     @staticmethod
     def greedy_select(
-            logits: torch.Tensor,
-            n_options: int,
-            min_count: int,
-            max_count: int,
+        logits: torch.Tensor,
+        n_options: int,
+        min_count: int,
+        max_count: int,
     ) -> list[int]:
         """
         Resolve a whole selection from one fixed set of action logits.
@@ -256,11 +256,11 @@ class GreedyPolicyOpponent:
 
 
 def load_actor_critic(
-        checkpoint_path: str | Path,
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: TensorSpec,
-        device: torch.device | str = "cpu",
+    checkpoint_path: str | Path,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: TensorSpec,
+    device: torch.device | str = "cpu",
 ) -> ActorCritic:
     """
     Rebuild an actor-critic from a snapshot and load its weights.
@@ -289,12 +289,12 @@ def load_actor_critic(
 
 
 def load_greedy_opponent(
-        checkpoint_path: str | Path,
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: TensorSpec,
-        encoder: ObservationEncoder,
-        device: torch.device | str = "cpu",
+    checkpoint_path: str | Path,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: TensorSpec,
+    encoder: ObservationEncoder,
+    device: torch.device | str = "cpu",
 ) -> GreedyPolicyOpponent:
     """
     Load a snapshot and wrap it as a greedy opponent.
@@ -307,5 +307,7 @@ def load_greedy_opponent(
     :param device: Device for inference.
     :return: A greedy opponent playing the snapshot.
     """
-    actor_critic = load_actor_critic(checkpoint_path, cfg, obs_spec, action_spec, device)
+    actor_critic = load_actor_critic(
+        checkpoint_path, cfg, obs_spec, action_spec, device
+    )
     return GreedyPolicyOpponent(actor_critic, encoder, device=device)

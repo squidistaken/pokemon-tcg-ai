@@ -1,7 +1,3 @@
-
-
-
-
 from collections.abc import Sequence
 
 import torch
@@ -201,19 +197,19 @@ class StructuredObsAdapter(nn.Module):
     _option_target_scales: torch.Tensor
 
     def __init__(
-            self,
-            obs_spec: Composite,
-            in_keys: list[str | tuple[str, ...]],
-            card_embed_dim: int = 8,
-            attack_embed_dim: int = 8,
-            category_embed_dim: int = 4,
-            card_database: CardDatabase | None = None,
-            entity_dim: int | None = 64,
-            pool: bool = True,
-            emit_option_tokens: bool = False,
-            zone_pooling: str = "mean",
-            pokemon_seat_split: bool = False,
-            option_target_state: bool = False,
+        self,
+        obs_spec: Composite,
+        in_keys: list[str | tuple[str, ...]],
+        card_embed_dim: int = 8,
+        attack_embed_dim: int = 8,
+        category_embed_dim: int = 4,
+        card_database: CardDatabase | None = None,
+        entity_dim: int | None = 64,
+        pool: bool = True,
+        emit_option_tokens: bool = False,
+        zone_pooling: str = "mean",
+        pokemon_seat_split: bool = False,
+        option_target_state: bool = False,
     ) -> None:
         """
         :param obs_spec: Full environment observation spec.
@@ -295,7 +291,8 @@ class StructuredObsAdapter(nn.Module):
             "_card_static", card_static / card_static.abs().amax(dim=0).clamp(min=1.0)
         )
         self.register_buffer(
-            "_attack_static", attack_static / attack_static.abs().amax(dim=0).clamp(min=1.0)
+            "_attack_static",
+            attack_static / attack_static.abs().amax(dim=0).clamp(min=1.0),
         )
         self.register_buffer("_card_categories", card_categories)
         self.register_buffer("_card_attack_ids", card_attack_ids)
@@ -310,8 +307,12 @@ class StructuredObsAdapter(nn.Module):
         self._entity_dim: int | None = entity_dim
         self._pool: bool = pool and entity_dim is not None
 
-        self._card_embedding = nn.Embedding(card_static.shape[0], card_embed_dim, padding_idx=0)
-        self._attack_embedding = nn.Embedding(attack_static.shape[0], attack_embed_dim, padding_idx=0)
+        self._card_embedding = nn.Embedding(
+            card_static.shape[0], card_embed_dim, padding_idx=0
+        )
+        self._attack_embedding = nn.Embedding(
+            attack_static.shape[0], attack_embed_dim, padding_idx=0
+        )
         field_count = (
             self.SELECT_CATEGORY_FIELD_COUNT
             + self.OPTION_CATEGORY_FIELD_COUNT
@@ -322,20 +323,30 @@ class StructuredObsAdapter(nn.Module):
         )
         self.register_buffer(
             "_select_category_offsets",
-            torch.arange(self.SELECT_CATEGORY_FIELD_COUNT, dtype=torch.int64) * self.CATEGORY_VOCAB_SIZE,
+            torch.arange(self.SELECT_CATEGORY_FIELD_COUNT, dtype=torch.int64)
+            * self.CATEGORY_VOCAB_SIZE,
         )
         self.register_buffer(
             "_option_category_offsets",
-            (torch.arange(self.OPTION_CATEGORY_FIELD_COUNT, dtype=torch.int64)
-             + self.SELECT_CATEGORY_FIELD_COUNT) * self.CATEGORY_VOCAB_SIZE,
+            (
+                torch.arange(self.OPTION_CATEGORY_FIELD_COUNT, dtype=torch.int64)
+                + self.SELECT_CATEGORY_FIELD_COUNT
+            )
+            * self.CATEGORY_VOCAB_SIZE,
         )
         self.register_buffer(
             "_card_category_offsets",
-            (torch.arange(self.CARD_CATEGORY_FIELD_COUNT, dtype=torch.int64)
-             + self.SELECT_CATEGORY_FIELD_COUNT + self.OPTION_CATEGORY_FIELD_COUNT) * self.CATEGORY_VOCAB_SIZE,
+            (
+                torch.arange(self.CARD_CATEGORY_FIELD_COUNT, dtype=torch.int64)
+                + self.SELECT_CATEGORY_FIELD_COUNT
+                + self.OPTION_CATEGORY_FIELD_COUNT
+            )
+            * self.CATEGORY_VOCAB_SIZE,
         )
         global_scales = self.GAME_SCALES + self.SELECT_SCALES + 2 * self.PLAYER_SCALES
-        self.register_buffer("_global_scales", torch.tensor(global_scales, dtype=torch.float32))
+        self.register_buffer(
+            "_global_scales", torch.tensor(global_scales, dtype=torch.float32)
+        )
         self.register_buffer(
             "_pokemon_feature_scales",
             torch.tensor(self.POKEMON_FEATURE_SCALES, dtype=torch.float32),
@@ -509,7 +520,10 @@ class StructuredObsAdapter(nn.Module):
         :return: ``{name: segment_ids}``, ``segment_ids`` an int64 tensor of
             shape ``(group_slot_counts[name],)``.
         """
-        return {name: getattr(self, f"_segment_ids_{name}") for name in self._segment_group_names}
+        return {
+            name: getattr(self, f"_segment_ids_{name}")
+            for name in self._segment_group_names
+        }
 
     def _register_segment_ids(self, name: str, segment_ids: torch.Tensor) -> None:
         """
@@ -603,7 +617,9 @@ class StructuredObsAdapter(nn.Module):
             self._register_segment_ids(name, option_segment_ids)
             if self._pool:
                 assert self._entity_dim is not None
-                self._option_encoder = nn.Linear(self._option_row_width(spec), self._entity_dim)
+                self._option_encoder = nn.Linear(
+                    self._option_row_width(spec), self._entity_dim
+                )
                 return self._entity_dim
             return n_slots * self._option_row_width(spec)
         if name == "pokemon":
@@ -629,26 +645,38 @@ class StructuredObsAdapter(nn.Module):
             )
             if self._pool:
                 assert self._entity_dim is not None
-                self._pokemon_encoder = nn.Linear(self._pokemon_row_width(spec), self._entity_dim)
+                self._pokemon_encoder = nn.Linear(
+                    self._pokemon_row_width(spec), self._entity_dim
+                )
                 seats = 2 if self._pokemon_seat_split else 1
                 return seats * self._pool_width(self._entity_dim)
             return rows * self._pokemon_row_width(spec)
         if name in ("my", "opp", "select_deck", "looking"):
             if not isinstance(spec, Composite):
-                raise ValueError(f"Zone group '{name}' must be a composite of ids/mask leaves.")
+                raise ValueError(
+                    f"Zone group '{name}' must be a composite of ids/mask leaves."
+                )
             pairs: list[tuple[str, str]] = []
             for leaf_name in spec:
                 if not isinstance(leaf_name, str):
                     continue
                 if leaf_name == "ids" or leaf_name.endswith("_ids"):
-                    mask_name = "mask" if leaf_name == "ids" else leaf_name[: -len("_ids")] + "_mask"
+                    mask_name = (
+                        "mask"
+                        if leaf_name == "ids"
+                        else leaf_name[: -len("_ids")] + "_mask"
+                    )
                     if mask_name not in spec:
-                        raise ValueError(f"Zone group '{name}' has '{leaf_name}' without '{mask_name}'.")
+                        raise ValueError(
+                            f"Zone group '{name}' has '{leaf_name}' without '{mask_name}'."
+                        )
                     pairs.append((leaf_name, mask_name))
             if len(pairs) == 0:
                 raise ValueError(f"Zone group '{name}' contains no ids/mask pairs.")
             self._zone_pairs[name] = pairs
-            self.group_slot_counts[name] = sum(spec[ids_name].shape[-1] for ids_name, _ in pairs)
+            self.group_slot_counts[name] = sum(
+                spec[ids_name].shape[-1] for ids_name, _ in pairs
+            )
             # One id per zone (e.g. hand vs discard vs prize), repeated
             # across that zone's capacity: without it, the same card looks
             # identical whichever zone holds it, since every zone shares the
@@ -657,7 +685,9 @@ class StructuredObsAdapter(nn.Module):
                 name,
                 torch.cat(
                     [
-                        torch.full((spec[ids_name].shape[-1],), segment, dtype=torch.int64)
+                        torch.full(
+                            (spec[ids_name].shape[-1],), segment, dtype=torch.int64
+                        )
                         for segment, (ids_name, _) in enumerate(pairs)
                     ]
                 ),
@@ -668,7 +698,9 @@ class StructuredObsAdapter(nn.Module):
             return len(pairs) * zw
         raise ValueError(f"Unknown structured observation group '{name}'.")
 
-    def encode_groups(self, *inputs: torch.Tensor | TensorDictBase) -> list[torch.Tensor]:
+    def encode_groups(
+        self, *inputs: torch.Tensor | TensorDictBase
+    ) -> list[torch.Tensor]:
         """
         Encode each structured observation group separately.
 
@@ -687,7 +719,9 @@ class StructuredObsAdapter(nn.Module):
                 assert isinstance(value, torch.Tensor)
                 parts.append(value / self._global_scales)
             elif name == "select_cats":
-                parts.append(self._embed_categories(value, self._select_category_offsets))
+                parts.append(
+                    self._embed_categories(value, self._select_category_offsets)
+                )
             elif name in ("context_card_ids", "stadium_id"):
                 parts.append(self._encode_card_ids(value))
             elif name == "options":
@@ -699,9 +733,9 @@ class StructuredObsAdapter(nn.Module):
         return parts
 
     def encode_entity_tokens(
-            self,
-            *inputs: torch.Tensor | TensorDictBase,
-            groups: Sequence[str],
+        self,
+        *inputs: torch.Tensor | TensorDictBase,
+        groups: Sequence[str],
     ) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
         """
         Encode selected groups as per-entity token sequences, unpooled.
@@ -775,7 +809,9 @@ class StructuredObsAdapter(nn.Module):
                 card_parts: list[torch.Tensor] = []
                 mask_parts: list[torch.Tensor] = []
                 for ids_name, mask_name in self._zone_pairs[name]:
-                    card_parts.append(self._card_proj(self._card_repr(value.get(ids_name))))
+                    card_parts.append(
+                        self._card_proj(self._card_repr(value.get(ids_name)))
+                    )
                     mask_parts.append(value.get(mask_name))
                 tokens[name] = (
                     torch.cat(card_parts, dim=-2),
@@ -784,8 +820,8 @@ class StructuredObsAdapter(nn.Module):
         return tokens
 
     def forward(
-            self,
-            *inputs: torch.Tensor | TensorDictBase,
+        self,
+        *inputs: torch.Tensor | TensorDictBase,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         Encode the structured observation groups.
@@ -799,7 +835,9 @@ class StructuredObsAdapter(nn.Module):
         state = torch.cat(self.encode_groups(*inputs), dim=-1)
         if not self._emit_option_tokens:
             return state
-        option_tokens, _ = self.encode_entity_tokens(*inputs, groups=["options"])["options"]
+        option_tokens, _ = self.encode_entity_tokens(*inputs, groups=["options"])[
+            "options"
+        ]
         return state, option_tokens
 
     # ── Card / attack / category helpers ──────────────────────────────
@@ -814,7 +852,9 @@ class StructuredObsAdapter(nn.Module):
             [
                 self._card_embedding(card_ids),
                 self._card_static[card_ids],
-                self._embed_categories(self._card_categories[card_ids], self._card_category_offsets),
+                self._embed_categories(
+                    self._card_categories[card_ids], self._card_category_offsets
+                ),
                 self._masked_mean(self._attack_repr(attack_ids), attack_ids != 0),
             ],
             dim=-1,
@@ -822,9 +862,14 @@ class StructuredObsAdapter(nn.Module):
 
     def _attack_repr(self, attack_ids: torch.Tensor) -> torch.Tensor:
         """Learned + static attack representation."""
-        return torch.cat([self._attack_embedding(attack_ids), self._attack_static[attack_ids]], dim=-1)
+        return torch.cat(
+            [self._attack_embedding(attack_ids), self._attack_static[attack_ids]],
+            dim=-1,
+        )
 
-    def _embed_categories(self, values: torch.Tensor, field_offsets: torch.Tensor) -> torch.Tensor:
+    def _embed_categories(
+        self, values: torch.Tensor, field_offsets: torch.Tensor
+    ) -> torch.Tensor:
         """Embed categorical fields through the shared table, flattening the result."""
         return self._flatten_rows(self._category_embedding(values + field_offsets))
 
@@ -841,15 +886,21 @@ class StructuredObsAdapter(nn.Module):
         """Raw per-option feature rows, shape ``(*batch, n_slots, row_width)``."""
         scalars = options.get("scalars")
         scaled = torch.where(
-            scalars < 0.0, scalars.new_full((), -1.0), scalars / self.OPTION_SCALAR_SCALE
+            scalars < 0.0,
+            scalars.new_full((), -1.0),
+            scalars / self.OPTION_SCALAR_SCALE,
         )
         return torch.cat(
             [
                 self._card_repr(options.get("card_id")),
                 self._card_repr(options.get("target_id")),
                 self._attack_repr(options.get("attack_id")),
-                nn.functional.one_hot(options.get("owner"), self.OWNER_VALUE_COUNT).to(torch.float32),
-                self._category_embedding(options.get("cats") + self._option_category_offsets).flatten(-2),
+                nn.functional.one_hot(options.get("owner"), self.OWNER_VALUE_COUNT).to(
+                    torch.float32
+                ),
+                self._category_embedding(
+                    options.get("cats") + self._option_category_offsets
+                ).flatten(-2),
                 scaled,
             ]
             # The targeted Pokemon's live state. Already zero-filled by the
@@ -872,7 +923,9 @@ class StructuredObsAdapter(nn.Module):
                 self._card_repr(pokemon.get("card_id")),
                 self._card_repr(pokemon.get("tool_id")),
                 self._masked_mean(self._card_repr(energy_ids), energy_ids != 0),
-                self._masked_mean(self._card_repr(pre_evolution_ids), pre_evolution_ids != 0),
+                self._masked_mean(
+                    self._card_repr(pre_evolution_ids), pre_evolution_ids != 0
+                ),
                 pokemon.get("features") / self._pokemon_feature_scales,
                 pokemon.get("mask").to(torch.float32).unsqueeze(-1),
             ],
@@ -993,7 +1046,11 @@ class StructuredObsAdapter(nn.Module):
         occupied = mask.unsqueeze(-1)
         # Empty sets would otherwise max to the sentinel; force them to zero so
         # an absent zone reads as "nothing here" rather than a huge constant.
-        maximum = reprs.masked_fill(~occupied, torch.finfo(reprs.dtype).min).amax(dim=-2)
-        maximum = torch.where(mask.any(dim=-1, keepdim=True), maximum, torch.zeros_like(maximum))
+        maximum = reprs.masked_fill(~occupied, torch.finfo(reprs.dtype).min).amax(
+            dim=-2
+        )
+        maximum = torch.where(
+            mask.any(dim=-1, keepdim=True), maximum, torch.zeros_like(maximum)
+        )
         total = (reprs * occupied.to(reprs.dtype)).sum(dim=-2) / reprs.shape[-2]
         return torch.cat([mean, maximum, total], dim=-1)

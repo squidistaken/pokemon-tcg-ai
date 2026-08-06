@@ -552,14 +552,14 @@ def test_deck_pool_width_narrows_train_but_not_eval() -> None:
     ``deck_pool_width`` shrinks the training pool while the held-out set is fixed.
     """
     full = _env_cfg(deck_pool=str(CORPUS_DIR), deck_holdout_frac=0.2)
-    narrow = _env_cfg(deck_pool=str(CORPUS_DIR), deck_holdout_frac=0.2, deck_pool_width=5)
-    assert (
-        len(_build_sampler_spec(narrow, deck_split="train")["decks"])
-        < len(_build_sampler_spec(full, deck_split="train")["decks"])
+    narrow = _env_cfg(
+        deck_pool=str(CORPUS_DIR), deck_holdout_frac=0.2, deck_pool_width=5
     )
-    assert (
-        len(_build_sampler_spec(narrow, deck_split="eval")["decks"])
-        == len(_build_sampler_spec(full, deck_split="eval")["decks"])
+    assert len(_build_sampler_spec(narrow, deck_split="train")["decks"]) < len(
+        _build_sampler_spec(full, deck_split="train")["decks"]
+    )
+    assert len(_build_sampler_spec(narrow, deck_split="eval")["decks"]) == len(
+        _build_sampler_spec(full, deck_split="eval")["decks"]
     )
 
 

@@ -430,9 +430,7 @@ class StructuredObservationEncoder:
             )
             if target is not None:
                 owner = (
-                    option.playerIndex
-                    if option.playerIndex is not None
-                    else agent_seat
+                    option.playerIndex if option.playerIndex is not None else agent_seat
                 )
                 is_active = any(
                     entry is target for entry in state.players[owner].active
@@ -737,7 +735,9 @@ class StructuredObsAdapter(nn.Module):
             if name == "globals":
                 parts.append(value / self._global_scales)
             elif name == "select_cats":
-                parts.append(self._embed_categories(value, self._select_category_offsets))
+                parts.append(
+                    self._embed_categories(value, self._select_category_offsets)
+                )
             elif name in ("context_card_ids", "stadium_id"):
                 parts.append(self._encode_card_ids(value))
             elif name == "options":
@@ -789,9 +789,7 @@ class StructuredObsAdapter(nn.Module):
                 card_parts: list[torch.Tensor] = []
                 mask_parts: list[torch.Tensor] = []
                 for ids_name, mask_name in self.ZONE_PAIRS[name]:
-                    card_parts.append(
-                        self._card_proj(self._card_repr(value[ids_name]))
-                    )
+                    card_parts.append(self._card_proj(self._card_repr(value[ids_name])))
                     mask_parts.append(value[mask_name])
                 tokens[name] = (
                     torch.cat(card_parts, dim=-2),
@@ -821,7 +819,9 @@ class StructuredObsAdapter(nn.Module):
             [
                 self._card_embedding(card_ids),
                 self._card_static[card_ids],
-                self._embed_categories(self._card_categories[card_ids], self._card_category_offsets),
+                self._embed_categories(
+                    self._card_categories[card_ids], self._card_category_offsets
+                ),
                 self._masked_mean(self._attack_repr(attack_ids), attack_ids != 0),
             ],
             dim=-1,
@@ -854,8 +854,12 @@ class StructuredObsAdapter(nn.Module):
         if self._zone_pooling == "mean":
             return mean
         occupied = mask.unsqueeze(-1)
-        maximum = reprs.masked_fill(~occupied, torch.finfo(reprs.dtype).min).amax(dim=-2)
-        maximum = torch.where(mask.any(dim=-1, keepdim=True), maximum, torch.zeros_like(maximum))
+        maximum = reprs.masked_fill(~occupied, torch.finfo(reprs.dtype).min).amax(
+            dim=-2
+        )
+        maximum = torch.where(
+            mask.any(dim=-1, keepdim=True), maximum, torch.zeros_like(maximum)
+        )
         total = (reprs * occupied.to(reprs.dtype)).sum(dim=-2) / reprs.shape[-2]
         return torch.cat([mean, maximum, total], dim=-1)
 
@@ -956,7 +960,6 @@ class StructuredObsAdapter(nn.Module):
             dim=-1,
         )
 
-
     def _pokemon_rows(self, pokemon: Mapping[str, torch.Tensor]) -> torch.Tensor:
         energy_ids = pokemon["energy_card_ids"]
         evolution_ids = pokemon["pre_evolution_ids"]
@@ -1011,7 +1014,8 @@ class StructuredObsAdapter(nn.Module):
             capacity = mask.shape[-1]
             reprs = self._card_proj(self._card_repr(zones[ids_name]))
             parts.append(
-                self._masked_pool(reprs, mask) if self._pool
+                self._masked_pool(reprs, mask)
+                if self._pool
                 else self._masked_mean(reprs, mask)
             )
             parts.append(mask.to(torch.float32).sum(dim=-1, keepdim=True) / capacity)
@@ -1576,7 +1580,9 @@ class PointerHead(PolicyHead):
         hidden = []
         index = 0
         while f"policy_head.scorer.{index + 2}.weight" in state_dict:
-            hidden.append(int(state_dict[f"policy_head.scorer.{index}.weight"].shape[0]))
+            hidden.append(
+                int(state_dict[f"policy_head.scorer.{index}.weight"].shape[0])
+            )
             index += 2
         activation = str(head_config.get("activation", "tanh"))
         self.scorer = _mlp(in_features + self.option_dim, hidden, 1, activation)
@@ -1726,9 +1732,7 @@ class Policy:
         inference_config = config.get("inference", {})
         if not isinstance(inference_config, Mapping):
             raise TypeError("inference config must be a mapping")
-        self.action_selection = str(
-            inference_config.get("action_selection", "sample")
-        )
+        self.action_selection = str(inference_config.get("action_selection", "sample"))
         if self.action_selection not in {"greedy", "sample"}:
             raise ValueError(
                 "inference.action_selection must be either 'greedy' or 'sample'"

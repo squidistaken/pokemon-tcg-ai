@@ -250,15 +250,33 @@ def test_submission_observation_schema_matches_the_competition_api() -> None:
     from cg import api as competition_api
     from submission import cg_api as shipped
 
-    for name in ("Card", "Pokemon", "PlayerState", "State", "Option", "SelectData", "Observation"):
-        expected = {field.name for field in dataclasses.fields(getattr(competition_api, name))}
-        shipped_fields = {field.name for field in dataclasses.fields(getattr(shipped, name))}
+    for name in (
+        "Card",
+        "Pokemon",
+        "PlayerState",
+        "State",
+        "Option",
+        "SelectData",
+        "Observation",
+    ):
+        expected = {
+            field.name for field in dataclasses.fields(getattr(competition_api, name))
+        }
+        shipped_fields = {
+            field.name for field in dataclasses.fields(getattr(shipped, name))
+        }
         assert shipped_fields == expected, f"{name} has drifted from cg.api"
 
     for enum_name in ("AreaType", "OptionType"):
-        expected_members = {member.name: int(member) for member in getattr(competition_api, enum_name)}
-        shipped_members = {member.name: int(member) for member in getattr(shipped, enum_name)}
-        assert shipped_members == expected_members, f"{enum_name} has drifted from cg.api"
+        expected_members = {
+            member.name: int(member) for member in getattr(competition_api, enum_name)
+        }
+        shipped_members = {
+            member.name: int(member) for member in getattr(shipped, enum_name)
+        }
+        assert shipped_members == expected_members, (
+            f"{enum_name} has drifted from cg.api"
+        )
 
 
 def test_pending_episodes_are_skipped_not_scored_as_draws() -> None:
@@ -334,7 +352,11 @@ def test_scout_reconstructs_only_the_scouted_teams_deck(monkeypatch, tmp_path) -
     episode = _Episode(id=7, agents=[_Agent(999, 0), _Agent(55, 1)])
 
     def _log(player_index: int, card_id: int) -> dict:
-        return {"type": int(LogType.PLAY), "playerIndex": player_index, "cardId": card_id}
+        return {
+            "type": int(LogType.PLAY),
+            "playerIndex": player_index,
+            "cardId": card_id,
+        }
 
     # Both sides carry the same log batch, as a real replay does; the parser
     # selects by `playerIndex`, so side 0 yields the opponent's card and side 1
@@ -390,11 +412,24 @@ def test_evolution_stats_group_reprints_of_the_same_card_by_name() -> None:
 
     def _card(card_id: int, name: str, evolves_from: str | None = None) -> CardData:
         return CardData(
-            cardId=card_id, name=name, cardType=CardType.POKEMON, retreatCost=1,
-            hp=100, weakness=None, resistance=None, energyType=0,
-            basic=evolves_from is None, stage1=evolves_from is not None,
-            stage2=False, ex=False, megaEx=False, tera=False, aceSpec=False,
-            evolvesFrom=evolves_from, skills=[], attacks=[],
+            cardId=card_id,
+            name=name,
+            cardType=CardType.POKEMON,
+            retreatCost=1,
+            hp=100,
+            weakness=None,
+            resistance=None,
+            energyType=0,
+            basic=evolves_from is None,
+            stage1=evolves_from is not None,
+            stage2=False,
+            ex=False,
+            megaEx=False,
+            tera=False,
+            aceSpec=False,
+            evolvesFrom=evolves_from,
+            skills=[],
+            attacks=[],
         )
 
     # Two printings of the same Basic (100, 101) and one evolution off it.
@@ -409,8 +444,11 @@ def test_evolution_stats_group_reprints_of_the_same_card_by_name() -> None:
 
     def _episode(episode_id: int, played: set[int], evolved: set[int]) -> ParsedEpisode:
         return ParsedEpisode(
-            episode_id=episode_id, result="win", opponent_team="them",
-            cards_played=played, evolutions_made=evolved,
+            episode_id=episode_id,
+            result="win",
+            opponent_team="them",
+            cards_played=played,
+            evolutions_made=evolved,
         )
 
     episodes = [

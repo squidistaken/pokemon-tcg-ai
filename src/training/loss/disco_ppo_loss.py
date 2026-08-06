@@ -46,7 +46,9 @@ class DiscoPPOLoss(ClipPPOLoss):
         tensordict = tensordict.clone(False)
 
         # ── Advantage ─────────────────────────────────────────────────
-        advantage = tensordict.get(self.tensor_keys.advantage, None, as_padded_tensor=True)
+        advantage = tensordict.get(
+            self.tensor_keys.advantage, None, as_padded_tensor=True
+        )
         if advantage is None:
             self.value_estimator(
                 tensordict,
@@ -101,7 +103,9 @@ class DiscoPPOLoss(ClipPPOLoss):
 
         # ── Critic loss ───────────────────────────────────────────────
         if self._has_critic:
-            loss_critic, value_clip_fraction, explained_variance = self.loss_critic(tensordict)
+            loss_critic, value_clip_fraction, explained_variance = self.loss_critic(
+                tensordict
+            )
             td_out.set("loss_critic", loss_critic)
             if value_clip_fraction is not None:
                 td_out.set("value_clip_fraction", value_clip_fraction)
@@ -110,13 +114,18 @@ class DiscoPPOLoss(ClipPPOLoss):
 
         td_out.set("ESS", _reduce(ess, self.reduction) / batch)
         td_out = td_out.named_apply(
-            lambda name, value: cast(torch.Tensor, _reduce(value, reduction=self.reduction)).squeeze(-1)
-            if name.startswith("loss_")
-            else value,
+            lambda name, value: (
+                cast(torch.Tensor, _reduce(value, reduction=self.reduction)).squeeze(-1)
+                if name.startswith("loss_")
+                else value
+            ),
         )
         self._clear_weakrefs(
-            tensordict, td_out,
-            "actor_network_params", "critic_network_params",
-            "target_actor_network_params", "target_critic_network_params",
+            tensordict,
+            td_out,
+            "actor_network_params",
+            "critic_network_params",
+            "target_actor_network_params",
+            "target_critic_network_params",
         )
         return td_out

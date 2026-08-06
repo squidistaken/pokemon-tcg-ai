@@ -51,9 +51,7 @@ def test_card_swapper_requires_resolve_implementation():
     assert MappingCardSwapper(CardIndex()).resolve(RawCard(1, "Missing")) == ()
 
 
-def test_all_strategies_fetch_once_and_create_separate_manifests(
-    tmp_path, monkeypatch
-):
+def test_all_strategies_fetch_once_and_create_separate_manifests(tmp_path, monkeypatch):
     class FakeSource:
         calls = 0
 
@@ -91,9 +89,7 @@ def test_all_strategies_fetch_once_and_create_separate_manifests(
     assert gap.identity.name == "entirely missing"
 
 
-def test_all_strategies_receive_the_identical_fetched_deck(
-    tmp_path, monkeypatch
-):
+def test_all_strategies_receive_the_identical_fetched_deck(tmp_path, monkeypatch):
     class FakeSource:
         @staticmethod
         def iter_decks(**_kwargs):
@@ -200,9 +196,16 @@ def test_mapping_gap_report_refuses_to_append_to_an_existing_file(
     rules.mkdir()
     gap = tmp_path / "gaps.jsonl.gz"
     args = [
-        "--source", "gap-source", "--card-swap-strategy", "mapping",
-        "--card-swap-map", str(rules), "--mapping-gap-out", str(gap),
-        "--out", str(tmp_path / "decks"),
+        "--source",
+        "gap-source",
+        "--card-swap-strategy",
+        "mapping",
+        "--card-swap-map",
+        str(rules),
+        "--mapping-gap-out",
+        str(gap),
+        "--out",
+        str(tmp_path / "decks"),
     ]
 
     assert main(args) == 0
@@ -231,28 +234,50 @@ def test_mapping_rule_change_writes_a_new_run_specific_gap_report(
     empty_rules.mkdir()
     changed_rules = tmp_path / "changed-rules"
     changed_rules.mkdir()
-    (changed_rules / "inactive.json").write_text(json.dumps({
-        "schema_version": 2,
-        "rules": [{
-            "rule_id": "known-rejection", "source_name": "Some Other Card",
-            "source_set": "PAL", "source_number": "185", "source_rule": None,
-            "source_stage": "Supporter", "source_previous_stage": None,
-            "targets": [{
-                "card_id": 1213, "expected_name": "Judge",
-                "mapping_confidence": 4,
-                "rationale": "Reviewed deterministic substitution.",
-            }],
-            "family_id": None,
-            "allow_cross_subtype": False,
-        }],
-    }), encoding="utf-8")
+    (changed_rules / "inactive.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "rules": [
+                    {
+                        "rule_id": "known-rejection",
+                        "source_name": "Some Other Card",
+                        "source_set": "PAL",
+                        "source_number": "185",
+                        "source_rule": None,
+                        "source_stage": "Supporter",
+                        "source_previous_stage": None,
+                        "targets": [
+                            {
+                                "card_id": 1213,
+                                "expected_name": "Judge",
+                                "mapping_confidence": 4,
+                                "rationale": "Reviewed deterministic substitution.",
+                            }
+                        ],
+                        "family_id": None,
+                        "allow_cross_subtype": False,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
     def run(rule_dir, job_id):
         monkeypatch.setenv("SLURM_JOB_ID", job_id)
-        return main([
-            "--source", "changed-gap-source", "--card-swap-strategy", "mapping",
-            "--card-swap-map", str(rule_dir),
-            "--out", str(tmp_path / "decks"),
-        ])
+        return main(
+            [
+                "--source",
+                "changed-gap-source",
+                "--card-swap-strategy",
+                "mapping",
+                "--card-swap-map",
+                str(rule_dir),
+                "--out",
+                str(tmp_path / "decks"),
+            ]
+        )
 
     assert run(empty_rules, "first") == 0
     first = tmp_path / "decks" / "mapping-gaps-first.jsonl.gz"

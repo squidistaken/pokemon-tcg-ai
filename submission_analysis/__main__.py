@@ -138,10 +138,14 @@ def _run_deck_report(argv: Sequence[str] | None) -> int:
     if deck_path.is_file():
         decklist = load_deck(deck_path)
     else:
-        print(f"warning: deck CSV not found at {deck_path}; skipping never-drawn-card coverage.")
+        print(
+            f"warning: deck CSV not found at {deck_path}; skipping never-drawn-card coverage."
+        )
 
     card_index = load_card_index()
-    rating_history_path = submissions.resolve_local_path(submissions.RATING_HISTORY_FILE, root)
+    rating_history_path = submissions.resolve_local_path(
+        submissions.RATING_HISTORY_FILE, root
+    )
     rating_history = load_rating_history(rating_history_path)
     labels_by_ref = _labels_by_ref(rating_history)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")  # noqa: DTZ005
@@ -150,7 +154,9 @@ def _run_deck_report(argv: Sequence[str] | None) -> int:
     for submission_dir in submission_dirs:
         parsed_episodes = load_parsed_episodes([submission_dir])
         if not parsed_episodes:
-            print(f"No replays could be parsed for submission {submission_dir.name}; skipping.")
+            print(
+                f"No replays could be parsed for submission {submission_dir.name}; skipping."
+            )
             continue
 
         folder_name = _submission_folder_name(submission_dir.name, labels_by_ref)
@@ -187,7 +193,9 @@ def _run_deck_report(argv: Sequence[str] | None) -> int:
             output_dir / "ko_rate_vs_win_rate.png",
             win_rate_baseline=report.win_rate,
         )
-        plot_attack_utilization(report.card_stats, output_dir / "attack_utilization.png")
+        plot_attack_utilization(
+            report.card_stats, output_dir / "attack_utilization.png"
+        )
         plot_attack_usage(report.attack_stats, output_dir / "attack_usage.png")
         plot_damage_by_card(report.attack_stats, output_dir / "damage_by_card.png")
         plot_opponent_attack_usage(
@@ -200,7 +208,9 @@ def _run_deck_report(argv: Sequence[str] | None) -> int:
         plot_first_attack_turn_distribution(
             report.first_attack_turns, output_dir / "first_attack_turn_distribution.png"
         )
-        plot_ko_margin_distribution(report.ko_margins, output_dir / "ko_margin_distribution.png")
+        plot_ko_margin_distribution(
+            report.ko_margins, output_dir / "ko_margin_distribution.png"
+        )
         plot_game_length_distribution(
             report.game_lengths, output_dir / "game_length_distribution.png"
         )
@@ -212,7 +222,9 @@ def _run_deck_report(argv: Sequence[str] | None) -> int:
     plot_leaderboard_rank_over_time(
         rating_history, root_output_dir / "leaderboard_rank_over_time.png"
     )
-    plot_win_rate_by_submission(summaries, root_output_dir / "win_rate_by_submission.png")
+    plot_win_rate_by_submission(
+        summaries, root_output_dir / "win_rate_by_submission.png"
+    )
     plot_average_ko_margin_by_submission(
         summaries, root_output_dir / "average_ko_margin_by_submission.png"
     )

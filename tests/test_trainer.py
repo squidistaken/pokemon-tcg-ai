@@ -75,7 +75,9 @@ def test_trainer_with_opponent_pool() -> None:
     Environments built with an opponent pool factory collect normally.
     """
     trainer = Trainer(
-        env_factories=make_env_factories(make_cfg(), opponent_factory=make_opponent_pool),
+        env_factories=make_env_factories(
+            make_cfg(), opponent_factory=make_opponent_pool
+        ),
         policy=RandomMaskedPolicy(),
         frames_per_batch=64,
         total_frames=64,
@@ -186,7 +188,9 @@ class _ScriptedTrainer(Trainer):
         self.restarts.append(restart_index)
 
 
-WORKER_DEATH = RuntimeError("At least one process failed. Check for more infos in the log.")
+WORKER_DEATH = RuntimeError(
+    "At least one process failed. Check for more infos in the log."
+)
 
 
 def test_worker_death_is_told_apart_from_ordinary_failures() -> None:
@@ -355,7 +359,8 @@ class _WorkerKillingTrainer(Trainer):
         # accessor; an AttributeError here is the right failure if torchrl ever
         # renames it, rather than a test that quietly kills nothing.
         workers = cast(
-            list[BaseProcess], collector.env._workers  # noqa: SLF001 - no public accessor
+            list[BaseProcess],
+            collector.env._workers,  # noqa: SLF001 - no public accessor
         )
         self.pools.append([cast(int, worker.pid) for worker in workers])
         original_update = self._update

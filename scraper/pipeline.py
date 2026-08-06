@@ -27,7 +27,9 @@ class RunSummary:
     dropped_invalid: int = 0
     written_slugs: list[str] = field(default_factory=list)
     drops: list[str] = field(default_factory=list)  # human-readable reasons
-    warnings: list[str] = field(default_factory=list)  # non-fatal, e.g. impossible evolutions
+    warnings: list[str] = field(
+        default_factory=list
+    )  # non-fatal, e.g. impossible evolutions
     #: Written/re-observed decks containing a same-name printing selected from
     #: gameplay similarity — a subset of ``written`` + ``reobserved``.
     swapped_decks: int = 0
@@ -173,7 +175,9 @@ def process_deck(
         summary.written += 1
         summary.written_slugs.append(outcome.slug)
         if verbose:
-            print(f"{prefix}: {outcome.slug}.csv ({raw.archetype!r}, {len(resolved.ids)} cards)")
+            print(
+                f"{prefix}: {outcome.slug}.csv ({raw.archetype!r}, {len(resolved.ids)} cards)"
+            )
     elif outcome.new_observation:
         summary.reobserved += 1
         if verbose:
@@ -184,4 +188,6 @@ def process_deck(
     else:
         summary.already_recorded += 1
         if verbose:
-            print(f"ALREADY RECORDED: this exact occurrence of {outcome.slug!r} is on file")
+            print(
+                f"ALREADY RECORDED: this exact occurrence of {outcome.slug!r} is on file"
+            )

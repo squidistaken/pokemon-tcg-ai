@@ -124,8 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001 - retry this deck on the next run
             errors.append((event.source, exc))
             print(
-                f"  inventory error for [{event.source}] "
-                f"{event.deck.archetype}: {exc}",
+                f"  inventory error for [{event.source}] {event.deck.archetype}: {exc}",
                 file=sys.stderr,
             )
             continue

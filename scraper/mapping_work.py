@@ -67,8 +67,9 @@ def _write_json(path: Path, value: object) -> None:
 
 def _write_jsonl(path: Path, values: Iterable[object]) -> None:
     content = b"".join(
-        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        .encode("utf-8")
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
         + b"\n"
         for value in values
     )
@@ -93,9 +94,7 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _reject_unknown(
-    value: Mapping[str, Any], allowed: set[str], location: str
-) -> None:
+def _reject_unknown(value: Mapping[str, Any], allowed: set[str], location: str) -> None:
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise MappingWorkError(
@@ -177,7 +176,9 @@ def _load_supplements(path: Path) -> dict[str, dict[str, object]]:
                 raise MappingWorkError(
                     f"invalid supplemental profile line {line_number}: {exc}"
                 ) from exc
-            if not isinstance(value, dict) or not isinstance(value.get("record_key"), str):
+            if not isinstance(value, dict) or not isinstance(
+                value.get("record_key"), str
+            ):
                 raise MappingWorkError(
                     f"invalid supplemental profile line {line_number}"
                 )
@@ -401,7 +402,9 @@ def _shard_units(
     ]
     weights = [0] * len(shards)
     for unit in units:
-        destination = min(range(len(shards)), key=lambda offset: (weights[offset], offset))
+        destination = min(
+            range(len(shards)), key=lambda offset: (weights[offset], offset)
+        )
         shards[destination].append(unit)
         weights[destination] += int(unit["frequency"])
     return shards
@@ -483,8 +486,9 @@ def prepare(args: argparse.Namespace) -> int:
     index = CardIndex(str(csv_path))
     catalog_path = run_dir / "competition_catalog.jsonl"
     catalog_content = b"".join(
-        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        .encode("utf-8")
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
         + b"\n"
         for value in _catalog_rows(index)
     )
@@ -617,13 +621,17 @@ def _verify_prepared_inputs(run_dir: Path, run: Mapping[str, Any]) -> None:
         )
 
 
-def _shard_records(shard: Mapping[str, Any]) -> dict[tuple[str, str, str], dict[str, Any]]:
+def _shard_records(
+    shard: Mapping[str, Any],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
     records: dict[tuple[str, str, str], dict[str, Any]] = {}
     for unit in _require_list(shard, "units", "shard"):
         if not isinstance(unit, dict):
             raise MappingWorkError("shard unit must be an object")
         for record in _require_list(unit, "records", "shard unit"):
-            if not isinstance(record, dict) or not isinstance(record.get("identity"), dict):
+            if not isinstance(record, dict) or not isinstance(
+                record.get("identity"), dict
+            ):
                 raise MappingWorkError("shard record must contain an identity")
             identity = record["identity"]
             name = _require_string(identity, "name", "identity")
@@ -638,9 +646,7 @@ def _shard_records(shard: Mapping[str, Any]) -> dict[tuple[str, str, str], dict[
     return records
 
 
-def _validate_target(
-    raw: Any, index: CardIndex, location: str
-) -> dict[str, object]:
+def _validate_target(raw: Any, index: CardIndex, location: str) -> dict[str, object]:
     if not isinstance(raw, dict):
         raise MappingWorkError(f"{location} must be an object")
     _reject_unknown(
@@ -710,7 +716,9 @@ def _validate_rule(
     )
     source = records.get(key)
     if source is None:
-        raise MappingWorkError(f"{location} source is not an exact printing in its shard")
+        raise MappingWorkError(
+            f"{location} source is not an exact printing in its shard"
+        )
     targets = [
         _validate_target(target, index, f"{location}.targets[{offset}]")
         for offset, target in enumerate(_require_list(raw, "targets", location))
@@ -734,9 +742,7 @@ def _validate_rule(
     if not isinstance(allow_cross, bool):
         raise MappingWorkError(f"{location}.allow_cross_subtype must be boolean")
     family_id = _optional_string(raw, "family_id", location)
-    source_previous_stage = _optional_string(
-        raw, "source_previous_stage", location
-    )
+    source_previous_stage = _optional_string(raw, "source_previous_stage", location)
     for target in targets:
         info = index.by_id[int(target["card_id"])]
         if info.is_ace_spec and not source_is_ace:
@@ -868,7 +874,9 @@ def _validate_shard_outputs(
     proposer = _require_string(proposal, "proposer", str(proposal_path))
     rules = [
         _validate_rule(raw, records, index, f"{proposal_path}:rules[{offset}]")
-        for offset, raw in enumerate(_require_list(proposal, "rules", str(proposal_path)))
+        for offset, raw in enumerate(
+            _require_list(proposal, "rules", str(proposal_path))
+        )
     ]
     if len({rule["rule_id"] for rule in rules}) != len(rules):
         raise MappingWorkError(f"{proposal_path} repeats a rule_id")
@@ -942,7 +950,9 @@ def _validate_shard_outputs(
         )
     decision_ids = [str(item["rule_id"]) for item in normalized_decisions]
     if set(decision_ids) != proposal_ids or len(decision_ids) != len(proposal_ids):
-        raise MappingWorkError(f"{review_path} must decide every proposed rule exactly once")
+        raise MappingWorkError(
+            f"{review_path} must decide every proposed rule exactly once"
+        )
     review["validated_decisions"] = normalized_decisions
     _validate_receipt(
         run_dir / "receipts" / f"{shard_id}.reviewer.json",
@@ -952,7 +962,9 @@ def _validate_shard_outputs(
         role="reviewer",
         output_path=review_path,
         record_count=int(shard_meta["record_count"]),
-        positive_rules=sum(item["status"] == "approved" for item in normalized_decisions),
+        positive_rules=sum(
+            item["status"] == "approved" for item in normalized_decisions
+        ),
         agent=reviewer,
         input_sha=proposal_sha,
     )
@@ -983,7 +995,9 @@ def _validated_outputs(
                     str(rule["source_number"]),
                 )
                 if rule_id in rule_ids:
-                    raise MappingWorkError(f"duplicate rule_id across shards: {rule_id}")
+                    raise MappingWorkError(
+                        f"duplicate rule_id across shards: {rule_id}"
+                    )
                 if source_key in source_keys:
                     raise MappingWorkError(
                         f"multiple rules for exact source printing {source_key!r}"
@@ -1029,9 +1043,7 @@ def compile_work(args: argparse.Namespace) -> int:
     for proposal, review in outputs:
         if proposal is None or review is None:
             continue
-        proposals = {
-            str(rule["rule_id"]): rule for rule in proposal["validated_rules"]
-        }
+        proposals = {str(rule["rule_id"]): rule for rule in proposal["validated_rules"]}
         for decision in review["validated_decisions"]:
             proposed = proposals[str(decision["rule_id"])]
             family_id = proposed.get("family_id")
@@ -1081,7 +1093,11 @@ def compile_work(args: argparse.Namespace) -> int:
                 )
             accepted.append(
                 {
-                    **{key: value for key, value in proposed.items() if key != "targets"},
+                    **{
+                        key: value
+                        for key, value in proposed.items()
+                        if key != "targets"
+                    },
                     "targets": targets,
                 }
             )

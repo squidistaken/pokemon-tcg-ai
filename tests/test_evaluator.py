@@ -10,7 +10,9 @@ from src.training.evaluator import Evaluator, _archetype_metrics, _episode_arche
 DECK_PATH = str(Path(__file__).parents[1] / "decks" / "example.csv")
 
 
-def _stub_env(deck_labels: tuple[str, str] | None, agent_seat: int = 0) -> SimpleNamespace:
+def _stub_env(
+    deck_labels: tuple[str, str] | None, agent_seat: int = 0
+) -> SimpleNamespace:
     """A transform-wrapped env stub exposing the attributes eval reads.
 
     :param deck_labels: The leaf env's ``deck_labels``, or None if unlabelled.
@@ -131,9 +133,7 @@ def test_evaluate_without_labels_omits_archetype_metrics() -> None:
     per-archetype breakdown is requested.
     """
     deck = load_deck(DECK_PATH)
-    factory = partial(
-        make_env, {"kind": "fixed", "deck0": deck, "deck1": deck}, 96, 0
-    )
+    factory = partial(make_env, {"kind": "fixed", "deck0": deck, "deck1": deck}, 96, 0)
     evaluator = Evaluator(env_factory=factory, n_episodes=3, per_archetype=True)
     try:
         metrics = evaluator.evaluate(RandomMaskedPolicy())

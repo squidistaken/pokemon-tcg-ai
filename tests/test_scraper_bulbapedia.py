@@ -81,7 +81,7 @@ def test_category_pagination_stops_at_configured_page_limit():
             "next": _members("Gamma", "Delta", continuation="unused"),
         }
     )
-    source = BulbapediaSource(client)  # type: ignore[arg-type]
+    source = BulbapediaSource(client)
 
     pages = source._category_pages("Decks", max_pages=3)  # noqa: SLF001
 
@@ -101,7 +101,7 @@ def test_category_pagination_zero_walks_until_continuation_is_exhausted():
             "third": _members("Delta"),
         }
     )
-    source = BulbapediaSource(client)  # type: ignore[arg-type]
+    source = BulbapediaSource(client)
 
     pages = source._category_pages("Decks", max_pages=0)  # noqa: SLF001
 
@@ -115,7 +115,7 @@ def test_category_pagination_zero_walks_until_continuation_is_exhausted():
 
 def test_explicit_pages_are_first_and_deduplicated_against_category_pages():
     client = FakeClient({None: _members("Category Page", "Explicit Page")})
-    source = BulbapediaSource(client)  # type: ignore[arg-type]
+    source = BulbapediaSource(client)
 
     decks = list(
         source.iter_decks(
@@ -137,7 +137,7 @@ def test_page_request_failures_are_reported_after_partial_results():
             return super().get_json(url, params=params, headers=headers)
 
     client = PartlyBrokenClient({})
-    source = BulbapediaSource(client)  # type: ignore[arg-type]
+    source = BulbapediaSource(client)
     decks = iter(source.iter_decks(pages=["Working", "Broken"]))
 
     assert next(decks).archetype == "Working"
@@ -152,7 +152,7 @@ def test_all_valid_pages_without_deck_tables_are_reported():
                 return {"parse": {"text": {"*": "<p>Valid article</p>"}}}
             return super().get_json(url, params=params, headers=headers)
 
-    source = BulbapediaSource(NoDeckClient({}))  # type: ignore[arg-type]
+    source = BulbapediaSource(NoDeckClient({}))
 
     with pytest.raises(SourceFetchError, match="no recognized decklist tables.*2"):
         list(source.iter_decks(pages=["Article A", "Article B"]))
@@ -165,7 +165,7 @@ def test_page_without_deck_table_is_allowed_when_another_page_has_one():
                 return {"parse": {"text": {"*": "<p>Valid article</p>"}}}
             return super().get_json(url, params=params, headers=headers)
 
-    source = BulbapediaSource(MixedClient({}))  # type: ignore[arg-type]
+    source = BulbapediaSource(MixedClient({}))
 
     decks = list(source.iter_decks(pages=["Article", "Deck Page"]))
 

@@ -32,7 +32,9 @@ def make_random_pool() -> OpponentPool:
     return OpponentPool([RandomOpponent(seed=0), RandomOpponent(seed=1)], seed=2)
 
 
-def _make_trainer(actor_critic, action_spec, opponent_factory=None, **kwargs) -> PPOTrainerForTests:
+def _make_trainer(
+    actor_critic, action_spec, opponent_factory=None, **kwargs
+) -> PPOTrainerForTests:
     """
     Build a small PPO trainer over a serial structured-observation env.
 
@@ -44,7 +46,9 @@ def _make_trainer(actor_critic, action_spec, opponent_factory=None, **kwargs) ->
     :return: A configured PPO trainer with tiny budgets.
     """
     params = {
-        "env_factories": make_env_factories(structured_env_cfg(), opponent_factory=opponent_factory),
+        "env_factories": make_env_factories(
+            structured_env_cfg(), opponent_factory=opponent_factory
+        ),
         "actor_critic": actor_critic,
         "action_spec": action_spec,
         "frames_per_batch": 64,
@@ -103,7 +107,9 @@ def _pointer_head_cfg(transformer_model_cfg: DictConfig) -> DictConfig:
     )
 
 
-def test_ppo_trainer_trains_without_nans(structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_ppo_trainer_trains_without_nans(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     A short PPO run over the default pairing (structured obs + ``MLPBackbone``
     with its adapter) collects the requested frames, finishes episodes and
@@ -121,7 +127,9 @@ def test_ppo_trainer_trains_without_nans(structured_model_cfg, structured_obs_sp
     around 1e-6.
     """
     torch.manual_seed(0)
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     trainer = _make_trainer(actor_critic, action_spec, total_frames=_EPISODE_FRAMES)
     stats = trainer.train()
     assert stats["frames"] == _EPISODE_FRAMES
@@ -129,12 +137,16 @@ def test_ppo_trainer_trains_without_nans(structured_model_cfg, structured_obs_sp
     assert all(torch.isfinite(p).all() for p in actor_critic.parameters())
 
 
-def test_ppo_update_returns_finite_losses(structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_ppo_update_returns_finite_losses(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     ``_update`` on a real collected batch returns the three PPO loss terms, a
     gradient norm and the policy entropy, all finite.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     trainer = _make_trainer(actor_critic, action_spec)
     env = SerialEnv(2, make_env_factories(structured_env_cfg()))
     collector = Collector(
@@ -151,7 +163,13 @@ def test_ppo_update_returns_finite_losses(structured_model_cfg, structured_obs_s
     # _update returns None only if every minibatch was NaN/Inf; a healthy batch
     # must produce real losses.
     assert losses is not None
-    assert set(losses) >= {"loss_objective", "loss_critic", "loss_entropy", "grad_norm", "entropy"}
+    assert set(losses) >= {
+        "loss_objective",
+        "loss_critic",
+        "loss_entropy",
+        "grad_norm",
+        "entropy",
+    }
     assert all(math.isfinite(value) for value in losses.values())
 
 
@@ -171,12 +189,16 @@ def test_ppo_update_reports_unweighted_policy_entropy(
     because the coefficient does, with a flat policy entropy behind it.
     """
     entropy_coeff = 0.02
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     trainer = _make_trainer(actor_critic, action_spec, entropy_coeff=entropy_coeff)
     losses = trainer.update_for_test(_collect_one_batch(trainer))
     assert losses is not None
     assert 0.0 < losses["entropy"] <= math.log(N_ACTIONS)
-    assert losses["loss_entropy"] == pytest.approx(-entropy_coeff * losses["entropy"], rel=1e-5)
+    assert losses["loss_entropy"] == pytest.approx(
+        -entropy_coeff * losses["entropy"], rel=1e-5
+    )
 
 
 def test_ppo_update_reports_ppo_health_diagnostics(
@@ -188,7 +210,9 @@ def test_ppo_update_reports_ppo_health_diagnostics(
     ``explained_variance`` there is no signal at all for whether the critic
     predicts returns. Each must be finite and in its defined range.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     trainer = _make_trainer(actor_critic, action_spec)
     losses = trainer.update_for_test(_collect_one_batch(trainer))
     assert losses is not None
@@ -258,7 +282,13 @@ def test_ppo_update_finite_on_pointer_head_batch(
     trainer = _make_trainer(actor_critic, action_spec)
     losses = trainer.update_for_test(_collect_one_batch(trainer))
     assert losses is not None
-    assert set(losses) >= {"loss_objective", "loss_critic", "loss_entropy", "grad_norm", "entropy"}
+    assert set(losses) >= {
+        "loss_objective",
+        "loss_critic",
+        "loss_entropy",
+        "grad_norm",
+        "entropy",
+    }
     assert all(math.isfinite(value) for value in losses.values())
 
 
@@ -283,17 +313,25 @@ def test_value_head_activation_from_config_reaches_module(
     assert not any(isinstance(module, torch.nn.Tanh) for module in mlp_modules)
 
 
-def test_ppo_trainer_self_play_pool(structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_ppo_trainer_self_play_pool(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     Training against an opponent pool (the self-play scaffold) collects frames.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
-    trainer = _make_trainer(actor_critic, action_spec, opponent_factory=make_random_pool)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    trainer = _make_trainer(
+        actor_critic, action_spec, opponent_factory=make_random_pool
+    )
     stats = trainer.train()
     assert stats["frames"] == 128
 
 
-def test_target_kl_early_stops_epoch_loop(structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_target_kl_early_stops_epoch_loop(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     ``target_kl`` breaks the epoch loop early: far fewer optimizer steps than
     ``num_epochs * minibatches`` (10 epochs * 2 minibatches = 20).
@@ -305,29 +343,41 @@ def test_target_kl_early_stops_epoch_loop(structured_model_cfg, structured_obs_s
     ``kl_approx`` oscillates around zero, even negative, when the policy
     barely moves.)
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
-    trainer = _make_trainer(actor_critic, action_spec, num_epochs=10, lr=0.1, target_kl=1e-3)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    trainer = _make_trainer(
+        actor_critic, action_spec, num_epochs=10, lr=0.1, target_kl=1e-3
+    )
     steps = trainer.count_optimizer_steps_for_update(_collect_one_batch(trainer))
     assert 0 < steps < 20
 
 
-def test_amp_update_is_finite_on_cpu(structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_amp_update_is_finite_on_cpu(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     AMP (bfloat16 autocast, no scaler on CPU) runs the update NaN-free.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     trainer = _make_trainer(actor_critic, action_spec, use_amp=True)
     stats = trainer.train()
     assert stats["frames"] == 128
     assert all(torch.isfinite(p).all() for p in actor_critic.parameters())
 
 
-def test_lr_and_entropy_anneal_decrease(structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_lr_and_entropy_anneal_decrease(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     With annealing enabled, the LR and entropy coefficient fall below their
     initial values over the course of training.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     trainer = _make_trainer(
         actor_critic,
         action_spec,

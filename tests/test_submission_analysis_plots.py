@@ -96,10 +96,16 @@ EVOLUTION_STATS = [
 
 SUMMARIES = [
     SubmissionSummary(
-        label="111-fast", win_rate=0.6, average_ko_margin=1.2, average_first_attack_turn=4.0
+        label="111-fast",
+        win_rate=0.6,
+        average_ko_margin=1.2,
+        average_first_attack_turn=4.0,
     ),
     SubmissionSummary(
-        label="222-slow", win_rate=0.3, average_ko_margin=-0.5, average_first_attack_turn=None
+        label="222-slow",
+        win_rate=0.3,
+        average_ko_margin=-0.5,
+        average_first_attack_turn=None,
     ),
 ]
 
@@ -183,21 +189,33 @@ EMPTY_REPORT = DeckReport(
 )
 
 RATING_HISTORY = [
-    RatingHistoryRow("2026-08-01T00:00:00+00:00", 1, "agent-a", "COMPLETE", 400.0, 5000),
-    RatingHistoryRow("2026-08-01T01:00:00+00:00", 1, "agent-a", "COMPLETE", 420.0, 4200),
-    RatingHistoryRow("2026-08-01T00:00:00+00:00", 2, "agent-b", "COMPLETE", 300.0, None),
+    RatingHistoryRow(
+        "2026-08-01T00:00:00+00:00", 1, "agent-a", "COMPLETE", 400.0, 5000
+    ),
+    RatingHistoryRow(
+        "2026-08-01T01:00:00+00:00", 1, "agent-a", "COMPLETE", 420.0, 4200
+    ),
+    RatingHistoryRow(
+        "2026-08-01T00:00:00+00:00", 2, "agent-b", "COMPLETE", 300.0, None
+    ),
 ]
 EMPTY_RATING_HISTORY = [
     RatingHistoryRow("2026-08-01T00:00:00+00:00", 1, "agent", "ERROR", None, None)
 ]
 NO_TURN_SUMMARIES = [
-    SubmissionSummary(label="x", win_rate=0.0, average_ko_margin=0.0, average_first_attack_turn=None)
+    SubmissionSummary(
+        label="x", win_rate=0.0, average_ko_margin=0.0, average_first_attack_turn=None
+    )
 ]
 
 # (name, call with populated data, call with empty-equivalent data) - one
 # entry per plot function, driving the two smoke tests below.
 _PLOTTERS: list[tuple[str, Callable[[Path], None], Callable[[Path], None]]] = [
-    ("play_rate", lambda p: plot_card_play_rate(CARD_STATS, p), lambda p: plot_card_play_rate([], p)),
+    (
+        "play_rate",
+        lambda p: plot_card_play_rate(CARD_STATS, p),
+        lambda p: plot_card_play_rate([], p),
+    ),
     (
         "win_rate_when_played",
         lambda p: plot_win_rate_when_played(CARD_STATS, p),
@@ -224,7 +242,11 @@ _PLOTTERS: list[tuple[str, Callable[[Path], None], Callable[[Path], None]]] = [
         lambda p: plot_evolution_conversion_rate(EVOLUTION_STATS, p),
         lambda p: plot_evolution_conversion_rate([], p),
     ),
-    ("attacks", lambda p: plot_attack_usage(ATTACK_STATS, p), lambda p: plot_attack_usage([], p)),
+    (
+        "attacks",
+        lambda p: plot_attack_usage(ATTACK_STATS, p),
+        lambda p: plot_attack_usage([], p),
+    ),
     (
         "damage_by_card",
         lambda p: plot_damage_by_card(ATTACK_STATS, p),
@@ -235,7 +257,11 @@ _PLOTTERS: list[tuple[str, Callable[[Path], None], Callable[[Path], None]]] = [
         lambda p: plot_opponent_attack_usage(OPPONENT_ATTACK_STATS, p),
         lambda p: plot_opponent_attack_usage([], p),
     ),
-    ("losses", lambda p: plot_loss_causes(REPORT, p), lambda p: plot_loss_causes(EMPTY_REPORT, p)),
+    (
+        "losses",
+        lambda p: plot_loss_causes(REPORT, p),
+        lambda p: plot_loss_causes(EMPTY_REPORT, p),
+    ),
     (
         "first_attack_turns",
         lambda p: plot_first_attack_turn_distribution(REPORT.first_attack_turns, p),
@@ -324,12 +350,22 @@ def test_plot_damage_by_card_sums_across_a_cards_attacks(tmp_path) -> None:
     out_path = tmp_path / "damage_by_card.png"
     two_attacks_one_card = [
         AttackStat(
-            attack_id=1, name="Tackle", card_id=1, card_name="Basic Mon",
-            uses=5, total_damage=100, kos=0,
+            attack_id=1,
+            name="Tackle",
+            card_id=1,
+            card_name="Basic Mon",
+            uses=5,
+            total_damage=100,
+            kos=0,
         ),
         AttackStat(
-            attack_id=2, name="Slam", card_id=1, card_name="Basic Mon",
-            uses=3, total_damage=150, kos=1,
+            attack_id=2,
+            name="Slam",
+            card_id=1,
+            card_name="Basic Mon",
+            uses=3,
+            total_damage=150,
+            kos=1,
         ),
     ]
 

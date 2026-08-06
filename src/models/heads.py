@@ -29,9 +29,9 @@ class LinearPolicyHead(nn.Module):
         self.linear = nn.Linear(in_features, n_actions)
 
     def forward(
-            self,
-            state_repr: torch.Tensor,
-            option_repr: torch.Tensor | None = None,
+        self,
+        state_repr: torch.Tensor,
+        option_repr: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Map the latent state to per-action logits.
@@ -82,10 +82,10 @@ class PointerPolicyHead(nn.Module):
     requires_option_repr = True
 
     def __init__(
-            self,
-            in_features: int,
-            n_actions: int,
-            option_dim: int | None = None,
+        self,
+        in_features: int,
+        n_actions: int,
+        option_dim: int | None = None,
     ) -> None:
         """
         :param in_features: Width of the incoming ``state_repr``.
@@ -107,9 +107,9 @@ class PointerPolicyHead(nn.Module):
         self._scale = float(self.option_dim) ** 0.5
 
     def forward(
-            self,
-            state_repr: torch.Tensor,
-            option_repr: torch.Tensor | None = None,
+        self,
+        state_repr: torch.Tensor,
+        option_repr: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Score every option token against a state-derived query.
@@ -165,12 +165,12 @@ class PointerHead(nn.Module):
     requires_option_repr = True
 
     def __init__(
-            self,
-            in_features: int,
-            n_actions: int,
-            option_dim: int,
-            num_cells: list[int] | None = None,
-            activation: str = "tanh",
+        self,
+        in_features: int,
+        n_actions: int,
+        option_dim: int,
+        num_cells: list[int] | None = None,
+        activation: str = "tanh",
     ) -> None:
         """
         :param in_features: Width of the incoming ``state_repr``.
@@ -203,9 +203,9 @@ class PointerHead(nn.Module):
         )
 
     def forward(
-            self,
-            state_repr: torch.Tensor,
-            option_repr: torch.Tensor | None = None,
+        self,
+        state_repr: torch.Tensor,
+        option_repr: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Score every option slot against the state, plus the stop action.
@@ -242,10 +242,10 @@ class ValueHead(nn.Module):
     """
 
     def __init__(
-            self,
-            in_features: int,
-            num_cells: list[int],
-            activation: str = "tanh",
+        self,
+        in_features: int,
+        num_cells: list[int],
+        activation: str = "tanh",
     ) -> None:
         """
         :param in_features: Width of the incoming ``state_repr``.

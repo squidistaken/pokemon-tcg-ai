@@ -22,6 +22,7 @@ The script inspects the environment's pending selection (via its public
 ``pending_select``/``already_chosen_option_count`` accessors) to classify
 observations; it is a dev tool, not part of training.
 """
+
 import random
 import sys
 from pathlib import Path
@@ -38,7 +39,7 @@ from src.env.deck import load_deck
 from src.env.tcg_env import TCGEnv
 
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures"
-MAX_STEPS_PER_EPISODE = 5000   # Don't like this but this is a slop script anyway
+MAX_STEPS_PER_EPISODE = 5000  # Don't like this but this is a slop script anyway
 """Safety cap on steps per random-policy episode, to bail out of a stuck game."""
 CASE_NAMES = [
     "setup",

@@ -1,7 +1,7 @@
 # Best-response exploitability probe: freeze a trained agent and train a fresh
-# learner to beat it across the multi-deck corpus. 
-# 
-# The learner's eval/win_rate is the frozen agent's exploitability, or how 
+# learner to beat it across the multi-deck corpus.
+#
+# The learner's eval/win_rate is the frozen agent's exploitability, or how
 # beatable a dedicated best-responder finds it.
 #
 # Usage:

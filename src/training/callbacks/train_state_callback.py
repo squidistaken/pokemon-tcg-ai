@@ -35,11 +35,11 @@ class TrainStateCallback(TrainingCallback):
     """
 
     def __init__(
-            self,
-            actor_critic: nn.Module,
-            optimizer: Optimizer,
-            path: str | Path,
-            interval: int,
+        self,
+        actor_critic: nn.Module,
+        optimizer: Optimizer,
+        path: str | Path,
+        interval: int,
     ) -> None:
         """
         :param actor_critic: Network whose weights accompany the optimizer

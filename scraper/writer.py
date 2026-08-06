@@ -173,7 +173,9 @@ class DeckWriter:
         return None
 
     @staticmethod
-    def observation_for(resolved: ResolvedDeck, *, date: str | None = None) -> Observation:
+    def observation_for(
+        resolved: ResolvedDeck, *, date: str | None = None
+    ) -> Observation:
         """Build the occurrence record for a scraped deck.
 
         :param resolved: The resolved deck, carrying its source deck's provenance.
@@ -195,7 +197,9 @@ class DeckWriter:
             substitutions=[swap.to_json() for swap in resolved.swaps],
         )
 
-    def classify(self, resolved: ResolvedDeck, *, date: str | None = None) -> WriteResult:
+    def classify(
+        self, resolved: ResolvedDeck, *, date: str | None = None
+    ) -> WriteResult:
         """Report what :meth:`write` would do, without touching the disk.
 
         :param resolved: The resolved deck to test.
@@ -250,7 +254,11 @@ class DeckWriter:
                 None,
             )
             provenance_added = False
-            if existing is not None and not existing.substitutions and obs.substitutions:
+            if (
+                existing is not None
+                and not existing.substitutions
+                and obs.substitutions
+            ):
                 existing.substitutions = list(obs.substitutions)
                 provenance_added = True
             added = entry.add_observation(obs)

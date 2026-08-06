@@ -9,7 +9,9 @@ from submission_analysis.scout import (
     plot_gap_analysis,
 )
 
-CARD_INDEX = CardIndex(cards={}, attacks={})  # names fall back to "card <id>"; fine for plots
+CARD_INDEX = CardIndex(
+    cards={}, attacks={}
+)  # names fall back to "card <id>"; fine for plots
 
 
 def _team(team_id: int, cards: set[int]) -> ScoutedTeam:

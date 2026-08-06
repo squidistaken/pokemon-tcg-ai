@@ -30,7 +30,7 @@ def test_sources_start_concurrently_and_decks_return_to_one_consumer():
         "right": CoordinatedSource("right", right_started, left_started),
     }
 
-    events = list(iter_source_events(sources, {}))  # type: ignore[arg-type]
+    events = list(iter_source_events(sources, {}))
 
     assert {event.deck.source for event in events if event.deck} == {"left", "right"}
     assert sum(event.done for event in events) == 2
@@ -49,9 +49,7 @@ def test_source_failure_does_not_cancel_successful_worker():
             yield RawDeck("good", "deck")
 
     events = list(
-        iter_source_events(  # type: ignore[arg-type]
-            {"broken": BrokenSource(), "good": GoodSource()}, {}
-        )
+        iter_source_events({"broken": BrokenSource(), "good": GoodSource()}, {})
     )
 
     assert any(event.deck and event.deck.source == "good" for event in events)

@@ -30,6 +30,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.6.1",
     "pyright>=1.1.411",
     "ruff>=0.15.21",
 ]
@@ -65,6 +66,12 @@ filterwarnings = [
 target-version = "py312"
 # cg/ is vendored engine API code and is deliberately not checked or modified.
 extend-exclude = ["cg"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
 
 [tool.ruff.lint.isort]
 # Ruff decides first-party vs third-party by looking for the module on disk.
