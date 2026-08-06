@@ -569,8 +569,14 @@ class StructuredObsAdapter(nn.Module):
         card_embed_dim: int,
         attack_embed_dim: int,
         category_embed_dim: int,
+        zone_pooling: str = "mean",
+        emit_option_tokens: bool = False,
     ) -> None:
         super().__init__()
+        if zone_pooling not in ("mean", "mean_max_sum"):
+            raise ValueError(f"Unsupported zone_pooling: {zone_pooling}")
+        self._zone_pooling = zone_pooling
+        self._emit_option_tokens = emit_option_tokens
         card_static = state_dict["backbone.adapter._card_static"]
         attack_static = state_dict["backbone.adapter._attack_static"]
         self.register_buffer("_card_static", torch.zeros_like(card_static))
@@ -637,6 +643,7 @@ class StructuredObsAdapter(nn.Module):
     ) -> list[torch.Tensor]:
         """Encode each group separately, in ``group_names`` order."""
         parts: list[torch.Tensor] = []
+        option_tokens: torch.Tensor | None = None
         for name in group_names:
             value = observation[name]
             if name == "globals":
@@ -651,6 +658,8 @@ class StructuredObsAdapter(nn.Module):
                 parts.append(self._encode_card_ids(value))
             elif name == "options":
                 parts.append(self._encode_options(value))
+                if self._emit_option_tokens:
+                    option_tokens = self._option_encoder(self._option_rows(value))
             elif name == "pokemon":
                 parts.append(self._encode_pokemon(value))
             else:
@@ -827,6 +836,7 @@ class StructuredObsAdapter(nn.Module):
             dim=-1,
         )
 
+
     def _pokemon_rows(self, pokemon: Mapping[str, torch.Tensor]) -> torch.Tensor:
         energy_ids = pokemon["energy_card_ids"]
         evolution_ids = pokemon["pre_evolution_ids"]
@@ -853,7 +863,7 @@ class StructuredObsAdapter(nn.Module):
     def _encode_pokemon(self, pokemon: Mapping[str, torch.Tensor]) -> torch.Tensor:
         rows = self._pokemon_rows(pokemon)
         if self._pool:
-            return self._masked_mean(self._pokemon_encoder(rows), pokemon["mask"])
+            return self._masked_pool(self._pokemon_encoder(rows), pokemon["mask"])
         return self._flatten_rows(rows)
 
     def _encode_zone_group(
@@ -864,7 +874,10 @@ class StructuredObsAdapter(nn.Module):
             mask = zones[mask_name]
             capacity = mask.shape[-1]
             reprs = self._card_proj(self._card_repr(zones[ids_name]))
-            parts.append(self._masked_mean(reprs, mask))
+            parts.append(
+                self._masked_pool(reprs, mask) if self._pool
+                else self._masked_mean(reprs, mask)
+            )
             parts.append(mask.to(torch.float32).sum(dim=-1, keepdim=True) / capacity)
         return torch.cat(parts, dim=-1)
 
@@ -953,7 +966,20 @@ class MLPBackbone(nn.Module):
         config: Mapping[str, Any],
     ) -> None:
         super().__init__()
-        self.adapter = _build_adapter(state_dict, config)
+        adapter_config = config.get("adapter", {})
+        # Both of these are read off the checkpoint rather than assumed: older
+        # checkpoints predate the pointer head and the richer zone pooling, and
+        # must keep loading exactly as they were trained.
+        emit_option_tokens = "policy_head.scorer.0.weight" in state_dict
+        self.adapter = StructuredObsAdapter(
+            state_dict,
+            card_embed_dim=int(adapter_config.get("card_embed_dim", 8)),
+            attack_embed_dim=int(adapter_config.get("attack_embed_dim", 8)),
+            category_embed_dim=int(adapter_config.get("category_embed_dim", 4)),
+            zone_pooling=str(adapter_config.get("zone_pooling", "mean")),
+            emit_option_tokens=emit_option_tokens,
+        )
+        self.produces_option_repr = emit_option_tokens
         backbone_config = config["backbone"]
         self.group_names = _group_names(backbone_config)
         input_dim = state_dict["backbone.mlp.0.weight"].shape[1]

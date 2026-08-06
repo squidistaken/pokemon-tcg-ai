@@ -60,6 +60,31 @@ class Backbone(nn.Module, ABC):
         self.in_keys = list(in_keys)
         self.out_features = out_features
 
+    @property
+    def option_repr_dim(self) -> int:
+        """
+        Width of one row of the emitted ``option_repr``.
+
+        The trunk, not the adapter, is the authority here: a backbone may hand
+        the adapter's per-entity encodings up untouched, or project them to its
+        own width first, and only it knows which. :func:`~src.policies.
+        ppo_actor.build_actor_critic` reads this to size whichever pointer head
+        is configured, so the two can never disagree about the token width.
+
+        Defaults to :attr:`out_features`, which is right for any backbone that
+        projects its option tokens into the trunk's latent space; a backbone
+        that passes narrower encodings through overrides it.
+
+        :return: Width of one option token.
+        :raises ValueError: If this backbone emits no option tokens.
+        """
+        if not self.produces_option_repr:
+            raise ValueError(
+                f"{type(self).__name__} does not emit per-option tokens, so it has no "
+                "option_repr_dim."
+            )
+        return self.out_features
+
     @abstractmethod
     def forward(self, *inputs: torch.Tensor | TensorDictBase):
         """
@@ -74,4 +99,3 @@ class Backbone(nn.Module, ABC):
             :attr:`produces_option_repr` is True.
         """
         raise NotImplementedError
-

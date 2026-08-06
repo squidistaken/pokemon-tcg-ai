@@ -533,6 +533,17 @@ possible here.
    effort is answering the wrong question and the fix is a **head** change at
    1068 fps. If it does not reproduce, the pointer head genuinely needs the
    trunk — also a real finding. Either outcome is decisive. ~1 h × 3 seeds.
+
+   > **Since answered — do not re-run as written.** #66 ran this experiment with
+   > a shared-MLP scorer (`PointerHead`, now `model/head=pointer`) rather than
+   > the dot product, and it reproduced: 0.922 against the flat head's 0.825 on
+   > a matched task, budget and seed. See
+   > [`pointer-head.md`](pointer-head.md). The pointer head's gain does **not**
+   > require attention. What is still open is the narrower question this arm was
+   > phrased around — whether the *dot-product* formulation
+   > (`model/head=pointer_dot`) matches the MLP scorer, and whether the
+   > transformer trunk adds anything on top of either. That is what
+   > `conf/experiment/ptr_mlp_pointer.yaml` now compares.
 6. **Long `tf_pointer`: 15–20M frames, 3 seeds.** Only arm outside noise,
    separating from 0.5M, healthiest dynamics, −14% fps, and not plateaued.
 7. **Longer `tf_combined` with `max_grad_norm` raised to 5–10.** It was clipped

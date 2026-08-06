@@ -84,26 +84,44 @@ class StructuredObsAdapter(nn.Module):
     **MLP path (pool=True) — one flat vector**
 
     Same per-entity encoding.  Then each group is collapsed to a single fixed
-    vector by **masked-mean pooling** (skip padding).  Zones also get a fill
-    fraction (cards present / zone capacity).
+    vector by masked set pooling (skip padding).  Zones also get a fill
+    fraction (cards present / zone capacity).  Under the default
+    ``zone_pooling="mean_max_sum"`` each set contributes ``3 × 64`` (mean,
+    element-wise max, capacity-normalized sum) instead of the mean alone: a
+    centroid cannot say whether a specific card is *present*, only what the
+    average card looks like, which is not enough to read a hand or a board.
+    The ``options`` group keeps its plain mean — it is only context here, and
+    the per-slot detail a pointer head needs lives in the token path below.
 
     ::
 
-        group              dims
-        ─────              ────
-        globals              41
-        select_cats           8
-        context_card_ids    128   (2 × 64)
-        stadium_id           64   (1 × 64)
-        options              64   (mean of N_opt tokens)
-        pokemon              64   (mean of N_pkm tokens)
-        my (3 zones)        195   (3 × [64 card + 1 fill])
-        opp (2 zones)       130   (2 × [64 card + 1 fill])
-        select_deck (1)      65   (64 card + 1 fill)
-        looking (1)          65   (64 card + 1 fill)
-                            ───
-                  torch.cat → 824  →  MLP
+        group              dims (mean_max_sum)   (legacy mean)
+        ─────              ───────────────────   ─────────────
+        globals                    41                  41
+        select_cats                 8                   8
+        context_card_ids          128                 128
+        stadium_id                 64                  64
+        options                    64                  64   (pooled digest only)
+        pokemon                   192                  64
+        my (3 zones)              579                 195
+        opp (2 zones)             386                 130
+        select_deck (1)           193                  65
+        looking (1)               193                  65
+                                 ────                 ───
+                      torch.cat → 1848                 824   →  MLP
+
+    **Option tokens (emit_option_tokens=True)**
+
+    The pooled ``options`` entry above is permutation-invariant, so on its own
+    it tells the policy *nothing* about which action sits in which slot.  With
+    ``emit_option_tokens`` :meth:`forward` additionally returns the per-slot
+    table for a pointer head to score against — the same rows
+    :meth:`encode_entity_tokens` yields, handed up unprojected for a trunk
+    that builds no tokens of its own.
     """
+
+    #: Supported set-pooling modes for zone/board groups (see ``zone_pooling``).
+    POOL_MODES = ("mean", "mean_max_sum")
 
     #: Rows reserved per categorical field in the shared category table.
     CATEGORY_VOCAB_SIZE = 64
@@ -148,6 +166,8 @@ class StructuredObsAdapter(nn.Module):
             card_database: CardDatabase | None = None,
             entity_dim: int | None = 64,
             pool: bool = True,
+            emit_option_tokens: bool = False,
+            zone_pooling: str = "mean",
     ) -> None:
         """
         :param obs_spec: Full environment observation spec.
@@ -166,8 +186,29 @@ class StructuredObsAdapter(nn.Module):
             consumes input width (13,297 features against 824) — this is *not*
             the transformer token path, which is :meth:`encode_entity_tokens`
             and works with pooling left on. Ignored when ``entity_dim`` is None.
+        :param emit_option_tokens: If True, :meth:`forward` additionally
+            returns the per-option token table, so a backbone that does not
+            build tokens of its own can still feed a pointer head. This is the
+            same table :meth:`encode_entity_tokens` returns for ``options``,
+            handed up unprojected; without it the option group is only ever
+            seen through its pooled mean, which is permutation-invariant and
+            so carries no slot-to-option correspondence at all.
+        :param zone_pooling: How unordered card sets (zones and the Pokémon
+            board) are collapsed. ``"mean"`` is the centroid alone;
+            ``"mean_max_sum"`` concatenates the mean, the element-wise max
+            and a capacity-normalized sum, which lets the trunk answer "is
+            card X present" and "how many" rather than only "what is the
+            average card here".
+        :raises ValueError: If ``zone_pooling`` is not a supported mode, or
+            ``emit_option_tokens`` is set without an ``options`` group.
         """
         super().__init__()
+        if zone_pooling not in self.POOL_MODES:
+            raise ValueError(
+                f"Unknown zone_pooling '{zone_pooling}'; expected one of {list(self.POOL_MODES)}."
+            )
+        self._zone_pooling = zone_pooling
+        self._emit_option_tokens = bool(emit_option_tokens)
         database = card_database if card_database is not None else CardDatabase()
         card_static = database.card_features
         attack_static = database.attack_features
@@ -249,6 +290,46 @@ class StructuredObsAdapter(nn.Module):
             width = self._register_group(name, obs_spec[key])
             self.group_feature_widths.append(width)
             self.out_features += width
+        if self._emit_option_tokens and "options" not in self._group_names:
+            raise ValueError(
+                "emit_option_tokens=True requires the 'options' group in in_keys; "
+                f"got {self._group_names}."
+            )
+
+    @property
+    def emits_option_tokens(self) -> bool:
+        """
+        Whether :meth:`forward` returns per-option tokens alongside the state vector.
+
+        Backbones read this to decide whether option tokens arrive from here or
+        have to be built from :meth:`encode_entity_tokens`; see
+        :class:`~src.models.mlp.MLPBackbone`, which supports both.
+
+        :return: True when the adapter was built with ``emit_option_tokens``.
+        """
+        return self._emit_option_tokens
+
+    @property
+    def option_token_dim(self) -> int:
+        """
+        Width of one per-option token, for sizing a pointer head.
+
+        :return: The token width emitted for each option slot.
+        :raises ValueError: If the adapter does not emit option tokens.
+        """
+        if not self._emit_option_tokens:
+            raise ValueError("This adapter does not emit option tokens.")
+        assert self._entity_dim is not None
+        return self._entity_dim
+
+    def _pool_width(self, dim: int) -> int:
+        """
+        Output width of :meth:`_masked_pool` for per-entity encodings of ``dim``.
+
+        :param dim: Width of a single entity encoding.
+        :return: Width after set pooling under the configured mode.
+        """
+        return dim if self._zone_pooling == "mean" else 3 * dim
 
     @property
     def entity_dim(self) -> int | None:
@@ -425,7 +506,7 @@ class StructuredObsAdapter(nn.Module):
             if self._pool:
                 assert self._entity_dim is not None
                 self._pokemon_encoder = nn.Linear(self._pokemon_row_width(spec), self._entity_dim)
-                return self._entity_dim
+                return self._pool_width(self._entity_dim)
             return rows * self._pokemon_row_width(spec)
         if name in ("my", "opp", "select_deck", "looking"):
             if not isinstance(spec, Composite):
@@ -458,7 +539,7 @@ class StructuredObsAdapter(nn.Module):
             )
             dim = self._entity_dim if self._pool else self._card_repr_dim
             assert dim is not None
-            zw = dim + 1
+            zw = (self._pool_width(dim) if self._pool else dim) + 1
             return len(pairs) * zw
         raise ValueError(f"Unknown structured observation group '{name}'.")
 
@@ -577,13 +658,24 @@ class StructuredObsAdapter(nn.Module):
                 )
         return tokens
 
-    def forward(self, *inputs: torch.Tensor | TensorDictBase) -> torch.Tensor:
+    def forward(
+            self,
+            *inputs: torch.Tensor | TensorDictBase,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         Encode the structured observation groups.
 
-        :return: ``(*batch, out_features)`` flat vector.
+        :param inputs: One value per registered group, in ``in_keys`` order.
+        :return: ``(*batch, out_features)`` flat vector; or, when the adapter
+            was built with ``emit_option_tokens``, a
+            ``(state_vector, option_tokens)`` pair with tokens shaped
+            ``(*batch, group_slot_counts["options"], option_token_dim)``.
         """
-        return torch.cat(self.encode_groups(*inputs), dim=-1)
+        state = torch.cat(self.encode_groups(*inputs), dim=-1)
+        if not self._emit_option_tokens:
+            return state
+        option_tokens, _ = self.encode_entity_tokens(*inputs, groups=["options"])["options"]
+        return state, option_tokens
 
     # ── Card / attack / category helpers ──────────────────────────────
 
@@ -678,20 +770,20 @@ class StructuredObsAdapter(nn.Module):
 
     def _encode_pokemon(self, pokemon: TensorDictBase) -> torch.Tensor:
         """
-        Encode the board table. With pooling: ``(*batch, entity_dim)``. Legacy: flat.
+        Encode the board table. With pooling: ``(*batch, _pool_width(entity_dim))``.
+        Legacy: flat.
         """
         rows = self._pokemon_rows(pokemon)
         if self._pool:
-            rows = self._pokemon_encoder(rows)
-            return self._masked_mean(rows, pokemon.get("mask"))
+            return self._masked_pool(self._pokemon_encoder(rows), pokemon.get("mask"))
         return self._flatten_rows(rows)
 
     def _encode_zone_group(self, name: str, zones: TensorDictBase) -> torch.Tensor:
         """
         Pool unordered card-ID zones into per-zone summaries.
 
-        With pooling: N_zones × ``(entity_dim + 1)`` (card repr + fill fraction).
-        Legacy: same but with ``card_repr_dim``.
+        With pooling: N_zones × ``(_pool_width(entity_dim) + 1)`` (card repr +
+        fill fraction). Legacy: same but with ``card_repr_dim``.
         """
         parts: list[torch.Tensor] = []
         for ids_name, mask_name in self._zone_pairs[name]:
@@ -700,8 +792,9 @@ class StructuredObsAdapter(nn.Module):
             fill = mask.to(torch.float32).sum(dim=-1, keepdim=True) / capacity
             reprs = self._card_repr(zones.get(ids_name))
             if self._pool:
-                reprs = self._card_proj(reprs)
-            parts.append(self._masked_mean(reprs, mask))
+                parts.append(self._masked_pool(self._card_proj(reprs), mask))
+            else:
+                parts.append(self._masked_mean(reprs, mask))
             parts.append(fill)
         return torch.cat(parts, dim=-1)
 
@@ -715,3 +808,28 @@ class StructuredObsAdapter(nn.Module):
     def _masked_mean(reprs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         weights = mask.to(torch.float32).unsqueeze(-1)
         return (reprs * weights).sum(dim=-2) / weights.sum(dim=-2).clamp(min=1.0)
+
+    def _masked_pool(self, reprs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """
+        Collapse a padded set of entity encodings into a fixed-width summary.
+
+        Under ``"mean"`` this is the plain centroid. Under ``"mean_max_sum"``
+        the max and a capacity-normalized sum are concatenated alongside it:
+        the mean alone cannot express *presence* (one copy of a card in a
+        seven-card hand barely moves the centroid) nor *count*, both of which
+        the critic needs to read a board.
+
+        :param reprs: Entity encodings of shape ``(*batch, n_slots, dim)``.
+        :param mask: Bool occupancy mask of shape ``(*batch, n_slots)``.
+        :return: Pooled summary of shape ``(*batch, _pool_width(dim))``.
+        """
+        mean = self._masked_mean(reprs, mask)
+        if self._zone_pooling == "mean":
+            return mean
+        occupied = mask.unsqueeze(-1)
+        # Empty sets would otherwise max to the sentinel; force them to zero so
+        # an absent zone reads as "nothing here" rather than a huge constant.
+        maximum = reprs.masked_fill(~occupied, torch.finfo(reprs.dtype).min).amax(dim=-2)
+        maximum = torch.where(mask.any(dim=-1, keepdim=True), maximum, torch.zeros_like(maximum))
+        total = (reprs * occupied.to(reprs.dtype)).sum(dim=-2) / reprs.shape[-2]
+        return torch.cat([mean, maximum, total], dim=-1)

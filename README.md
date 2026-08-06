@@ -56,6 +56,10 @@ Publish a new corpus (auto-increments to the next `decks-vN`):
 `fetch_decks.sh` picks up the highest-numbered release automatically. `build_decks_release.sh` is
 the low-level builder it wraps if you only want the local tarball.
 
+Every deck in a release comes from Limitless. The scraper also walks Bulbapedia, but its
+archetype pages are historical lists whose cards predate the engine's pool, so all of them drop
+as unresolved and none reach the corpus — see the card pool section of `scraper/README.md`.
+
 ## Code structure
 
 ```
@@ -85,9 +89,11 @@ src/
     curriculum_deck_sampler.py  DeckSampler drawing each episode's matchup from that channel
     random_opponent.py          Uniform-random opponent baseline
   models/                     Actor-critic network, independent of the policy/training wiring
-    backbone.py                  Backbone ABC + MLPBackbone (DeepSets/TemporalTransformer/Recurrent planned)
-    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, pools zones/emits per-entity tokens
-    heads.py                     LinearPolicyHead (flat logits) + PointerPolicyHead (per-option token scoring) + ValueHead (scalar critic)
+    backbone.py                  Backbone ABC + MLPBackbone (SetTransformer/TemporalTransformer/Recurrent planned)
+    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, set-pools zones,
+                                   and emits the per-option token table the pointer head scores
+    heads.py                     PointerHead (per-option scoring, the default) + LinearPolicyHead
+                                   (flat slot-indexed logits, the baseline) + ValueHead (scalar critic)
     actor_critic.py              ActorCritic: shared trunk feeding both heads, tensordict-in/tensordict-out
     transformer.py                TransformerBackbone: self-attention trunk with pooling modes, per-entity token groups, and pointer-head option tokens
   policies/
@@ -119,7 +125,8 @@ conf/                        Hydra configs (config.yaml + env/, agent/, model/, 
   model/
     default.yaml                Composes one backbone + one head, holds shared dims (embed_dim, value_head)
     backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
-    head/linear.yaml             Flat logits head (more heads added as separate config files as they land)
+    head/pointer.yaml            Per-option scoring head (default)
+    head/linear.yaml             Flat slot-indexed logits head (the baseline the pointer head replaced)
   train/
     default.yaml                Keys shared by every training variant; the variants below override only what differs
     fixed_opponent.yaml          Default: fixed random opponent, no snapshotting; the control for self-play runs
@@ -134,6 +141,7 @@ scripts/                     Standalone dev scripts (not part of the training en
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
   make_submission.py           Build a Kaggle .tar.gz and optionally submit it through the Kaggle CLI
   run_selfplay_compile.sh      1M-frame self-play run with torch.compile (caps Inductor's compile workers)
+submission_analysis/          Kaggle submission tooling: `python -m submission_analysis <status|episodes|deck-report|scout>` (see its own README)
 submission/
   main.py                      Kaggle entryfile template; `agent` is deliberately its final callable
   cg_api.py                    Pure-Python observation parser (no native simulator dependency)
@@ -150,6 +158,24 @@ slurm-conf/                  Slurm profiles, uv setup, and generic submission/tr
 
 The **backbone** and **head** are independent Hydra config groups, so any backbone can be paired
 with any head from the CLI or a sweep, e.g. `python -m src.train model/backbone=mlp model/head=linear`.
+
+### Policy head: why `pointer` is the default
+
+`model/head=pointer` scores each action slot from `[state_repr, option_repr_i]` with weights shared
+across slots. `model/head=linear` — the original baseline — emits one logit per slot from the pooled
+state alone, and the adapter hands it the option table as a *masked mean*. Mean pooling is
+permutation-invariant, so under the flat head, shuffling the options leaves the logits bit-identical
+while the correct action moves: the policy is structurally unable to condition on what an action
+does, and the most it can represent is a prior over slot indices.
+
+`model/head=pointer_dot` is the same idea with a scaled dot product instead of a shared MLP: cheaper
+(one product per slot, no hidden widths to tune) and it scores the stop action as a real row of the
+option table rather than from a separate branch. `pointer` is the default because it is the arm with
+the measured win; `pointer_dot` is the transformer work's formulation, still being compared.
+
+That is not a tuning problem, it is a ceiling, and it was the binding constraint on training — see
+[`docs/architecture/pointer-head.md`](docs/architecture/pointer-head.md) for the measurements. `linear` is
+kept as the control for that comparison; use `pointer` for real runs.
 
 ## Usage
 
@@ -311,14 +337,21 @@ uv run python scripts/make_submission.py \
   --force
 ```
 
-Check the resulting Kaggle status with:
+**[`submission_analysis/`](submission_analysis/README.md)** covers the rest
+of the Kaggle workflow: live submission status and leaderboard rank
+(`status`), episode outcomes and replay download (`episodes`), a
+replay-driven deck-refinement report with a prioritized "worth looking into"
+list (`deck-report`), and scouting the top leaderboard teams' decks
+(`scout`).
 
 ```bash
-uv run dotenv run -- \
-  kaggle competitions submissions pokemon-tcg-ai-battle --csv
+uv run python -m submission_analysis status --most-recent-n 2
+uv run python -m submission_analysis episodes --download-replays --most-recent-n 2
+uv run python -m submission_analysis deck-report --deck decks/example.csv
+uv run python -m submission_analysis scout --deck decks/example.csv
 ```
 
-The command reads `.env`, resolves `latest` from `CHECKPOINT_KEYS_FILE` (default
+Building a submission reads `.env`, resolves `latest` from `CHECKPOINT_KEYS_FILE` (default
 `logs/checkpoint_keys.csv`), and verifies the recorded SHA-256 before building.
 An explicit hash is resolved from the registry first; path/name lookup under
 `CHECKPOINTS_DIR` remains available for legacy or unregistered checkpoints. It

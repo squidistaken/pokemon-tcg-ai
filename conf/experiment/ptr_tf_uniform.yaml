@@ -27,7 +27,7 @@
 # Free to run: no code change, no throughput cost, and it is the only arm whose
 # result is useful whichever way the model comparisons land.
 defaults:
-  - override /model/head: pointer
+  - override /model/head: pointer_dot
 
 model:
   backbone:

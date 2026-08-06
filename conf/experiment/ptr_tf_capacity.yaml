@@ -17,7 +17,7 @@
 # and is one of the four candidates for tf_combined's monotonic 0.96 -> 4.14
 # growth into the max_grad_norm: 1 clip.
 defaults:
-  - override /model/head: pointer
+  - override /model/head: pointer_dot
 
 model:
   backbone:

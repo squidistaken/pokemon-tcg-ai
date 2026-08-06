@@ -20,7 +20,7 @@
 # also loses to arm 4, both non-mean readouts are refuted and `mean` stops
 # being merely the default — it becomes the tested winner among three.
 defaults:
-  - override /model/head: pointer
+  - override /model/head: pointer_dot
 
 model:
   backbone:

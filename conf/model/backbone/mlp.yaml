@@ -17,13 +17,18 @@
 _target_: src.models.mlp.MLPBackbone
 num_cells: [256, 256]
 activation: tanh
-# If true, also emit per-option tokens as option_repr for model/head=pointer,
-# by projecting adapter.encode_entity_tokens(groups=["options"]) to
-# out_features plus that group's stop-slot segment embedding -- the same
-# cheap per-entity projection TransformerBackbone's option_tokens uses when
-# encoded_option_repr is left false, without the transformer's attention
-# cost. false (the default) keeps this backbone paired with model/head=linear
-# as before; this key's addition changes nothing for existing configs. See
+# If true, build the per-option tokens here rather than taking the adapter's:
+# projecting adapter.encode_entity_tokens(groups=["options"]) to out_features
+# plus that group's stop-slot segment embedding -- the same cheap per-entity
+# projection TransformerBackbone's option_tokens uses when encoded_option_repr
+# is left false, without the transformer's attention cost.
+#
+# false (the default) does NOT mean "no option tokens": with either pointer
+# head selected, build_actor_critic has the adapter emit them instead, at
+# entity_dim and unprojected, which is the configuration the pointer head's
+# measured win was obtained in (docs/architecture/pointer-head.md). It only
+# means this backbone adds no parameters of its own. The two sources are
+# mutually exclusive and either pairs with either pointer head. See
 # conf/experiment/ptr_mlp_pointer.yaml, the arm this exists for: does the
 # pointer head's gain need attention at all, or is it available at the MLP's
 # throughput (~2.4x the transformer's, per

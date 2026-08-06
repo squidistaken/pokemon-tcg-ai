@@ -1,0 +1,1004 @@
+{
+  "schema_version": 2,
+  "rules": [
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "battle-vip-pass-fst-225",
+      "source_name": "Battle VIP Pass",
+      "source_number": "225",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "FST",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1086,
+          "expected_name": "Buddy-Buddy Poffin",
+          "mapping_confidence": 3,
+          "rationale": "Preserves the Item effect of searching for up to 2 Basic Pokémon and putting them directly onto the Bench, but replaces the first-turn-only restriction with a 70-HP-or-less restriction."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "beast-energy-fli-117",
+      "source_name": "Beast Energy",
+      "source_number": "117",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "FLI",
+      "source_stage": "Special Energy",
+      "targets": [
+        {
+          "card_id": 16,
+          "expected_name": "Prism Energy",
+          "mapping_confidence": 1,
+          "rationale": "Both are Special Energy cards that provide every Energy type only when attached to a restricted class of Pokemon. Prism Energy requires a Basic Pokemon rather than an Ultra Beast and loses the 30-damage bonus, a major strategic difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "brooklet-hill-gri-120",
+      "source_name": "Brooklet Hill",
+      "source_number": "120",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "GRI",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1267,
+          "expected_name": "Lumiose City",
+          "mapping_confidence": 2,
+          "rationale": "Preserves the symmetric once-per-turn Stadium effect of searching for a Basic Pokémon and putting it directly onto the Bench, but permits any type while ending the searching player's turn instead of restricting the search to Water or Fighting Pokémon."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "energy-pickup-la-132",
+      "source_name": "Energy Pickup",
+      "source_number": "132",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "LA",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1135,
+          "expected_name": "Energy Coin",
+          "mapping_confidence": 2,
+          "rationale": "Preserves coin-gated Item-based acceleration of a Basic Energy directly to a Pokémon, but searches the deck rather than the discard pile and requires 2 heads instead of 1 head."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "evosoda-xy-116",
+      "source_name": "Evosoda",
+      "source_number": "116",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "XY",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1079,
+          "expected_name": "Rare Candy",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that evolve a Pokemon directly from a searched or held Evolution card and share first-turn/newly-played restrictions. Rare Candy specifically skips from Basic to Stage 2 and requires the Stage 2 in hand, materially narrowing the evolution path."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "nitro-fire-energy-cri-86",
+      "source_name": "Nitro Fire Energy",
+      "source_number": "86",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "CRI",
+      "source_stage": "Special Energy",
+      "targets": [
+        {
+          "card_id": 9,
+          "expected_name": "Boomerang Energy",
+          "mapping_confidence": 3,
+          "rationale": "Preserves the Special Energy's defining self-recycling trigger when it is discarded by an attack used by its attached Pokémon, but it provides Colorless rather than Fire Energy and reattaches itself instead of returning to the hand."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "pluspower-bs-84",
+      "source_name": "PlusPower",
+      "source_number": "84",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BS",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1141,
+          "expected_name": "Premium Power Pro",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that increase damage to the opponent's Active Pokemon for the turn. Premium Power Pro gives 30 rather than 10 extra damage but works only for Fighting Pokemon, a material effectiveness and applicability difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "pluspower-dp-109",
+      "source_name": "PlusPower",
+      "source_number": "109",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "DP",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1141,
+          "expected_name": "Premium Power Pro",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that increase damage to the opponent's Active Pokemon for the turn. Premium Power Pro gives 30 rather than 10 extra damage but works only for Fighting Pokemon, a material effectiveness and applicability difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "pluspower-pl-112",
+      "source_name": "PlusPower",
+      "source_number": "112",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PL",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1141,
+          "expected_name": "Premium Power Pro",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that increase damage to the opponent's Active Pokemon for the turn. Premium Power Pro gives 30 rather than 10 extra damage but works only for Fighting Pokemon, a material effectiveness and applicability difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "pluspower-sw-121",
+      "source_name": "PlusPower",
+      "source_number": "121",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SW",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1141,
+          "expected_name": "Premium Power Pro",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that increase damage to the opponent's Active Pokemon for the turn. Premium Power Pro gives 30 rather than 10 extra damage but works only for Fighting Pokemon, a material effectiveness and applicability difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rigid-band-mew-165",
+      "source_name": "Rigid Band",
+      "source_number": "165",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "MEW",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1177,
+          "expected_name": "Sacred Charm",
+          "mapping_confidence": 2,
+          "rationale": "Preserves the Tool effect of reducing attack damage by exactly 30, but conditions the reduction on the attacking Pokémon having an Ability rather than on the attached Pokémon being Stage 1."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "rough-seas-prc-137",
+      "source_name": "Rough Seas",
+      "source_number": "137",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PRC",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1242,
+          "expected_name": "Community Center",
+          "mapping_confidence": 2,
+          "rationale": "Preserves a symmetric, once-per-turn Stadium effect that heals each of the acting player's Pokémon, but heals only 10 instead of 30 and requires that player to have played a Supporter while removing the Water-or-Lightning restriction."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-002-nest-ball-sum-123",
+      "source_name": "nest ball",
+      "source_number": "123",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SUM",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1086,
+          "expected_name": "Buddy-Buddy Poffin",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that search the deck and put Basic Pokemon directly onto the Bench. Buddy-Buddy Poffin can fetch up to two targets but only targets Pokemon with 70 HP or less, a material effectiveness difference from Nest Ball's unrestricted single Basic target."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-002-nest-ball-svi-181",
+      "source_name": "nest ball",
+      "source_number": "181",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SVI",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1086,
+          "expected_name": "Buddy-Buddy Poffin",
+          "mapping_confidence": 2,
+          "rationale": "Both are Items that search the deck and put Basic Pokemon directly onto the Bench. Buddy-Buddy Poffin can fetch up to two targets but only targets Pokemon with 70 HP or less, a material effectiveness difference from Nest Ball's unrestricted single Basic target."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-006-special-red-card-cri-82",
+      "source_name": "special red card",
+      "source_number": "82",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "CRI",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1103,
+          "expected_name": "Meddling Memo",
+          "mapping_confidence": 2,
+          "rationale": "Both are ordinary Items that put only the opponent's hand on the bottom of their deck and replace it by drawing. Meddling Memo preserves the opponent's hand size instead of reducing it to 3 and lacks Special Red Card's late-game Prize condition, materially weakening the comeback disruption role."
+        },
+        {
+          "card_id": 1087,
+          "expected_name": "Hand Trimmer",
+          "mapping_confidence": 2,
+          "rationale": "Both are ordinary Items whose primary role is reducing an opponent's hand. Hand Trimmer reduces only hands above 5, also affects the user's hand, and discards rather than replacing cards, while Special Red Card is late-game opponent-only disruption to exactly 3 cards."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-007-repeat-ball-prc-136",
+      "source_name": "repeat ball",
+      "source_number": "136",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PRC",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1083,
+          "expected_name": "Love Ball",
+          "mapping_confidence": 2,
+          "rationale": "Both are ordinary Items that search the deck for a Pokémon sharing an exact name with a Pokémon already in play. Repeat Ball checks the user's own board, while Love Ball checks the opponent's board, so the same-name search role is retained but its availability is materially matchup-dependent."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-007-wally-ros-94",
+      "source_name": "wally",
+      "source_number": "94",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "ROS",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1189,
+          "expected_name": "Salvatore",
+          "mapping_confidence": 4,
+          "rationale": "Both are ordinary Supporters that search for a direct Evolution and immediately evolve one of the user's Pokémon, including a Pokémon put into play that turn. Their narrow eligibility exclusions differ: Salvatore requires the Evolution to have no Abilities, while Wally excludes Pokémon-EX."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-ace-trainer-aor-69",
+      "source_name": "Ace Trainer",
+      "source_number": "69",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "AOR",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1237,
+          "expected_name": "Lucian",
+          "mapping_confidence": 2,
+          "rationale": "Both are Supporters that reset both players' hands and can create a 6/3 redraw split. Lucian is unconditional but uses independent coin flips and bottoms cards instead of guaranteeing the favorable split after a Prize disadvantage, materially changing reliability and comeback timing."
+        },
+        {
+          "card_id": 1223,
+          "expected_name": "Harlequin",
+          "mapping_confidence": 2,
+          "rationale": "Both are Supporters that shuffle and redraw both players' hands with a possible asymmetric advantage. Harlequin is unconditional but uses a coin flip for either side of a 5/3 split, replacing Ace Trainer's behind-on-Prizes condition and guaranteed 6/3 outcome with substantial variance."
+        },
+        {
+          "card_id": 1213,
+          "expected_name": "Judge",
+          "mapping_confidence": 2,
+          "rationale": "Both are Supporters that shuffle both players' hands into their decks and replace them. Judge is unconditional and always gives both players 4 cards, losing Ace Trainer's conditional 6/3 comeback advantage while preserving the two-player hand-reset role."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-dowsing-machine-pls-128",
+      "source_name": "Dowsing Machine",
+      "source_number": "128",
+      "source_previous_stage": null,
+      "source_rule": "ACE SPEC",
+      "source_set": "PLS",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1109,
+          "expected_name": "Miracle Headset",
+          "mapping_confidence": 3,
+          "rationale": "Both are ACE SPEC Items whose primary effect recovers Trainer cards from the discard pile into the hand. Miracle Headset recovers up to 2 Supporters without a discard cost rather than 1 Trainer after discarding 2 cards, preserving the recovery role with narrower targets and different economy."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-giacomo-pal-182",
+      "source_name": "Giacomo",
+      "source_number": "182",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAL",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1209,
+          "expected_name": "Ruffian",
+          "mapping_confidence": 2,
+          "rationale": "Both are unrestricted Supporters whose central effect removes Special Energy attached to an opponent's Pokémon. Ruffian affects only 1 Pokémon and also discards a Tool, while Giacomo can remove one Special Energy from each opposing Pokémon, so scope and effectiveness materially differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-leon-viv-154",
+      "source_name": "Leon",
+      "source_number": "154",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "VIV",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1191,
+          "expected_name": "Kieran",
+          "mapping_confidence": 4,
+          "rationale": "Kieran's damage option is the same unrestricted Supporter timing and +30 damage to the opponent's Active Pokémon for the turn. It applies only when that Active Pokémon is ex or V, while Kieran can alternatively switch the user's Active Pokémon, making defender subtype the principal edge case."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-pignite-blw-17",
+      "source_name": "Pignite",
+      "source_number": "17",
+      "source_previous_stage": "Tepig",
+      "source_rule": "n/a",
+      "source_set": "BLW",
+      "source_stage": "Stage 1 Pokémon",
+      "targets": [
+        {
+          "card_id": 568,
+          "expected_name": "Pignite",
+          "mapping_confidence": 2,
+          "rationale": "This is the same non-rule-box Stage 1 species evolving from Tepig, with the same Fire type, Weakness, Retreat Cost, and a Heat Crash attack. The target has 10 more HP and stronger direct attacks but loses Flame Charge's self-acceleration, a material gameplay difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-quick-ball-fst-237",
+      "source_name": "Quick Ball",
+      "source_number": "237",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "FST",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 3,
+          "rationale": "Both are ordinary Items that discard cards from hand to search the deck for a Pokémon. Ultra Ball searches any Pokémon instead of only a Basic Pokémon but requires 2 discards instead of 1, preserving the core search mechanic with a modest cost-and-scope tradeoff."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-quick-ball-mt-114",
+      "source_name": "Quick Ball",
+      "source_number": "114",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "MT",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 3,
+          "rationale": "Both are ordinary Items that discard cards from hand to search the deck for a Pokémon. Ultra Ball searches any Pokémon instead of only a Basic Pokémon but requires 2 discards instead of 1, preserving the core search mechanic with a modest cost-and-scope tradeoff."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-quick-ball-ssh-179",
+      "source_name": "Quick Ball",
+      "source_number": "179",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SSH",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1121,
+          "expected_name": "Ultra Ball",
+          "mapping_confidence": 3,
+          "rationale": "Both are ordinary Items that discard cards from hand to search the deck for a Pokémon. Ultra Ball searches any Pokémon instead of only a Basic Pokémon but requires 2 discards instead of 1, preserving the core search mechanic with a modest cost-and-scope tradeoff."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-super-rod-bkt-149",
+      "source_name": "Super Rod",
+      "source_number": "149",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "BKT",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1097,
+          "expected_name": "Night Stretcher",
+          "mapping_confidence": 2,
+          "rationale": "Both are ordinary Items that recover either a Pokémon or a Basic Energy from the discard pile without a deck-specific condition. Night Stretcher puts only 1 card into the hand instead of shuffling up to 3 cards into the deck, so the destination and recovery volume materially differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-super-rod-drv-20",
+      "source_name": "Super Rod",
+      "source_number": "20",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "DRV",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1097,
+          "expected_name": "Night Stretcher",
+          "mapping_confidence": 2,
+          "rationale": "Both are ordinary Items that recover either a Pokémon or a Basic Energy from the discard pile without a deck-specific condition. Night Stretcher puts only 1 card into the hand instead of shuffling up to 3 cards into the deck, so the destination and recovery volume materially differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-super-rod-nvi-95",
+      "source_name": "Super Rod",
+      "source_number": "95",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "NVI",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1097,
+          "expected_name": "Night Stretcher",
+          "mapping_confidence": 2,
+          "rationale": "Both are ordinary Items that recover either a Pokémon or a Basic Energy from the discard pile without a deck-specific condition. Night Stretcher puts only 1 card into the hand instead of shuffling up to 3 cards into the deck, so the destination and recovery volume materially differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-super-rod-pal-188",
+      "source_name": "Super Rod",
+      "source_number": "188",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAL",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1097,
+          "expected_name": "Night Stretcher",
+          "mapping_confidence": 2,
+          "rationale": "Both are ordinary Items that recover either a Pokémon or a Basic Energy from the discard pile without a deck-specific condition. Night Stretcher puts only 1 card into the hand instead of shuffling up to 3 cards into the deck, so the destination and recovery volume materially differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-008-the-rockets-trap-g1-19",
+      "source_name": "The Rocket's Trap",
+      "source_number": "19",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "G1",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1087,
+          "expected_name": "Hand Trimmer",
+          "mapping_confidence": 2,
+          "rationale": "Both are ordinary Items whose primary role is reducing cards in the opponent's hand. Hand Trimmer deterministically discards both players down to 5 only when needed, whereas The Rocket's Trap needs a successful coin flip and randomly shuffles up to 3 opposing cards into the deck, so timing and disruption strength materially differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-009-big-air-balloon-mew-155",
+      "source_name": "big air balloon",
+      "source_number": "155",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "MEW",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1174,
+          "expected_name": "Air Balloon",
+          "mapping_confidence": 3,
+          "rationale": "Both Pokémon Tools reduce the attached Pokémon's Retreat Cost. Air Balloon works on any Pokémon but reduces the cost by two rather than making every Stage 2 Pokémon's Retreat Cost zero, so it is equivalent only for Stage 2 Pokémon with at most two Retreat Cost."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-009-erika-g1-16",
+      "source_name": "erika",
+      "source_number": "16",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "G1",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1224,
+          "expected_name": "Cheren",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters provide the user with 3 cards. Cheren removes Erika's option to draw fewer and does not offer the opponent an optional draw, preserving the core draw amount while omitting a meaningful secondary effect."
+        },
+        {
+          "card_id": 1236,
+          "expected_name": "Urbain",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters provide the user with 3 cards. Urbain removes Erika's option to draw fewer and does not offer the opponent an optional draw, preserving the core draw amount while omitting a meaningful secondary effect."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": "shard-009-jirachi-plb-support-search",
+      "rule_id": "shard-009-jirachi-plb-60",
+      "source_name": "jirachi",
+      "source_number": "60",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PLB",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 1071,
+          "expected_name": "Meowth ex",
+          "mapping_confidence": 4,
+          "rationale": "Both are Basic rule-box Pokémon with an Ability triggered when played from hand to the Bench that searches the deck for a Supporter and puts it into the hand. Meowth ex adds a once-per-turn limit shared by Abilities named Last-Ditch, while the cards' attacks differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-009-red-card-xy-124",
+      "source_name": "red card",
+      "source_number": "124",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "XY",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1103,
+          "expected_name": "Meddling Memo",
+          "mapping_confidence": 2,
+          "rationale": "Both Items replace only the opponent's hand with cards drawn after returning that hand to the deck. Meddling Memo preserves the opponent's hand size and puts the old hand on the bottom rather than shuffling it, materially reducing Red Card's hand-size disruption."
+        },
+        {
+          "card_id": 1087,
+          "expected_name": "Hand Trimmer",
+          "mapping_confidence": 2,
+          "rationale": "Both Items reduce an opponent's large hand. Hand Trimmer caps the hand at 5 rather than replacing it with 4 cards, discards the excess, and applies to the user's hand as well, creating material timing and effectiveness differences."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": "shard-009-tapu-lele-gri-support-search",
+      "rule_id": "shard-009-tapu-lele-gri-60",
+      "source_name": "tapu lele",
+      "source_number": "60",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "GRI",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 1071,
+          "expected_name": "Meowth ex",
+          "mapping_confidence": 4,
+          "rationale": "Both are Basic rule-box Pokémon with an Ability triggered when played from hand to the Bench that searches the deck for a Supporter and puts it into the hand. Meowth ex adds a once-per-turn limit shared by Abilities named Last-Ditch, while the cards' attacks differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-artazon-pal-171",
+      "source_name": "artazon",
+      "source_number": "171",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAL",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1267,
+          "expected_name": "Lumiose City",
+          "mapping_confidence": 2,
+          "rationale": "Both Stadiums let each player search the deck once per turn for a Basic Pokémon and put it directly onto the Bench. Lumiose City allows Rule Box Pokémon but ends the searching player's turn, so the timing and target scope materially differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-bronzor-pbl-63",
+      "source_name": "bronzor",
+      "source_number": "63",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PBL",
+      "source_stage": "Basic Pokémon",
+      "targets": [
+        {
+          "card_id": 54,
+          "expected_name": "Bronzor",
+          "mapping_confidence": 4,
+          "rationale": "Both are 80-HP Basic non-rule-box Bronzor with Mirror Attack for 10 damage plus 30 when the opponent's Active Pokémon matches the card's own type. The competition printing changes the type and attack requirement from Metal to Psychic but preserves the mechanic and numbers."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-choice-band-gri-121",
+      "source_name": "choice band",
+      "source_number": "121",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "GRI",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1175,
+          "expected_name": "Brave Bangle",
+          "mapping_confidence": 3,
+          "rationale": "Both ordinary Pokémon Tools add 30 damage when attacking an opposing Active rule-box Pokémon. Brave Bangle uses the current Pokémon ex target and additionally requires the attached attacker to have no Rule Box, a meaningful eligibility restriction."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-clavell-pal-177",
+      "source_name": "clavell",
+      "source_number": "177",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAL",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1210,
+          "expected_name": "Brock’s Scouting",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters search the deck for multiple Pokémon and put them into the hand. Brock's Scouting finds up to 2 Basic Pokémon without an HP cap, or 1 Evolution Pokémon, instead of up to 3 Basic Pokémon with 120 HP or less, creating a modest count-and-scope tradeoff."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-colress-pls-118",
+      "source_name": "colress",
+      "source_number": "118",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PLS",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1199,
+          "expected_name": "Lacey",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters shuffle the user's hand into the deck and redraw a number of cards determined by the game state. Lacey draws 4 or 8 according to the opponent's remaining Prize cards instead of drawing for both players' Benched Pokémon, materially changing the effect's timing and range."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-rust-syndicate-grunt-pbl-81",
+      "source_name": "rust syndicate grunt",
+      "source_number": "81",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PBL",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1209,
+          "expected_name": "Ruffian",
+          "mapping_confidence": 2,
+          "rationale": "Both Supporters discard Energy attached to an opponent's Pokémon. Ruffian is not gated by a recent Knock Out and also discards a Tool, but it can remove only Special Energy rather than any Energy, so timing and target scope materially differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-shiftry-nxd-72",
+      "source_name": "shiftry",
+      "source_number": "72",
+      "source_previous_stage": "Nuzleaf",
+      "source_rule": "n/a",
+      "source_set": "NXD",
+      "source_stage": "Stage 2 Pokémon",
+      "targets": [
+        {
+          "card_id": 658,
+          "expected_name": "Shiftry",
+          "mapping_confidence": 2,
+          "rationale": "Both are non-rule-box Stage 2 Shiftry evolving from Nuzleaf, and both can flip a coin to shuffle any opposing Pokémon and all attached cards into the opponent's deck. The source performs this through an evolution-triggered Ability, while the target must attack, a material timing difference."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-010-tulip-par-181",
+      "source_name": "tulip",
+      "source_number": "181",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PAR",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1238,
+          "expected_name": "Tarragon",
+          "mapping_confidence": 4,
+          "rationale": "Both Supporters recover up to 4 in any combination of same-type Pokémon and that type's Basic Energy from the discard pile into the hand. Tarragon substitutes Fighting for Psychic, while the mechanics and numbers are otherwise the same."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-aurora-energy-ssh-186",
+      "source_name": "Aurora Energy",
+      "source_number": "186",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "SSH",
+      "source_stage": "Special Energy",
+      "targets": [
+        {
+          "card_id": 16,
+          "expected_name": "Prism Energy",
+          "mapping_confidence": 3,
+          "rationale": "Both are non-ACE Special Energy cards that provide 1 Energy of every type while their rainbow condition is met. Prism Energy removes Aurora Energy's discard-on-attachment cost but provides every type only while attached to a Basic Pokémon, creating a meaningful cost-and-scope tradeoff."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-great-haul-net-cri-78",
+      "source_name": "Great Haul Net",
+      "source_number": "78",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "CRI",
+      "source_stage": "Item",
+      "targets": [
+        {
+          "card_id": 1097,
+          "expected_name": "Night Stretcher",
+          "mapping_confidence": 2,
+          "rationale": "Both are ordinary Items that recover either Pokémon or Basic Energy from the discard pile. Night Stretcher puts only 1 card into the hand instead of shuffling up to 3 Water Pokémon and up to 3 Basic Water Energy into the deck, so destination, volume, and type restrictions materially differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-greens-exploration-unb-175",
+      "source_name": "Green's Exploration",
+      "source_number": "175",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "UNB",
+      "source_stage": "Supporter",
+      "targets": [
+        {
+          "card_id": 1219,
+          "expected_name": "Team Rocket's Petrel",
+          "mapping_confidence": 3,
+          "rationale": "Both Supporters search the deck for Trainer cards and put them into the hand. Team Rocket's Petrel searches for 1 Trainer without a board condition instead of up to 2 Trainers only when the user has no Pokémon with Abilities in play, preserving the core tutor effect with meaningful quantity and timing differences."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-011-silent-lab-prc-140",
+      "source_name": "Silent Lab",
+      "source_number": "140",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PRC",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1256,
+          "expected_name": "Team Rocket's Watchtower",
+          "mapping_confidence": 2,
+          "rationale": "Both Stadiums symmetrically remove Abilities from a defined class of Pokémon. Team Rocket's Watchtower affects Colorless Pokémon in play instead of all Basic Pokémon in play, in hand, and in discard piles, so the locked population and affected zones materially differ."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-012-forest-of-giant-plants-aor-74",
+      "source_name": "forest of giant plants",
+      "source_number": "74",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "AOR",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1261,
+          "expected_name": "Forest of Vitality",
+          "mapping_confidence": 4,
+          "rationale": "Both Stadiums let each player's Grass Pokémon evolve during the turn those Pokémon are played. Forest of Vitality retains the first-turn evolution prohibition, while Forest of Giant Plants also bypasses it."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-015-pokemon-league-headquarters-obf-192",
+      "source_name": "Pokémon League Headquarters",
+      "source_number": "192",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "OBF",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1266,
+          "expected_name": "Nighttime Mine",
+          "mapping_confidence": 1,
+          "rationale": "Both are symmetric Stadiums that add one Colorless Energy to attack costs; the affected class changes materially from all Basic Pokémon to Tera Pokémon."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "shard-020-silver-bangle-plb-88",
+      "source_name": "silver bangle",
+      "source_number": "88",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "PLB",
+      "source_stage": "Pokémon Tool",
+      "targets": [
+        {
+          "card_id": 1175,
+          "expected_name": "Brave Bangle",
+          "mapping_confidence": 4,
+          "rationale": "Both Pokémon Tools give a non-Rule-Box attacker 30 more damage against an opponent's Active multi-Prize Pokémon. Brave Bangle uses modern Rule Box and Pokémon ex/Pokémon V eligibility instead of the older Pokémon-EX wording."
+        }
+      ]
+    },
+    {
+      "allow_cross_subtype": false,
+      "family_id": null,
+      "rule_id": "snowpoint-temple-la-134",
+      "source_name": "Snowpoint Temple",
+      "source_number": "134",
+      "source_previous_stage": null,
+      "source_rule": "n/a",
+      "source_set": "LA",
+      "source_stage": "Stadium",
+      "targets": [
+        {
+          "card_id": 1251,
+          "expected_name": "Lively Stadium",
+          "mapping_confidence": 3,
+          "rationale": "Preserves the symmetric Stadium role of increasing the HP of Basic Pokémon in play, but raises the bonus from 20 to 30 HP and uses the modern Basic-Pokémon wording rather than the older non-Evolved wording."
+        }
+      ]
+    }
+  ]
+}

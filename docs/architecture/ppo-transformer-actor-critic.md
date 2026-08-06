@@ -139,7 +139,13 @@ TorchRL assembly are identical across all implementations, so backbones are swap
 
 ### 3. Heads (`src/models/heads.py`)
 
-- **`PointerPolicyHead`** — **implemented** (`model/head=pointer`). Scaled dot product between each
+- **`PointerHead`** — **implemented, and the default** (`model/head=pointer`). One shared MLP scores
+  slot `i` from `[state_repr, option_repr_i]`, with a separate state-only branch for the synthetic
+  stop action (whose slot is padding). Permutation-equivariant, and the arm with the measured win:
+  0.922 against the flat head's 0.825 on a matched task/budget/seed — see
+  `docs/architecture/pointer-head.md`, which also covers the `zone_pooling: mean_max_sum` half of
+  that fix.
+- **`PointerPolicyHead`** — **implemented** (`model/head=pointer_dot`). Scaled dot product between each
   `option_repr` token and a query derived from `state_repr` → one logit per option. The option table
   already carries one row per action slot *including* the synthetic stop at `max_options`, so
   scoring every row yields exactly `(..., (max_options + 1))` logits and no separate stop logit is
@@ -173,7 +179,11 @@ TorchRL assembly are identical across all implementations, so backbones are swap
   3" — never "pick the option that KOs". That is a ceiling on the MLP baseline too, and a candidate
   explanation for both arms flattening out near 0.85 against the random opponent.
 
-  Needs a backbone emitting `option_repr`; `build_actor_critic` raises at construction otherwise.
+  Either pointer head needs a backbone emitting `option_repr`; `build_actor_critic` raises at
+  construction otherwise. It also sizes the head's `option_dim` from the backbone's
+  `option_repr_dim`, so both heads pair with either token source — the adapter's unprojected
+  per-entity encodings (`emit_option_tokens`, chosen automatically when the trunk builds none) or
+  the trunk's own projection to `embed_dim` (`model.backbone.option_tokens=true`).
 - **`ValueHead`** — MLP on `state_repr` → scalar `state_value`.
 - *Alternative (not Phase 1):* the Hearthstone ByteRL work factors the action **auto-regressively**
   as `(type, target)` with a per-step mask instead of one flat softmax. The `Backbone`/`ActorCritic`
@@ -406,10 +416,13 @@ num_layers: 1
 # linear.yaml — flat (max_options + 1)-way logits; the MLP baseline's head
 _target_: src.models.heads.LinearPolicyHead
 
-# pointer.yaml — score per-option tokens against a state query (needs option_repr)
+# pointer.yaml — shared MLP over [state, option_i], separate stop branch (the default)
+_target_: src.models.heads.PointerHead
+num_cells: [128, 128]
+activation: tanh
+
+# pointer_dot.yaml — score per-option tokens against a state query (needs option_repr)
 _target_: src.models.heads.PointerPolicyHead
-query_dim: ${model.embed_dim}
-score: dot               # dot | mlp
 
 # autoregressive.yaml — factored (type, target) head (later; see Heads §3)
 _target_: src.models.heads.AutoRegressivePolicyHead

@@ -13,6 +13,7 @@ from src.checkpoint_registry import (
     CHECKPOINT_REGISTRY_FIELDS,
     CheckpointRegistryError,
     append_checkpoint_record,
+    append_rating_history,
     find_checkpoint_record,
     latest_checkpoint_record,
     read_checkpoint_records,
@@ -198,6 +199,93 @@ def test_validation_detects_missing_and_changed_checkpoint(tmp_path: Path) -> No
     checkpoint.unlink()
     with pytest.raises(CheckpointRegistryError, match="no longer exists"):
         validate_checkpoint_record(record, tmp_path)
+
+
+def test_rating_history_appends_one_row_per_call(tmp_path: Path) -> None:
+    """Each fetch snapshot lands as its own row, building a real time series."""
+    history_path = tmp_path / "logs" / "kaggle_rating_history.csv"
+
+    append_rating_history(
+        history_path, kaggle_ref=1, label="agent", status="COMPLETE", public_score=446.8
+    )
+    append_rating_history(
+        history_path, kaggle_ref=1, label="agent", status="COMPLETE", public_score=463.6
+    )
+
+    with history_path.open(encoding="utf-8", newline="") as history_file:
+        rows = list(csv.DictReader(history_file))
+    assert [row["public_score"] for row in rows] == ["446.8", "463.6"]
+    assert all(row["kaggle_ref"] == "1" and row["label"] == "agent" for row in rows)
+
+
+def test_rating_history_records_missing_score_as_blank(tmp_path: Path) -> None:
+    """A PENDING/ERROR submission has no rating; that's blank, not '0'."""
+    history_path = tmp_path / "logs" / "kaggle_rating_history.csv"
+
+    append_rating_history(
+        history_path, kaggle_ref=2, label="agent", status="ERROR", public_score=None
+    )
+
+    with history_path.open(encoding="utf-8", newline="") as history_file:
+        [row] = list(csv.DictReader(history_file))
+    assert row["public_score"] == ""
+
+
+def test_rating_history_records_leaderboard_rank(tmp_path: Path) -> None:
+    history_path = tmp_path / "logs" / "kaggle_rating_history.csv"
+
+    append_rating_history(
+        history_path,
+        kaggle_ref=1,
+        label="agent",
+        status="COMPLETE",
+        public_score=446.8,
+        leaderboard_rank=4980,
+    )
+
+    with history_path.open(encoding="utf-8", newline="") as history_file:
+        [row] = list(csv.DictReader(history_file))
+    assert row["leaderboard_rank"] == "4980"
+
+
+def test_rating_history_records_missing_rank_as_blank(tmp_path: Path) -> None:
+    history_path = tmp_path / "logs" / "kaggle_rating_history.csv"
+
+    append_rating_history(
+        history_path, kaggle_ref=1, label="agent", status="COMPLETE", public_score=446.8
+    )
+
+    with history_path.open(encoding="utf-8", newline="") as history_file:
+        [row] = list(csv.DictReader(history_file))
+    assert row["leaderboard_rank"] == ""
+
+
+def test_rating_history_migrates_a_header_written_before_leaderboard_rank_existed(
+    tmp_path: Path,
+) -> None:
+    """Older history files only have the first five columns; appending a row
+    with the new field must backfill the header rather than misaligning it."""
+    history_path = tmp_path / "logs" / "kaggle_rating_history.csv"
+    history_path.parent.mkdir(parents=True)
+    history_path.write_text(
+        "fetched_at_utc,kaggle_ref,label,status,public_score\n"
+        "2026-08-01T00:00:00+00:00,1,agent,COMPLETE,400.0\n",
+        encoding="utf-8",
+    )
+
+    append_rating_history(
+        history_path,
+        kaggle_ref=1,
+        label="agent",
+        status="COMPLETE",
+        public_score=420.0,
+        leaderboard_rank=100,
+    )
+
+    with history_path.open(encoding="utf-8", newline="") as history_file:
+        rows = list(csv.DictReader(history_file))
+    assert [row["leaderboard_rank"] for row in rows] == ["", "100"]
+    assert [row["public_score"] for row in rows] == ["400.0", "420.0"]
 
 
 def test_concurrent_processes_write_complete_rows_and_one_header(

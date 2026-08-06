@@ -64,7 +64,11 @@ pooling: mean
 # docs/architecture/transformer-diagnosis-45.md and the ptr_tf_setattn /
 # ptr_tf_entities arms this measurement unblocked.
 token_groups: []
-# Emit per-option tokens as option_repr for model/head=pointer. By default
+# Emit per-option tokens as option_repr for a pointer head (model/head=pointer
+# or model/head=pointer_dot). Unlike the MLP trunk, this backbone has no
+# adapter-emitted fallback: leave it false and a pointer head is rejected at
+# construction, because the adapter's unprojected tokens would bypass the
+# encoder entirely and make the trunk irrelevant to the policy. By default
 # (encoded_option_repr: false below) this is one Linear projection per option
 # row plus its segment embedding, not routed through the encoder -- linear in
 # the option count, unlike self-attention over the option tokens.

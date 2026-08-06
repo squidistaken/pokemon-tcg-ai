@@ -580,3 +580,44 @@ def test_kaggle_cli_command_is_used_for_submission(
         "submit",
         "pokemon-tcg-ai-battle",
     ]
+
+
+def _isolate_local_paths(root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect every local-file default into tmp_path.
+
+    Leaves ``repo_root()`` pointing at the real repository so a build can
+    still find ``submission/main.py`` and friends; registry rows below store
+    absolute checkpoint paths, so they resolve correctly regardless. The deck
+    stays the repository's real example deck: the native battle engine
+    enforces per-card copy limits a synthetic all-one-card deck would violate.
+    """
+    monkeypatch.setenv("CHECKPOINT_KEYS_FILE", str(tmp_path / "logs" / "checkpoint_keys.csv"))
+    monkeypatch.setenv("KAGGLE_DECK_PATH", str(root / "decks" / "example.csv"))
+    monkeypatch.setenv("KAGGLE_SUBMISSIONS_DIR", str(tmp_path / "submissions"))
+
+
+def _prepare_registered_checkpoint(root: Path, tmp_path: Path, marker: int) -> str:
+    """Write a checkpoint under tmp_path and register it against the real root.
+
+    :param root: The real repository root, matching what ``repo_root()``
+        returns in ``main()`` so the registry's stored path resolves later.
+    :return: The checkpoint's 12-character registry key.
+    """
+    checkpoint = write_checkpoint(tmp_path / "checkpoint.pt", marker)
+    registry = tmp_path / "logs" / "checkpoint_keys.csv"
+    digest = sha256_file(checkpoint)
+    append_checkpoint_record(
+        registry, checkpoint, digest=digest, frames=marker, repo_root=root
+    )
+    return digest[:12]
+
+
+def test_main_completes_a_successful_build(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = Path(__file__).parents[1]
+    _prepare_registered_checkpoint(root, tmp_path, 9)
+    _isolate_local_paths(root, tmp_path, monkeypatch)
+
+    exit_code = main(["--label", "test-agent", "--yes"])
+
+    assert exit_code == 0
+    assert (tmp_path / "submissions" / "test-agent.tar.gz").is_file()

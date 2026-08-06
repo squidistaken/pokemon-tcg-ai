@@ -224,6 +224,9 @@ class Trainer(BaseTrainer):
                 while totals.frames < self._budget:
                     if restarts:
                         self._prepare_restart(restarts)
+                    # Only children this collector starts are ours to reap if it
+                    # dies; anything already running (e.g. the W&B service) is not.
+                    preexisting = {child.pid for child in torch_mp.active_children()}
                     collector = self._make_collector(self._budget - totals.frames)
                     frames_before = totals.frames
                     try:
@@ -262,7 +265,7 @@ class Trainer(BaseTrainer):
                     else:
                         break
                     finally:
-                        self._shutdown_collector(collector)
+                        self._shutdown_collector(collector, preexisting)
                         collector = None
         except KeyboardInterrupt:
             logger.warning(
@@ -270,6 +273,12 @@ class Trainer(BaseTrainer):
                 "Press Ctrl-C again only if shutdown hangs.",
                 totals.frames,
             )
+        except BaseException as error:
+            # Recorded before the teardown below so metric backends can mark the
+            # run failed. Without this a crashed run closes as cleanly as a
+            # finished one and is indistinguishable from a short successful run.
+            self._callbacks.on_train_error(error)
+            raise
         finally:
             with _deferred_interrupt():
                 if self._evaluator is not None:
@@ -377,7 +386,10 @@ class Trainer(BaseTrainer):
             self._env_factories = self._rebuild_env_factories(restart_index)
 
     @staticmethod
-    def _shutdown_collector(collector: Collector) -> None:
+    def _shutdown_collector(
+            collector: Collector,
+            preexisting_pids: set[int | None] | None = None,
+    ) -> None:
         """
         Tear a collector down without letting cleanup mask the original failure.
 
@@ -387,7 +399,17 @@ class Trainer(BaseTrainer):
         discard the specific one ("worker 6 dead") in favour of the generic one,
         which is exactly how the failure this guards against reports itself.
 
+        Because that shutdown cannot be relied on to finish, it is also not
+        guaranteed to reap the pool's surviving workers. Any it leaves behind
+        are terminated here when ``preexisting_pids`` says which children the
+        collector owns, or the next collector's workers would contend with
+        orphans still holding the previous pool's shared memory.
+
         :param collector: Collector to shut down; may already be broken.
+        :param preexisting_pids: PIDs of child processes that predate this
+            collector and must be left alone (the W&B service, say). None skips
+            the reaping entirely, for callers that never started a pool of
+            their own.
         """
         with _deferred_interrupt():
             try:
@@ -396,6 +418,16 @@ class Trainer(BaseTrainer):
                 logger.warning(
                     "Collector shutdown failed; continuing.", exc_info=True
                 )
+            if preexisting_pids is None:
+                return
+            for child in torch_mp.active_children():
+                if child.pid in preexisting_pids:
+                    continue
+                child.terminate()
+                child.join(timeout=10.0)
+                if child.is_alive():
+                    child.kill()
+                    child.join(timeout=10.0)
 
     def _should_evaluate(self, frames: int, last_eval_frames: int) -> bool:
         """
