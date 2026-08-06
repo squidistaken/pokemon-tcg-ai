@@ -86,16 +86,61 @@ def test_zone_pooling_is_permutation_invariant(adapter, structured_obs_spec) -> 
     assert not torch.allclose(encoded_a, encoded_c)
 
 
-def test_padding_card_id_encodes_to_zero(adapter, structured_obs_spec) -> None:
+def test_card_categories_reach_the_representation(adapter) -> None:
     """
-    ID 0 (none/padding) contributes a zero card representation, so an
-    all-empty observation encodes zone summaries as zeros.
+    Regression test: card type/energy type/weakness/resistance were computed
+    by ``CardDatabase`` but never read, so mutating them used to have no
+    effect on ``_card_repr``. It must now.
+    """
+    card_id = torch.tensor([5])
+    before = adapter._card_repr(card_id).clone()  # noqa: SLF001
+    adapter._card_categories[5] = (adapter._card_categories[5] + 1) % 60  # noqa: SLF001
+    after = adapter._card_repr(card_id)  # noqa: SLF001
+    assert not torch.allclose(before, after)
+
+
+def test_card_attacks_reach_the_representation(adapter) -> None:
+    """
+    Regression test: a card's usable attacks were computed by
+    ``CardDatabase`` but never pooled into its representation, so mutating
+    them used to have no effect on ``_card_repr``. It must now.
+    """
+    card_id = torch.tensor([5])
+    before = adapter._card_repr(card_id).clone()  # noqa: SLF001
+    current = adapter._card_attack_ids[5, 0].item()  # noqa: SLF001
+    adapter._card_attack_ids[5, 0] = 1 if current != 1 else 2  # noqa: SLF001
+    after = adapter._card_repr(card_id)  # noqa: SLF001
+    assert not torch.allclose(before, after)
+
+
+def test_padding_card_id_encodes_to_constant(adapter, structured_obs_spec) -> None:
+    """
+    ID 0 (none/padding) contributes the same fixed representation on every
+    call, block by block: zero learned embedding, zero static features, and
+    zero pooled attack representation (all three reserve row 0 for "absent",
+    and card 0 has no attacks to pool), except the categorical block, whose
+    "absent" card type/energy type/weakness/resistance is a constant but not
+    necessarily zero vector, same as ``select_cats``/``options.cats``.
+    Padding slots still drop out of masked pooling via the validity mask,
+    not via this being zero.
     """
     obs = _zero_obs(structured_obs_spec, batch=1)
     encoded = adapter(*_adapter_inputs(obs))
     assert torch.all(torch.isfinite(encoded))
-    card_zero = adapter._card_repr(torch.zeros(1, dtype=torch.int64))  # noqa: SLF001
-    assert torch.all(card_zero == 0.0)
+    card_zero_a = adapter._card_repr(torch.zeros(1, dtype=torch.int64))  # noqa: SLF001
+    card_zero_b = adapter._card_repr(torch.zeros(1, dtype=torch.int64))  # noqa: SLF001
+    assert torch.equal(card_zero_a, card_zero_b)
+
+    embed_dim = adapter._card_embedding.embedding_dim  # noqa: SLF001
+    static_dim = adapter._card_static.shape[-1]  # noqa: SLF001
+    cat_dim = adapter.CARD_CATEGORY_FIELD_COUNT * adapter._category_embed_dim  # noqa: SLF001
+    embed_block = card_zero_a[..., :embed_dim]
+    static_block = card_zero_a[..., embed_dim : embed_dim + static_dim]
+    attack_block = card_zero_a[..., embed_dim + static_dim + cat_dim :]
+    assert torch.all(embed_block == 0.0)
+    assert torch.all(static_block == 0.0)
+    assert torch.all(attack_block == 0.0)
+    assert attack_block.shape[-1] == adapter._attack_repr_dim  # noqa: SLF001
 
 
 def test_gradients_reach_card_embedding(adapter, structured_obs_spec) -> None:

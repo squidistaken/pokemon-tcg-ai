@@ -580,6 +580,8 @@ class StructuredObservationEncoder(ObservationEncoder):
         energy_card_ids = self._np_pokemon_energy_ids
         pre_evolution_ids = self._np_pokemon_pre_evolution_ids
         card_id[row] = pokemon.id
+        if len(pokemon.tools) > 1:
+            self._warn_truncation("tool", len(pokemon.tools), 1)
         if len(pokemon.tools) > 0:
             tool_id[row] = pokemon.tools[0].id
         energy_cards = pokemon.energyCards
