@@ -88,15 +88,39 @@ TorchRL assembly are identical across all implementations, so backbones are swap
   | `norm_first` / `final_norm` | `false` — torch's post-LN, which wants an LR warmup the PPO config lacks | `true` — pre-LN, trains without warmup |
   | `token_groups` | `[]` — attention sees only pooled group summaries | e.g. `[pokemon]`, expanding a group into per-entity tokens |
   | `option_tokens` | `false` | `true` — emits `option_repr` for the pointer head |
+  | `replace_pooled` | `false` — the pooled `encode_groups()` token for each `token_groups` name is kept alongside its per-entity tokens | `true` — drop that group's pooled token, so the per-entity tokens are the only route it reaches the trunk by |
+  | `encoded_option_repr` | `false` — `option_repr` is the cheap pre-attention per-option projection | `true` — read `option_repr` from the encoder's *output* rows instead (needs `option_tokens` and `"options"` in `token_groups`) |
 
   `token_groups` is the important one. The adapter's `encode_groups()` masked-mean-pools each
   group *before* the trunk sees it, so with the default `[]` the transformer attends over ten
-  group averages — the same 824 features the MLP consumes, merely un-concatenated — and cannot
-  represent "this Pokémon threatens that one". `encode_entity_tokens()` returns the unpooled
-  entities instead. It is opt-in per group because the padded slot counts are large (434 tokens
-  in total, `options` alone being `max_options + 1`) and attention is quadratic, while the league
-  opponent forward runs on CPU inside every worker — already 46% of throughput
-  (`docs/training-performance.md`).
+  group averages — the same 824 features the MLP consumes, merely un-concatenated.
+  `encode_entity_tokens()` returns the unpooled entities instead, and — since a follow-up
+  correctness pass after the first diagnosis — every per-entity token this produces also carries a
+  learned **segment embedding** (`StructuredObsAdapter.group_segment_ids`, unconditional, not a
+  flag): which seat a Pokémon belongs to, which zone a card sits in, whether an option slot is the
+  synthetic stop action. Before that embedding existed, per-entity tokens carried no such identity
+  at all — swapping the two players' Pokémon rows left `state_repr` bit-identical (measured
+  `0.000e+00`) — so `token_groups: [pokemon]` could not represent "this Pokémon threatens that
+  one" even in principle; a card in `my.hand[0]` and the same card in `my.discard[0]` produced
+  identical tokens for the same reason. Both are fixed now (seat swap moves `state_repr` by
+  `4.857e-02`), but the fix only reaches the *entity-token* path: with the default `token_groups:
+  []`, or under `model/backbone=mlp` in every configuration, groups are still masked-mean-pooled
+  before anything sees them, and that pooling erases the same identity the segment embedding
+  restores — those configurations remain seat/zone-blind. See
+  `docs/architecture/transformer-diagnosis-45.md`'s "what changed since" note and
+  `conf/experiment/ptr_tf_entities.yaml` for the redesigned test this enabled.
+
+  `token_groups` is opt-in per group because the padded slot counts are large (434 tokens in
+  total, `options` alone being `max_options + 1`), not because attention is unaffordable at these
+  lengths: measured unbatched CPU forward (1 thread — the path the league opponent forward runs
+  on inside every worker, already 46% of throughput per `docs/training-performance.md`) is 1.53 ms
+  for the MLP, 1.90 ms for the transformer's default 10 tokens, 2.30 ms at 28 tokens
+  (`token_groups: [pokemon]`), and 2.88 ms routing every option through attention too (139
+  tokens). Of the default arm's 1.90 ms, `adapter.encode_groups` itself is 1.36 ms and
+  `nn.TransformerEncoder` is 0.24 ms — the adapter's per-entity encoders dominate, not attention.
+  Routing the full option table through attention is roughly +50% on a ~2 ms forward, not the
+  quadratic blowup this section previously argued from complexity alone rather than a
+  measurement.
 - **`DeepSetsBackbone`** — permutation-**invariant** pooling (shared per-token MLP → sum/mean pool)
   over entity/hand/option tokens. The lightweight permutation-equivariant option named alongside
   Set Transformers in the literature; far cheaper than attention, order-invariant over cards.
@@ -119,9 +143,29 @@ TorchRL assembly are identical across all implementations, so backbones are swap
   `option_repr` token and a query derived from `state_repr` → one logit per option. The option table
   already carries one row per action slot *including* the synthetic stop at `max_options`, so
   scoring every row yields exactly `(..., (max_options + 1))` logits and no separate stop logit is
-  needed. Naturally handles the variable-length option set; `MaskedCategorical` + `action_mask`
-  zeroes illegal indices. Cost is linear in the option count — one dot product each — unlike
-  routing the 129 option tokens through the trunk's self-attention.
+  needed — true only in the trivial sense that a logit gets produced for that slot. Until
+  `StructuredObsAdapter` grew a per-slot segment embedding, the stop row's *representation* was
+  byte-identical to a padded slot's. The stop slot is not an engine option at all: the encoder
+  writes rows only for the options the engine offered, so slot `max_options` keeps the same fill
+  values (`card_id`/`cats` zero, `scalars` `-1.0`) as every unused slot, and
+  `entity_projections["options"]` therefore produced one shared vector for stop and padding alike
+  — the pointer head measurably gave them the identical logit (`0.056268`). The head could not
+  have learned any identity-based preference for "the stop action" specifically, only whatever the
+  state-derived query happened to produce against that shared constant.
+
+  Two distinct fixes, easily conflated. The stop slot is now marked valid *by position* (it is
+  structurally always present) and carries its own learned segment embedding, distinct from every
+  real option and from padding. Separately, a slot's realness is now `cats[..., 0] != 0` — the
+  option type the encoder always writes — rather than `card_id != 0`, which had been silently
+  classifying every genuine *card-less* option (YES/NO/NUMBER/RETREAT/END) as padding: with only
+  those legal, the pooled `options` vector was exactly all-zero and none of the 129 option tokens
+  was valid. That second bug reached the `MLPBackbone` baseline too, not just the transformer.
+  Naturally
+  handles the variable-length option set; `MaskedCategorical` + `action_mask` zeroes illegal
+  indices regardless — that masking was never wrong, only the pre-mask representation was
+  impoverished. Cost is linear in the option count — one dot product each — unlike routing the
+  129 option tokens through the trunk's self-attention (measured +50% on a ~2 ms forward, not
+  prohibitive; see §2).
 
   This matters more than it looks. `LinearPolicyHead` reads only the pooled `state_repr`, by which
   point option identity has been averaged away twice (the adapter's masked mean over option rows,
