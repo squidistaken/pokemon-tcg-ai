@@ -19,8 +19,19 @@
 # threshold. Runs before and after that re-pin are different experiments: the
 # previous pool was the 15 archetypes this list held minus those four.
 #
+# Entries are ${paths.data_dir}-relative, not hardcoded "decks/<archetype>":
+# the corpus has since been reorganized into per-resolution-strategy
+# subdirectories (decks/heuristic-resolved/, decks/mapping-resolved/), so a
+# bare "decks/<archetype>" no longer resolves (every archetype directory
+# moved one level deeper). A run now needs paths.data_dir set to whichever
+# subdirectory it wants -- e.g. paths.data_dir=decks/heuristic-resolved -- or
+# resolve_deck_paths raises "matched no CSV files" at env-factory time, not at
+# Hydra compose time, which is why this crashed mid-job rather than at
+# submission (see scripts/run_ptr_sweep.sh's --decks-dir).
+#
 # Usage:
-#   python -m src.train agent=ppo env=multideck_v2 train=ppo_selfplay
+#   python -m src.train agent=ppo env=multideck_v2 train=ppo_selfplay \
+#     paths.data_dir=decks/heuristic-resolved
 defaults:
   - default
   - _self_
@@ -31,22 +42,22 @@ deck_sampling: uniform
 deck_holdout_frac: 0.2
 
 deck_pool:
-  - decks/alakazam-dudunsparce
-  - decks/cynthias-garchomp
-  - decks/dragapult
-  - decks/dragapult-blaziken
-  - decks/dragapult-dusknoir
-  - decks/festival-lead
-  - decks/flareon-noctowl
-  - decks/grimmsnarl-froslass
-  - decks/lucario-hariyama
-  - decks/mega-lucario
-  - decks/mega-venusaur
-  - decks/ns-zoroark
-  - decks/ogerpon-meganium
-  - decks/other
-  - decks/raging-bolt-ogerpon
-  - decks/rockets-honchkrow
-  - decks/rockets-mewtwo
-  - decks/rockets-porygon-z
-  - decks/slowking
+  - ${paths.data_dir}/alakazam-dudunsparce
+  - ${paths.data_dir}/cynthias-garchomp
+  - ${paths.data_dir}/dragapult
+  - ${paths.data_dir}/dragapult-blaziken
+  - ${paths.data_dir}/dragapult-dusknoir
+  - ${paths.data_dir}/festival-lead
+  - ${paths.data_dir}/flareon-noctowl
+  - ${paths.data_dir}/grimmsnarl-froslass
+  - ${paths.data_dir}/lucario-hariyama
+  - ${paths.data_dir}/mega-lucario
+  - ${paths.data_dir}/mega-venusaur
+  - ${paths.data_dir}/ns-zoroark
+  - ${paths.data_dir}/ogerpon-meganium
+  - ${paths.data_dir}/other
+  - ${paths.data_dir}/raging-bolt-ogerpon
+  - ${paths.data_dir}/rockets-honchkrow
+  - ${paths.data_dir}/rockets-mewtwo
+  - ${paths.data_dir}/rockets-porygon-z
+  - ${paths.data_dir}/slowking
