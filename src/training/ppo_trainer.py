@@ -382,7 +382,7 @@ class PPOTrainer(Trainer):
         :param data: One ``(B, T)`` batch from the collector. The stored
             ``action_log_prob`` from collection is the old policy's, as PPO
             requires.
-        :return: Mean losses / diagnostics / grad-norm over all applied
+        :return: Mean losses / grad-norm / policy entropy over all applied
             minibatch updates, or ``None`` if every minibatch had a NaN/Inf loss.
         """
         self._maybe_anneal()
@@ -402,6 +402,8 @@ class PPOTrainer(Trainer):
         batch = data_flat.batch_size[0]
         loss_accum: dict[str, float] = {}
         grad_norm_accum = 0.0
+        entropy_accum = 0.0
+        entropy_counts = 0
         loss_counts = 0
         skipped_minibatches = 0
 
@@ -456,6 +458,22 @@ class PPOTrainer(Trainer):
                 grad_norm_accum += float(grad_norm)
                 loss_counts += 1
 
+                # Policy entropy is the exception to the loss-only rule above:
+                # it is the diagnostic for whether the policy is collapsing to a
+                # single action, and ``loss_entropy`` cannot stand in for it
+                # because that is the entropy already scaled by a coefficient
+                # which anneals over the run. Guarded on finiteness like the
+                # other diagnostics, and simply absent when the loss runs
+                # without an entropy bonus and so never computes it.
+                entropy = loss_vals.get("entropy")
+                if (
+                    isinstance(entropy, torch.Tensor)
+                    and entropy.numel() == 1
+                    and torch.isfinite(entropy)
+                ):
+                    entropy_accum += float(entropy.detach())
+                    entropy_counts += 1
+
                 if self._target_kl is not None and "kl_approx" in loss_vals:
                     epoch_kl += float(loss_vals["kl_approx"])
                     n_minibatches += 1
@@ -488,6 +506,8 @@ class PPOTrainer(Trainer):
             return None
         result = {key: value / loss_counts for key, value in loss_accum.items()}
         result["grad_norm"] = grad_norm_accum / loss_counts
+        if entropy_counts > 0:
+            result["entropy"] = entropy_accum / entropy_counts
         if self._curriculum is not None:
             result.update(self._curriculum.metrics())
         logger.debug("Update %d finished: %s", self._updates_done, result)
