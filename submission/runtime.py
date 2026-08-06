@@ -1187,6 +1187,10 @@ class MLPBackbone(nn.Module):
         option_rows, _ = self.adapter.encode_entity_tokens(observation, ["options"])[
             "options"
         ]
+        if not self.option_tokens:
+            # Adapter-sourced tokens pass through unprojected at entity_dim,
+            # exactly as the training backbone forwards them.
+            return state_repr, option_rows
         option_repr = self.option_projection(option_rows)
         if self.option_segment_embedding is not None:
             segment_ids = self.adapter.segment_ids("options", observation)
@@ -1619,6 +1623,39 @@ _POLICY_HEADS: dict[str, type[PolicyHead]] = {
     "src.models.heads.PointerPolicyHead": PointerPolicyHead,
     "src.models.heads.PointerHead": PointerHead,
 }
+
+
+def _build_policy_head(
+    head_target: str,
+    head_config: Mapping[str, Any],
+    state_dict: Mapping[str, torch.Tensor],
+    in_features: int,
+    n_actions: int,
+) -> nn.Module:
+    """
+    Rebuild the trained policy head from its config and checkpoint shapes.
+
+    :param head_target: Training ``_target_`` of the head.
+    :param head_config: The checkpoint's ``model.head`` section.
+    :param state_dict: Checkpoint parameters, for widths the config omits.
+    :param in_features: Width of ``state_repr``.
+    :param n_actions: Size of the action space (``max_options + 1``).
+    :return: The rebuilt head.
+    """
+    if head_target != "src.models.heads.PointerHead":
+        return _POLICY_HEADS[head_target](in_features, n_actions)
+    # The token width is whatever the trunk emitted at training time, which the
+    # config does not record: read it back off the scorer's own input width so
+    # the two cannot drift apart.
+    scorer_input = int(state_dict["policy_head.scorer.0.weight"].shape[1])
+    num_cells = head_config.get("num_cells") or [in_features]
+    return PointerHead(
+        in_features,
+        n_actions,
+        option_dim=scorer_input - in_features,
+        num_cells=[int(value) for value in num_cells],
+        activation=str(head_config.get("activation", "tanh")),
+    )
 
 
 class ActorCritic(nn.Module):

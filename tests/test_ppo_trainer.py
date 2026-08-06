@@ -217,7 +217,7 @@ def test_collected_batch_excludes_option_repr_and_hidden(
     actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec)
     trainer = _make_trainer(actor_critic, action_spec)
     data = _collect_one_batch(trainer)
-    keys = set(data.keys())
+    keys = set(cast(TensorDictBase, data).keys())
     assert {"action", "action_log_prob"} <= keys
     assert not {"option_repr", "hidden", "logits"} & keys
 

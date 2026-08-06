@@ -24,7 +24,14 @@ logger = logging.getLogger(__name__)
 # Metrics every iteration reports.
 # Anything else in a metrics mapping comes from the algorithm's _update and is
 # formatted generically.
-_CORE_METRICS = ("frames", "episodes", "win_rate", "draw_rate", "fps")
+_CORE_METRICS = (
+    "frames",
+    "episodes",
+    "win_rate",
+    "draw_rate",
+    "truncation_rate",
+    "fps",
+)
 
 #: Lowercase substrings identifying torchrl's report that a ParallelEnv worker
 #: process is gone. The engine aborts the process outright rather than raising
@@ -71,9 +78,11 @@ class _RunTotals:
     all survive untouched.
 
     :param frames: Frames collected so far *by this run*.
-    :param episodes: Episodes finished so far.
+    :param episodes: Episodes finished so far, decided or not.
     :param wins: Episodes won so far.
     :param draws: Episodes drawn so far.
+    :param truncations: Episodes cut off by the engine's selection cap, which
+        produce no result and are therefore excluded from the win/draw rates.
     :param last_eval_frames: Absolute frame count at the most recent evaluation.
     :param start_frames: Frames a warm-started run inherits from the checkpoint
         it continues, so reported counts carry on from there rather than
@@ -84,6 +93,7 @@ class _RunTotals:
     episodes: int = 0
     wins: int = 0
     draws: int = 0
+    truncations: int = 0
     last_eval_frames: int = 0
     start_frames: int = 0
 
@@ -334,6 +344,7 @@ class Trainer(BaseTrainer):
                 totals.draws,
                 time.time() - start_time,
                 collected_frames=totals.frames,
+                truncations=totals.truncations,
             )
             if restarts:
                 logger.warning(
@@ -368,10 +379,12 @@ class Trainer(BaseTrainer):
             batch_frames = data.numel()
             totals.frames += batch_frames
             done = cast(Tensor, data["next", "done"]).reshape(-1)
-            final_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[done]
+            terminated = cast(Tensor, data["next", "terminated"]).reshape(-1)
+            decided_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[terminated]
             totals.episodes += int(done.sum())
-            totals.wins += int((final_rewards > 0).sum())
-            totals.draws += int((final_rewards == 0).sum())
+            totals.truncations += int(done.sum()) - int(terminated.sum())
+            totals.wins += int((decided_rewards > 0).sum())
+            totals.draws += int((decided_rewards == 0).sum())
 
             # Perform update step (return surrgate loss)
             losses = self._update(data)
@@ -384,6 +397,7 @@ class Trainer(BaseTrainer):
                 time.time() - start_time,
                 losses,
                 collected_frames=totals.frames,
+                truncations=totals.truncations,
             )
             progress_bar.update(batch_frames)
             self._log_progress(progress_bar, metrics)
@@ -496,13 +510,18 @@ class Trainer(BaseTrainer):
             elapsed: float,
             losses: dict[str, float] | None = None,
             collected_frames: int | None = None,
+            truncations: int = 0,
     ) -> dict[str, float]:
         """
         Build the metrics mapping for the run so far.
 
+        Win and draw rates are over *decided* episodes only. A truncated run has
+        no winner, so counting it would drag both rates toward zero by an amount
+        that says nothing about how the policy played.
+
         :param frames: Frame count as reported, spanning a warm-started run's
             inherited frames.
-        :param episodes: Total episodes finished so far.
+        :param episodes: Total episodes finished so far, decided or not.
         :param wins: Total wins so far.
         :param draws: Total draws so far.
         :param elapsed: Wall-clock seconds since training started.
@@ -510,14 +529,17 @@ class Trainer(BaseTrainer):
         :param collected_frames: Frames this process actually collected, which
             is what the throughput figure is per second *of*. None means the
             run collected everything it reports, i.e. no warm start.
+        :param truncations: Episodes that ended without a result.
         :return: Metrics keyed by :data:`_CORE_METRICS` plus any loss keys.
         """
         throughput_frames = frames if collected_frames is None else collected_frames
+        decided = max(episodes - truncations, 1)
         metrics: dict[str, float] = {
             "frames": frames,
             "episodes": episodes,
-            "win_rate": wins / max(episodes, 1),
-            "draw_rate": draws / max(episodes, 1),
+            "win_rate": wins / decided,
+            "draw_rate": draws / decided,
+            "truncation_rate": truncations / max(episodes, 1),
             # Guarded because a fast first batch can land inside the clock's
             # resolution, making elapsed 0.
             "fps": throughput_frames / max(elapsed, 1e-9),

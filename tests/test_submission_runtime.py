@@ -398,7 +398,7 @@ def _run_serving_loop(
         picks = policy(portable_observation)
     finally:
         handle.finish()
-    return observation, picks, sample_calls
+    return portable_observation, picks, sample_calls
 
 
 def _assert_legal_sequential_selection(

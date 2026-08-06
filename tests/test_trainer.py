@@ -145,14 +145,20 @@ def _synthetic_batch(frames: int) -> TensorDict:
     Build the minimum batch the trainer's bookkeeping reads.
 
     :param frames: Number of transitions in the batch.
-    :return: TensorDict with the "next" done/reward keys, last step terminal.
+    :return: TensorDict with the "next" done/terminated/reward keys, last step
+        terminal.
     """
     done = torch.zeros(frames, 1, dtype=torch.bool)
     done[-1] = True
     reward = torch.zeros(frames, 1)
     reward[-1] = 1.0
     return TensorDict(
-        {"next": TensorDict({"done": done, "reward": reward}, batch_size=[frames])},
+        {
+            "next": TensorDict(
+                {"done": done, "terminated": done.clone(), "reward": reward},
+                batch_size=[frames],
+            )
+        },
         batch_size=[frames],
     )
 

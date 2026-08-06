@@ -584,16 +584,6 @@ def _optional_string(value: Mapping[str, Any], key: str, location: str) -> str |
     return item.strip()
 
 
-def _reject_unknown(
-    value: Mapping[str, Any], allowed: set[str], location: str
-) -> None:
-    unknown = sorted(set(value) - allowed)
-    if unknown:
-        raise MappingWorkError(
-            f"{location} contains unknown field(s): {', '.join(unknown)}"
-        )
-
-
 def _run_data(run_dir: Path) -> dict[str, Any]:
     run = _read_json(run_dir / "run.json")
     if run.get("schema_version") != WORK_SCHEMA_VERSION:
@@ -658,11 +648,6 @@ def _validate_target(
         {"card_id", "expected_name", "mapping_confidence", "rationale"},
         location,
     )
-    _reject_unknown(
-        raw,
-        {"card_id", "expected_name", "mapping_confidence", "rationale"},
-        location,
-    )
     card_id = raw.get("card_id")
     confidence = raw.get("mapping_confidence")
     if isinstance(card_id, bool) or not isinstance(card_id, int) or card_id <= 0:
@@ -699,22 +684,6 @@ def _validate_rule(
 ) -> dict[str, object]:
     if not isinstance(raw, dict):
         raise MappingWorkError(f"{location} must be an object")
-    _reject_unknown(
-        raw,
-        {
-            "rule_id",
-            "source_name",
-            "source_set",
-            "source_number",
-            "source_rule",
-            "source_stage",
-            "source_previous_stage",
-            "targets",
-            "family_id",
-            "allow_cross_subtype",
-        },
-        location,
-    )
     _reject_unknown(
         raw,
         {
@@ -846,7 +815,6 @@ def _validate_receipt(
         "output_sha256": _sha256(output_path),
     }
     _reject_unknown(receipt, set(expected), str(path))
-    _reject_unknown(receipt, set(expected), str(path))
     for key, value in expected.items():
         if receipt.get(key) != value:
             raise MappingWorkError(
@@ -875,19 +843,6 @@ def _validate_shard_outputs(
             raise MappingWorkError(f"{review_path} exists without a proposal")
         return None, None
     proposal = _read_json(proposal_path)
-    _reject_unknown(
-        proposal,
-        {
-            "schema_version",
-            "kind",
-            "run_id",
-            "shard_id",
-            "shard_sha256",
-            "proposer",
-            "rules",
-        },
-        str(proposal_path),
-    )
     _reject_unknown(
         proposal,
         {
@@ -948,20 +903,6 @@ def _validate_shard_outputs(
         },
         str(review_path),
     )
-    _reject_unknown(
-        review,
-        {
-            "schema_version",
-            "kind",
-            "run_id",
-            "shard_id",
-            "shard_sha256",
-            "proposal_sha256",
-            "reviewer",
-            "decisions",
-        },
-        str(review_path),
-    )
     for key, expected in {
         "schema_version": WORK_SCHEMA_VERSION,
         "kind": "mapping_reviews",
@@ -982,7 +923,6 @@ def _validate_shard_outputs(
         location = f"{review_path}:decisions[{offset}]"
         if not isinstance(raw, dict):
             raise MappingWorkError(f"{location} must be an object")
-        _reject_unknown(raw, {"rule_id", "status", "targets"}, location)
         _reject_unknown(raw, {"rule_id", "status", "targets"}, location)
         rule_id = _require_string(raw, "rule_id", location)
         status = _require_string(raw, "status", location)

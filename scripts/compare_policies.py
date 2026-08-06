@@ -58,6 +58,7 @@ def evaluate(policy, agent_deck, opponent, opponent_decks, episodes_per_pair, se
     results = []
     for opp_deck in opponent_decks:
         wins = 0
+        decided = 0
         for ep in range(episodes_per_pair):
             env = TransformedEnv(
                 TCGEnv(list(agent_deck), list(opp_deck), max_options=MAX_OPTIONS, opponent=opponent, seed=seed+ep),
@@ -65,11 +66,13 @@ def evaluate(policy, agent_deck, opponent, opponent_decks, episodes_per_pair, se
             try:
                 env.set_spec_lock_(True)
                 reward, terminated = _play_episode(env, policy)
-                if terminated and reward > 0:
-                    wins += 1
+                if terminated:
+                    decided += 1
+                    if reward > 0:
+                        wins += 1
             finally:
                 env.close()
-        results.append(wins / max(episodes_per_pair, 1))
+        results.append(wins / decided if decided else 0.0)
     results.sort()
     n = len(results)
     return {"mean": statistics.fmean(results),

@@ -9,7 +9,22 @@ from tensordict import TensorDictBase
 from torch import nn
 from torchrl.data import Composite, TensorSpec
 
+from cg.api import (
+    AreaType,
+    CardType,
+    EnergyType,
+    OptionType,
+    SelectContext,
+    SelectType,
+    SpecialConditionType,
+)
 from src.env.card_database import CardDatabase
+
+_CATEGORY_FIELD_ENUMS = {
+    "select_cats": (SelectType, SelectContext),
+    "options.cats": (OptionType, AreaType, AreaType, SpecialConditionType),
+    "card_cats": (CardType, EnergyType, EnergyType, EnergyType),
+}
 
 
 class StructuredObsAdapter(nn.Module):
@@ -267,6 +282,7 @@ class StructuredObsAdapter(nn.Module):
                 f"Unknown zone_pooling '{zone_pooling}'; expected one of {list(self.POOL_MODES)}."
             )
         self._zone_pooling = zone_pooling
+        self._check_category_vocab()
         self._emit_option_tokens = bool(emit_option_tokens)
         self._pokemon_seat_split = bool(pokemon_seat_split)
         self._option_target_state = bool(option_target_state)
@@ -384,6 +400,24 @@ class StructuredObsAdapter(nn.Module):
                 "emit_option_tokens=True requires the 'options' group in in_keys; "
                 f"got {self._group_names}."
             )
+
+    @classmethod
+    def _check_category_vocab(cls) -> None:
+        """
+        Fail loudly if an engine enum has outgrown its slice of the category table.
+
+        :raises ValueError: If any field's largest encoded value does not fit.
+        """
+        for field_group, enums in _CATEGORY_FIELD_ENUMS.items():
+            for enum in enums:
+                needed = max(int(value) for value in enum) + 2
+                if needed > cls.CATEGORY_VOCAB_SIZE:
+                    raise ValueError(
+                        f"{enum.__name__} (in {field_group}) needs {needed} category "
+                        f"rows but CATEGORY_VOCAB_SIZE is {cls.CATEGORY_VOCAB_SIZE}. "
+                        f"Raise it -- leaving it would silently alias this field onto "
+                        f"the next one's embedding rows instead of raising."
+                    )
 
     @property
     def emits_option_tokens(self) -> bool:

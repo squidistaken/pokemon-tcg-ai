@@ -38,6 +38,12 @@ class TCGEnv(EnvBase):
     would silently desynchronize the observation from the action space.
     """
 
+    #: Battles started per :meth:`_reset` before giving up. A battle that ends
+    #: before the agent's first selection is retried rather than handed over as
+    #: an episode with no decisions in it; the cap keeps an unsatisfiable
+    #: deck/cap combination from spinning forever.
+    MAX_RESET_ATTEMPTS = 100
+
     def __init__(
         self,
         deck0: list[int] | None = None,
@@ -202,14 +208,16 @@ class TCGEnv(EnvBase):
         :param tensordict: Optional reset input (unused).
         :return: Tensordict with the initial observation and action mask.
         """
-        while True:
+        on_reset = getattr(self._opponent, "on_reset", None)
+        if on_reset is not None:
+            on_reset()
+        self._opponent_is_anchor = bool(
+            getattr(self._opponent, "active_is_anchor", True)
+        )
+
+        for _ in range(self.MAX_RESET_ATTEMPTS):
             self._handle.finish()
-            on_reset = getattr(self._opponent, "on_reset", None)
-            if on_reset is not None:
-                on_reset()
-            self._agent_seat = self._rng.randint(
-                0, 1
-            )  # flip a coin to decide who plays first
+            self._agent_seat = self._rng.randint(0, 1)
             self._selection_count = 0
             self._truncate_flag = False
             self._chosen = []
@@ -224,15 +232,16 @@ class TCGEnv(EnvBase):
                 # Only meaningful under a curriculum sampler; every other
                 # sampler leaves the level at NO_LEVEL, which the learner skips.
                 self._level_id = int(getattr(self._deck_sampler, "level_id", NO_LEVEL))
-            self._opponent_is_anchor = bool(
-                getattr(self._opponent, "active_is_anchor", True)
-            )
             observation = self._handle.start(self._deck0, self._deck1)
             observation = self._advance_to_agent(observation)
             if not self._game_over(observation) and not self._truncate_flag:
-                break
-        self._pending = observation
-        return self._build_obs_tensordict()
+                self._pending = observation
+                return self._build_obs_tensordict()
+        raise RuntimeError(
+            f"No battle survived setup in {self.MAX_RESET_ATTEMPTS} attempts: every "
+            f"one ended or hit the {self._max_engine_selections}-selection cap before "
+            f"the agent could act. Check the sampled decks and max_engine_selections."
+        )
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """

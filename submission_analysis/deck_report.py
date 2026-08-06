@@ -502,29 +502,31 @@ def _evolution_stats(
     """
     if not decklist:
         return []
-    name_to_id = {
-        card_index.cards[card_id].name: card_id
-        for card_id in decklist
-        if card_id in card_index.cards
-    }
+    ids_by_name: dict[str, set[int]] = {}
+    for card_id in decklist:  # decklist repeats an id once per physical copy
+        card = card_index.cards.get(card_id)
+        if card is not None:
+            ids_by_name.setdefault(card.name, set()).add(card_id)
 
     stats = []
-    for card_id in set(decklist):  # decklist repeats an id once per physical copy
-        card = card_index.cards.get(card_id)
-        if card is None or not card.evolvesFrom:
+    for name, evo_ids in ids_by_name.items():
+        card = card_index.cards[min(evo_ids)]
+        if not card.evolvesFrom:
             continue
-        pre_evo_id = name_to_id.get(card.evolvesFrom)
-        if pre_evo_id is None:
+        pre_evo_ids = ids_by_name.get(card.evolvesFrom)
+        if not pre_evo_ids:
             continue
-        games_evolved = sum(1 for episode in episodes if card_id in episode.evolutions_made)
+        games_evolved = sum(
+            1 for episode in episodes if episode.evolutions_made & evo_ids
+        )
         games_pre_evo_played = sum(
-            1 for episode in episodes if pre_evo_id in episode.cards_played
+            1 for episode in episodes if episode.cards_played & pre_evo_ids
         )
         stats.append(
             EvolutionStat(
-                evo_card_id=card_id,
-                evo_name=card.name,
-                pre_evo_card_id=pre_evo_id,
+                evo_card_id=min(evo_ids),
+                evo_name=name,
+                pre_evo_card_id=min(pre_evo_ids),
                 pre_evo_name=card.evolvesFrom,
                 games_pre_evo_played=games_pre_evo_played,
                 games_evolved=games_evolved,

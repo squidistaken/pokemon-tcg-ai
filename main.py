@@ -1,6 +1,7 @@
 import os
 
 from cg.api import Observation, to_observation_class
+from src.env.deck import load_deck
 from src.policies.inference import InferenceAgent, load_inference_agent
 
 # Overridable via env var rather than hardcoded: main.py has no CLI args or
@@ -34,13 +35,7 @@ def read_deck_csv() -> list[int]:
     Returns:
         list[int]: A list of card IDs in the deck.
     """
-    file_path = _resolve_path("deck.csv")
-    with open(file_path, "r") as file:
-        csv = file.read().split("\n")
-    deck = []
-    for i in range(60):
-        deck.append(int(csv[i]))
-    return deck
+    return load_deck(_resolve_path("deck.csv"))
 
 
 def _load_agent() -> InferenceAgent:
