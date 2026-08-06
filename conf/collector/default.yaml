@@ -1,2 +1,18 @@
 frames_per_batch: 2048
 total_frames: 16384
+
+# Dead worker pools to rebuild and resume from before giving up on the run.
+#
+# The cabt engine aborts its process on rare game states rather than raising: a
+# C++ exception thrown inside it unwinds out through `Select`, which -- unlike
+# the `Search*` entry points -- has no handler, and reaches std::terminate.
+# Nothing on the Python side can catch that, so a ParallelEnv worker simply
+# vanishes and torchrl fails the whole run. Measured once in ~13k episodes
+# (~1.3M frames), which a multi-million-frame budget will hit several times.
+#
+# A restart discards the in-flight batch, every battle in progress and the
+# workers' PFSP win-rate tallies; weights, optimizer, curriculum buffer and
+# frame count all live in the parent process and are untouched. Set 0 to fail
+# on the first death instead -- what you want when debugging the engine rather
+# than training through it.
+max_restarts: 20

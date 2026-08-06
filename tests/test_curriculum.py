@@ -704,3 +704,39 @@ def test_sweeping_matures_the_buffer_near_the_theoretical_floor() -> None:
     assert episodes == floor, (
         f"expected the sweep to hit the {floor}-episode floor, took {episodes}"
     )
+
+
+def test_abandoned_episodes_do_not_leak_into_the_next_one() -> None:
+    """
+    Residuals banked against a worker pool that died must be dropped.
+
+    The replacement pool starts every row on a fresh battle, so the steps the
+    old row accumulated belong to a game that will never report ``done``.
+    Carried over, they would be committed under the next episode's matchup --
+    scoring one level with another level's evidence.
+    """
+    curriculum = make_curriculum()
+
+    # Level 0 gets six steps at residual 4.0 and then the pool dies.
+    curriculum.observe(
+        batch(
+            levels=[[0] * STEPS] * WORKERS,
+            residuals=[[4.0] * STEPS] * WORKERS,
+            done=[[False] * STEPS] * WORKERS,
+        )
+    )
+    curriculum.abandon_open_episodes()
+
+    # A restarted pool deals level 1 and plays it out to a natural end.
+    curriculum.observe(
+        batch(
+            levels=[[1] * STEPS] * WORKERS,
+            residuals=[[1.0] * STEPS] * WORKERS,
+            done=[[False] * (STEPS - 1) + [True]] * WORKERS,
+        )
+    )
+
+    assert curriculum.buffer.entries[0].visits == 0
+    assert curriculum.buffer.entries[1].visits == WORKERS
+    # 1.0, not the 2.5 that averaging in the abandoned 4.0 steps would give.
+    assert curriculum.buffer.entries[1].mean_residual == pytest.approx(1.0)

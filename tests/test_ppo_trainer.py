@@ -1,6 +1,9 @@
 import math
+from typing import cast
 
+import pytest
 import torch
+from omegaconf import DictConfig, OmegaConf
 from torchrl.collectors import Collector
 from torchrl.envs import SerialEnv
 
@@ -9,6 +12,8 @@ from src.env.random_opponent import RandomOpponent
 from src.policies.ppo_actor import build_actor_critic
 from src.training.env_factory import make_env_factories
 from tests.conftest import PPOTrainerForTests, structured_env_cfg
+from tests.test_curriculum import STEPS, WORKERS, make_curriculum
+from tests.test_curriculum import batch as curriculum_batch
 
 
 def make_random_pool() -> OpponentPool:
@@ -66,6 +71,31 @@ def _collect_one_batch(trainer: PPOTrainerForTests) -> object:
         collector.shutdown()
 
 
+def _pointer_head_cfg(transformer_model_cfg: DictConfig) -> DictConfig:
+    """
+    Transformer + pointer-head config: the only pairing whose collection
+    policy actually produces ``option_repr`` (``requires_option_repr`` on the
+    head and ``produces_option_repr`` on the backbone both true), so it is
+    the one that would show B1's fix doing nothing if it were broken.
+
+    :param transformer_model_cfg: The transformer fixture config.
+    :return: A merged copy with ``option_tokens=True`` and the pointer head;
+        the fixture itself is left untouched.
+    """
+    return cast(
+        DictConfig,
+        OmegaConf.merge(
+            transformer_model_cfg,
+            {
+                "model": {
+                    "backbone": {"option_tokens": True},
+                    "head": {"_target_": "src.models.heads.PointerPolicyHead"},
+                }
+            },
+        ),
+    )
+
+
 def test_ppo_trainer_trains_without_nans(structured_model_cfg, structured_obs_spec, action_spec) -> None:
     """
     A short PPO run over the default pairing (structured obs + ``MLPBackbone``
@@ -110,6 +140,88 @@ def test_ppo_update_returns_finite_losses(structured_model_cfg, structured_obs_s
     assert losses is not None
     assert set(losses) >= {"loss_objective", "loss_critic", "loss_entropy", "grad_norm"}
     assert all(math.isfinite(value) for value in losses.values())
+
+
+def test_collected_batch_excludes_option_repr_and_hidden(
+    transformer_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    A real collected batch must carry only ``action``/``action_log_prob``,
+    never ``option_repr``/``hidden``/``logits`` (B1, finding 5).
+
+    Uses the pointer head, the one pairing whose collection-policy forward
+    actually produces ``option_repr`` -- with the flat head this assertion
+    would pass trivially even if the fix did nothing, since the flat policy
+    never emits ``option_repr`` in the first place.
+    """
+    cfg = _pointer_head_cfg(transformer_model_cfg)
+    actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec)
+    trainer = _make_trainer(actor_critic, action_spec)
+    data = _collect_one_batch(trainer)
+    keys = set(data.keys())
+    assert {"action", "action_log_prob"} <= keys
+    assert not {"option_repr", "hidden", "logits"} & keys
+
+
+#: `pytest.mark.filterwarnings` splits its argument on ":" (action:message:
+#: category:module:lineno), so the message fragment below stops short of the
+#: warning's own "aten::..." op name -- a `re.match` prefix is enough to
+#: select it without breaking the split.
+_VMAP_ATTENTION_FALLBACK_WARNING = "ignore:There is a performance drop:UserWarning"
+
+
+@pytest.mark.filterwarnings(_VMAP_ATTENTION_FALLBACK_WARNING)
+def test_ppo_update_finite_on_pointer_head_batch(
+    transformer_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    ``_update`` still returns finite PPO losses on a batch collected with the
+    pointer head, even though that batch never carried ``option_repr`` (B1).
+
+    The loss's ``actor_network``/``critic_network`` are separate
+    ``get_*_operator()`` wrappers over the shared trunk, so they recompute
+    ``option_repr`` themselves from ``observation`` rather than reading it
+    back from the collected data; trimming the collected keys must not starve
+    them.
+
+    This is the first test in the suite to run a real ``_update`` (GAE +
+    ``ClipPPOLoss``) over a ``TransformerBackbone``: GAE's value network call
+    is wrapped in ``vmap`` (torchrl's default), which forces the encoder's
+    attention through functorch's CPU fallback for
+    ``scaled_dot_product_attention`` -- correct, just unoptimized -- and
+    ``torch`` reports that with a ``UserWarning`` this repo's
+    ``filterwarnings = ["error", ...]`` would otherwise turn into a failure
+    having nothing to do with what this test checks. Real (non-pytest)
+    training never sees this filter, so the warning is silent there.
+    """
+    cfg = _pointer_head_cfg(transformer_model_cfg)
+    actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec)
+    trainer = _make_trainer(actor_critic, action_spec)
+    losses = trainer.update_for_test(_collect_one_batch(trainer))
+    assert losses is not None
+    assert set(losses) >= {"loss_objective", "loss_critic", "loss_entropy", "grad_norm"}
+    assert all(math.isfinite(value) for value in losses.values())
+
+
+def test_value_head_activation_from_config_reaches_module(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    ``value_head.activation`` from config must reach the built ``ValueHead``
+    (B2, finding 7); ``build_actor_critic`` previously forwarded only
+    ``num_cells``, silently dropping this setting in favour of ``ValueHead``'s
+    ``"tanh"`` default.
+    """
+    cfg = cast(
+        DictConfig,
+        OmegaConf.merge(
+            structured_model_cfg, {"model": {"value_head": {"activation": "relu"}}}
+        ),
+    )
+    actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec)
+    mlp_modules = list(actor_critic.value_head.mlp.modules())
+    assert any(isinstance(module, torch.nn.ReLU) for module in mlp_modules)
+    assert not any(isinstance(module, torch.nn.Tanh) for module in mlp_modules)
 
 
 def test_ppo_trainer_self_play_pool(structured_model_cfg, structured_obs_spec, action_spec) -> None:
@@ -170,3 +282,40 @@ def test_lr_and_entropy_anneal_decrease(structured_model_cfg, structured_obs_spe
     trainer.train()
     assert trainer.current_lr_for_test < 1.0e-3
     assert trainer.current_entropy_coeff_for_test < 0.05
+
+
+def test_restart_abandons_open_curriculum_episodes(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    Rebuilding a dead worker pool must clear the curriculum's row accumulators.
+
+    The trainer owns the wiring; without it the residuals banked against the
+    dead pool's rows are committed under whatever matchup the replacement pool
+    deals into that row next.
+    """
+    curriculum = make_curriculum()
+    trainer = _make_trainer(
+        build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec),
+        action_spec,
+        curriculum=curriculum,
+    )
+
+    curriculum.observe(
+        curriculum_batch(
+            levels=[[0] * STEPS] * WORKERS,
+            residuals=[[3.0] * STEPS] * WORKERS,
+            done=[[False] * STEPS] * WORKERS,
+        )
+    )
+    trainer.prepare_restart_for_test(1)
+    curriculum.observe(
+        curriculum_batch(
+            levels=[[1] * STEPS] * WORKERS,
+            residuals=[[1.0] * STEPS] * WORKERS,
+            done=[[False] * (STEPS - 1) + [True]] * WORKERS,
+        )
+    )
+
+    assert curriculum.buffer.entries[0].visits == 0
+    assert curriculum.buffer.entries[1].mean_residual == pytest.approx(1.0)

@@ -3,6 +3,7 @@ import signal
 import time
 from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any, cast
 
 import torch.multiprocessing as torch_mp
@@ -24,26 +25,62 @@ logger = logging.getLogger(__name__)
 # formatted generically.
 _CORE_METRICS = ("frames", "episodes", "win_rate", "draw_rate", "fps")
 
-# Substrings torchrl uses when a ParallelEnv worker process has died. The
-# engine aborts the process outright on some card interactions (a C++
-# std::runtime_error crossing the extern "C" boundary calls std::terminate), so
-# this is not an exception the environment can catch -- the worker is simply
-# gone, and the collector reports it as one of these.
-_WORKER_DEATH_SIGNATURES = (
-    "worker",
-    "At least one process failed",
+#: Lowercase substrings identifying torchrl's report that a ParallelEnv worker
+#: process is gone. The engine aborts the process outright rather than raising
+#: (a C++ exception thrown inside the engine unwinds through cabt's `Select`
+#: entry point, which has no handler, into ctypes frames that carry no unwind
+#: tables, so it reaches std::terminate), so the parent only ever learns about
+#: it as a dead pipe. That surfaces as a bare RuntimeError, hence the string
+#: match: torchrl raises no dedicated exception type for it.
+_WORKER_DEATH_MARKERS = (
+    "at least one process failed",
+    "cannot proceed, worker",
 )
+
+#: Consecutive restarts that collect nothing before dying again, after which
+#: the loop stops respawning. A pool that cannot complete a single batch is
+#: failing for a reason a restart will not fix (a bad checkpoint, an
+#: unsatisfiable config), and retrying it forever would burn the wall clock
+#: while looking like a live run.
+_MAX_BARREN_RESTARTS = 3
 
 
 def _is_worker_death(error: BaseException) -> bool:
     """
-    Whether a collector error is a dead environment worker rather than a bug.
+    Whether an exception raised out of collection means a worker process died.
 
     :param error: Exception raised while iterating the collector.
-    :return: True if the message matches torchrl's worker-death reports.
+    :return: True if this is a dead worker rather than a fault in the update.
     """
-    message = str(error)
-    return any(signature in message for signature in _WORKER_DEATH_SIGNATURES)
+    if isinstance(error, EOFError | BrokenPipeError | ConnectionResetError):
+        # The parent hit the far end of a worker's pipe directly, before
+        # torchrl's own liveness check ran.
+        return True
+    message = str(error).lower()
+    return any(marker in message for marker in _WORKER_DEATH_MARKERS)
+
+
+@dataclass
+class _RunTotals:
+    """
+    Running totals for one training run, carried across collector restarts.
+
+    Held in the parent process, so a dead worker pool costs the run only its
+    in-flight batch: the counters, the policy, the optimizer and the curriculum
+    all survive untouched.
+
+    :param frames: Frames collected so far.
+    :param episodes: Episodes finished so far.
+    :param wins: Episodes won so far.
+    :param draws: Episodes drawn so far.
+    :param last_eval_frames: Frame count at the most recent evaluation.
+    """
+
+    frames: int = 0
+    episodes: int = 0
+    wins: int = 0
+    draws: int = 0
+    last_eval_frames: int = 0
 
 
 @contextmanager
@@ -99,7 +136,8 @@ class Trainer(BaseTrainer):
             run_config: Mapping[str, Any] | None = None,
             evaluator: Evaluator | MultiEvaluator | None = None,
             eval_interval: int = 0,
-            max_collector_restarts: int = 10,
+            max_collector_restarts: int = 0,
+            rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]] | None = None,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -122,14 +160,16 @@ class Trainer(BaseTrainer):
             collected win-rate is pinned near 0.5 by construction.
         :param eval_interval: Frames between evaluations; ``0`` disables them
             even when an evaluator is supplied.
-        :param max_collector_restarts: How many times a dead environment worker
-            may be recovered from by rebuilding the collector and carrying on.
-            The learner (model, optimizer, curriculum, frame counter) lives in
-            this process and is untouched by a worker dying, so the only cost
-            is the in-flight batch and a few seconds of fork time. This is a
-            budget for the whole run, not per occurrence, so a permanently
-            broken environment still fails instead of restarting forever.
-            ``0`` restores the previous behaviour of dying on the first one.
+        :param max_collector_restarts: How many times a dead worker pool may be
+            rebuilt and collection resumed, rather than ending the run. ``0``
+            (the default) propagates the failure as before. See :meth:`train`
+            for what a restart costs.
+        :param rebuild_env_factories: Builds a replacement set of factories for
+            restart *n* (1-based), so a restarted pool does not replay the
+            per-worker seed stream the dead one started from. None reuses the
+            original factories, which is fine for a stochastic policy but
+            re-deals the same deck/seat sequence. Unused when
+            ``max_collector_restarts`` is 0.
         """
         self._env_factories = env_factories
         self._policy = policy
@@ -143,80 +183,95 @@ class Trainer(BaseTrainer):
         self._evaluator = evaluator
         self._eval_interval = eval_interval
         self._max_collector_restarts = max_collector_restarts
+        self._rebuild_env_factories = rebuild_env_factories
+        # The Collector rounds its budget up to a whole number of batches, so
+        # anchoring the loop to the same rounded figure keeps the remaining
+        # frames handed to a restarted Collector exactly divisible. Passing the
+        # raw remainder instead would re-trigger torchrl's not-divisible warning
+        # on every restart and drift the run's total frame count.
+        batches = -(-total_frames // frames_per_batch)
+        self._budget = batches * frames_per_batch
 
     def train(self) -> dict[str, float]:
         """
         Run collection until ``total_frames``, updating after every rollout.
 
+        When ``max_collector_restarts`` allows it, a worker process that dies
+        mid-rollout is treated as a recoverable fault rather than the end of the
+        run: the pool is torn down, a fresh one is built and collection resumes
+        from the frame count reached so far. This is what it takes to finish a
+        long run unattended against an engine that aborts its process on rare
+        game states instead of raising (see :data:`_WORKER_DEATH_MARKERS`).
+
+        A restart is cheap but not free. Everything the learner owns lives in
+        this process and survives untouched -- weights, optimizer state, the
+        curriculum's level buffer, snapshot cadence, the frame counter. What is
+        lost is per-worker: the batch in flight, every battle in progress, and
+        the workers' PFSP win-rate tallies, which are estimated per worker and
+        so restart from their prior.
+
         :return: Aggregate statistics: frames, episodes, win/draw rate and fps,
             covering the frames collected before any interruption.
         """
-        frames = 0
-        episodes = 0
-        wins = 0
-        draws = 0
-        last_eval_frames = 0
+        totals = _RunTotals()
         start_time = time.time()
+        restarts = 0
+        barren_restarts = 0
         collector: Collector | None = None
-        restarts_left = self._max_collector_restarts
         try:
             self._callbacks.on_train_start(self._run_config)
             with tqdm(total=self._total_frames, unit="frame") as progress_bar:
-                while frames < self._total_frames:
+                while totals.frames < self._budget:
+                    if restarts:
+                        self._prepare_restart(restarts)
                     # Only children this collector starts are ours to reap if it
                     # dies; anything already running (e.g. the W&B service) is not.
                     preexisting = {child.pid for child in torch_mp.active_children()}
-                    collector = self._make_collector(self._total_frames - frames)
+                    collector = self._make_collector(self._budget - totals.frames)
+                    frames_before = totals.frames
                     try:
-                        for data in collector:
-                            self._callbacks.on_rollout_start(frames)
-                            assert isinstance(data, TensorDict)
-                            batch_frames = data.numel()
-                            frames += batch_frames
-                            done = cast(Tensor, data["next", "done"]).reshape(-1)
-                            final_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[done]
-                            episodes += int(done.sum())
-                            wins += int((final_rewards > 0).sum())
-                            draws += int((final_rewards == 0).sum())
-
-                            losses = self._update(data)
-
-                            metrics = self._metrics(
-                                frames, episodes, wins, draws, time.time() - start_time, losses
-                            )
-                            progress_bar.update(batch_frames)
-                            self._log_progress(progress_bar, metrics)
-                            self._callbacks.on_rollout_end(frames, metrics)
-                            if self._should_evaluate(frames, last_eval_frames):
-                                last_eval_frames = frames
-                                assert self._evaluator is not None
-                                self._callbacks.on_eval_end(
-                                    frames, self._evaluator.evaluate(self._policy)
-                                )
-                    except RuntimeError as error:
-                        if restarts_left <= 0 or not _is_worker_death(error):
+                        self._collect(collector, progress_bar, totals, start_time)
+                    except (RuntimeError, OSError, EOFError) as error:
+                        if not _is_worker_death(error):
                             raise
-                        restarts_left -= 1
-                        logger.warning(
-                            "Environment worker died at %d frames (%s). Discarding the "
-                            "in-flight batch and rebuilding the collector; %d restart(s) "
-                            "left. The learner's weights, optimizer and frame count are "
-                            "unaffected.",
-                            frames,
-                            error,
-                            restarts_left,
+                        if restarts >= self._max_collector_restarts:
+                            logger.error(
+                                "Worker pool died at %d frames after %d restart(s); "
+                                "the restart budget (collector.max_restarts) is spent.",
+                                totals.frames,
+                                restarts,
+                            )
+                            raise
+                        barren_restarts = (
+                            barren_restarts + 1 if totals.frames == frames_before else 0
                         )
-                        self._abandon_collector(collector, preexisting)
+                        if barren_restarts >= _MAX_BARREN_RESTARTS:
+                            logger.error(
+                                "Worker pool died %d times in a row without collecting "
+                                "a batch; not restarting again.",
+                                barren_restarts,
+                            )
+                            raise
+                        restarts += 1
+                        logger.warning(
+                            "Worker pool died at %d frames (%s). Restarting collection "
+                            "(%d of %d); the in-flight batch and all battles in "
+                            "progress are discarded.",
+                            totals.frames,
+                            error,
+                            restarts,
+                            self._max_collector_restarts,
+                        )
+                    else:
+                        break
+                    finally:
+                        self._shutdown_collector(collector, preexisting)
                         collector = None
-                        continue
-                    self._shutdown_collector(collector)
-                    collector = None
-                    break
         except KeyboardInterrupt:
             logger.warning(
                 "Interrupted at %d frames; shutting down and reporting partial results. "
                 "Press Ctrl-C again only if shutdown hangs.",
-                frames,
+                totals.frames,
             )
         except BaseException as error:
             # Recorded before the teardown below so metric backends can mark the
@@ -228,63 +283,143 @@ class Trainer(BaseTrainer):
             with _deferred_interrupt():
                 if self._evaluator is not None:
                     self._evaluator.close()
-                if collector is not None:
-                    self._shutdown_collector(collector)
-            summary = self._metrics(frames, episodes, wins, draws, time.time() - start_time)
+            if collector is not None:
+                self._shutdown_collector(collector)
+            summary = self._metrics(
+                totals.frames,
+                totals.episodes,
+                totals.wins,
+                totals.draws,
+                time.time() - start_time,
+            )
+            if restarts:
+                logger.warning(
+                    "Run completed across %d collector restart(s).", restarts
+                )
             self._callbacks.on_train_end(summary)
         return summary
 
-    def _make_collector(self, total_frames: int) -> Collector:
+    def _collect(
+            self,
+            collector: Collector,
+            progress_bar: tqdm,
+            totals: _RunTotals,
+            start_time: float,
+    ) -> None:
         """
-        Build a collector over a freshly constructed vectorized environment.
+        Drain one collector, updating and reporting after every rollout.
 
-        Opts out of torchrl's automatic policy-transform registration: env
-        transforms are managed explicitly by the env factories, and the policies
-        used here read ``action_mask`` directly without needing the InitTracker
-        transform the collector's heuristic would append.
+        Returns when the collector's own budget is exhausted; raises whatever
+        collection or the update raised, which :meth:`train` classifies into
+        recoverable worker death and everything else.
 
-        :param total_frames: Frames this collector should still collect, i.e.
-            the run's remaining budget rather than its total.
-        :return: A collector ready to iterate.
+        :param collector: Collector to iterate; owns one worker pool.
+        :param progress_bar: Bar tracking frames across the whole run, not just
+            this collector.
+        :param totals: Run totals, advanced in place so they survive a restart.
+        :param start_time: Wall-clock start of the run, for the fps figure.
         """
+        for data in collector:
+            self._callbacks.on_rollout_start(totals.frames)
+            assert isinstance(data, TensorDict)
+            batch_frames = data.numel()
+            totals.frames += batch_frames
+            done = cast(Tensor, data["next", "done"]).reshape(-1)
+            final_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[done]
+            totals.episodes += int(done.sum())
+            totals.wins += int((final_rewards > 0).sum())
+            totals.draws += int((final_rewards == 0).sum())
+
+            # Perform update step (return surrgate loss)
+            losses = self._update(data)
+
+            metrics = self._metrics(
+                totals.frames,
+                totals.episodes,
+                totals.wins,
+                totals.draws,
+                time.time() - start_time,
+                losses,
+            )
+            progress_bar.update(batch_frames)
+            self._log_progress(progress_bar, metrics)
+            self._callbacks.on_rollout_end(totals.frames, metrics)
+            if self._should_evaluate(totals.frames, totals.last_eval_frames):
+                totals.last_eval_frames = totals.frames
+                assert self._evaluator is not None
+                self._callbacks.on_eval_end(
+                    totals.frames, self._evaluator.evaluate(self._policy)
+                )
+
+    def _make_collector(self, remaining_frames: int) -> Collector:
+        """
+        Build a collector over a fresh worker pool for the frames still owed.
+
+        :param remaining_frames: Frames this collector should produce, i.e. the
+            run budget less what previous collectors already delivered.
+        :return: A Collector wrapping a newly built vectorized environment.
+        """
+        # Opt out of torchrl's automatic policy-transform registration: env
+        # transforms are managed explicitly by the env factories, and the
+        # policies used here read "action_mask" directly without needing the
+        # InitTracker transform the collector's heuristic would append.
         return Collector(
             create_env_fn=self._make_vec_env(),
             policy=self._policy,
             frames_per_batch=self._frames_per_batch,
-            total_frames=total_frames,
+            total_frames=remaining_frames,
             auto_register_policy_transforms=False,
             **self._collector_kwargs(),
         )
 
+    def _prepare_restart(self, restart_index: int) -> None:
+        """
+        Re-establish per-worker state before a replacement pool is built.
+
+        The base class only re-deals the environment factories. Subclasses
+        extend this for state that is keyed to collector rows and would
+        otherwise be misattributed to whichever episode lands in that row next.
+
+        :param restart_index: 1-based index of the restart about to happen.
+        """
+        if self._rebuild_env_factories is not None:
+            self._env_factories = self._rebuild_env_factories(restart_index)
+
     @staticmethod
-    def _shutdown_collector(collector: Collector) -> None:
+    def _shutdown_collector(
+            collector: Collector,
+            preexisting_pids: set[int | None] | None = None,
+    ) -> None:
         """
-        Shut a collector down, tolerating an already-broken worker pool.
+        Tear a collector down without letting cleanup mask the original failure.
 
-        :param collector: Collector to tear down.
-        """
-        try:
-            collector.shutdown()
-        except Exception:
-            logger.debug("Collector shutdown raised; continuing.", exc_info=True)
+        ``shutdown`` re-runs torchrl's liveness check, so tearing down a pool
+        whose worker has already died raises the very condition that brought us
+        here. Running from a ``finally``, that replacement exception would
+        discard the specific one ("worker 6 dead") in favour of the generic one,
+        which is exactly how the failure this guards against reports itself.
 
-    @staticmethod
-    def _abandon_collector(collector: Collector, preexisting_pids: set[int | None]) -> None:
-        """
-        Tear down a collector whose worker pool has already partly died.
+        Because that shutdown cannot be relied on to finish, it is also not
+        guaranteed to reap the pool's surviving workers. Any it leaves behind
+        are terminated here when ``preexisting_pids`` says which children the
+        collector owns, or the next collector's workers would contend with
+        orphans still holding the previous pool's shared memory.
 
-        torchrl's own shutdown path re-checks worker health and raises when it
-        finds the dead one, so it cannot be relied on to clean up after exactly
-        the failure being recovered from. Any worker it leaves behind is
-        terminated here, or the next collector's workers would contend with
-        orphans holding the previous run's shared memory.
-
-        :param collector: Collector to abandon.
+        :param collector: Collector to shut down; may already be broken.
         :param preexisting_pids: PIDs of child processes that predate this
-            collector and must be left alone.
+            collector and must be left alone (the W&B service, say). None skips
+            the reaping entirely, for callers that never started a pool of
+            their own.
         """
         with _deferred_interrupt():
-            Trainer._shutdown_collector(collector)
+            try:
+                collector.shutdown()
+            except Exception:
+                logger.warning(
+                    "Collector shutdown failed; continuing.", exc_info=True
+                )
+            if preexisting_pids is None:
+                return
             for child in torch_mp.active_children():
                 if child.pid in preexisting_pids:
                     continue

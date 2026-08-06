@@ -1,4 +1,5 @@
 import random
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -8,7 +9,9 @@ from dotenv import load_dotenv
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 from torchrl.data import Categorical, Composite
+from torchrl.envs import EnvBase
 
+from src.hydra_resolvers import register_resolvers
 from src.policies.ppo_actor import build_actor_critic
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training import (
@@ -31,6 +34,8 @@ from src.training import (
 from src.training.env_factory import OpponentFactory, _build_sampler_spec
 
 load_dotenv(Path(__file__).parents[1] / ".env", override=False)
+# Before Hydra composes anything: the run directory interpolates ${run_uid:}.
+register_resolvers()
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
@@ -67,6 +72,8 @@ def main(cfg: DictConfig) -> None:
             serial_for_single=cfg.env.serial_for_single,
             callbacks=callbacks,
             run_config=run_config,
+            max_collector_restarts=_max_collector_restarts(cfg),
+            rebuild_env_factories=_rebuild_env_factories(cfg),
         )
 
     stats = trainer.train()
@@ -243,7 +250,55 @@ def _build_ppo_trainer(
         ),
         eval_interval=eval_interval,
         curriculum=curriculum,
+        max_collector_restarts=_max_collector_restarts(cfg),
+        rebuild_env_factories=_rebuild_env_factories(
+            cfg, opponent_factory=opponent_factory, curriculum=curriculum
+        ),
     )
+
+
+def _max_collector_restarts(cfg: DictConfig) -> int:
+    """
+    Read the dead-worker restart budget from the collector config.
+
+    :param cfg: Hydra configuration with a ``collector`` section.
+    :return: Restarts allowed; ``0`` fails the run on the first worker death.
+    """
+    return int(cfg.collector.get("max_restarts", 0))
+
+
+def _rebuild_env_factories(
+    cfg: DictConfig,
+    opponent_factory: OpponentFactory | None = None,
+    curriculum: Any = None,
+) -> Callable[[int], list[Callable[[], EnvBase]]]:
+    """
+    Build the per-restart environment-factory builder handed to the trainer.
+
+    Offsets every worker's seed by a full pool width per restart, so the
+    replacement workers draw disjoint matchup/seat/opponent streams rather than
+    replaying from the top the ones the dead pool already played.
+
+    The live ``curriculum`` is passed through rather than rebuilt, so the
+    replacement workers attach to the same shared-memory distribution channel
+    and the same archetype index the buffer's level ids are addressed against.
+
+    :param cfg: Hydra configuration, re-read on every restart.
+    :param opponent_factory: Opponent factory to give the new workers.
+    :param curriculum: Live curriculum driving the train split, if any.
+    :return: Callable mapping a 1-based restart index to fresh factories.
+    """
+    num_workers = int(cfg.env.num_workers)
+
+    def rebuild(restart_index: int) -> list[Callable[[], EnvBase]]:
+        return make_env_factories(
+            cfg,
+            opponent_factory=opponent_factory,
+            curriculum=curriculum,
+            seed_offset=restart_index * num_workers,
+        )
+
+    return rebuild
 
 
 def _resolve_checkpoint_dir(cfg: DictConfig) -> Path:
@@ -257,13 +312,31 @@ def _resolve_checkpoint_dir(cfg: DictConfig) -> Path:
     defaults to False, so the working directory alone cannot be relied on to
     provide that isolation.
 
+    The directory is created exclusively, so any collision that survives the
+    unique run directory fails at startup instead of silently corrupting the
+    run: two runs sharing one directory write identically-named snapshots over
+    each other and draw each other's policies into their self-play leagues.
+
     :param cfg: Hydra configuration with a ``train`` section.
     :return: Absolute path to this run's snapshot directory.
+    :raises RuntimeError: If the run-directory-relative path already exists.
     """
     configured = Path(cfg.train.get("checkpoint_dir", "checkpoints"))
     if configured.is_absolute():
+        # An absolute path names a directory the operator chose deliberately,
+        # so its contents and lifecycle are theirs to manage.
         return configured
-    return Path(HydraConfig.get().runtime.output_dir) / configured
+    resolved = Path(HydraConfig.get().runtime.output_dir) / configured
+    try:
+        resolved.mkdir(parents=True, exist_ok=False)
+    except FileExistsError:
+        raise RuntimeError(
+            f"Snapshot directory {resolved} already exists, so another run owns it. "
+            f"Sharing it would overwrite that run's snapshots and mix its policies "
+            f"into this league. Give this run its own hydra.run.dir, or point "
+            f"train.checkpoint_dir at a fresh path."
+        ) from None
+    return resolved
 
 
 def _resolve_checkpoint_registry(cfg: DictConfig) -> Path:

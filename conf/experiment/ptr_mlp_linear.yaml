@@ -1,0 +1,40 @@
+# @package _global_
+# pointer-transfer-45, arm 1/8 — the matched MLP control the last sweep never ran.
+#
+# docs/architecture/transformer-diagnosis-45.md §3: nine transformer arms were
+# compared against each other and against `curriculum-8h-s0`, an MLP run on a
+# different seed and a 15-deck corpus. Every per-frame difference came out 5-10x
+# inside the noise floor, so "the transformer underperforms the MLP" — the
+# premise of Issue #45 — is still unproven in either direction.
+#
+# This arm is that control: launched from conf/ppo_transformer.yaml like every
+# other arm, so all 30-odd hyperparameters the diagnosis had to verify key-by-key
+# (workers, snapshot/eval intervals, eval episodes, pool size, PFSP settings, lr,
+# sub_batch_size, epochs, clipping, gamma/lmbda, curriculum, embed_dim, adapter,
+# value head, holdout) are matched by construction rather than by audit, and the
+# corpus and seed are shared.
+#
+# It is also the cheapest arm in the sweep: 1068 fps against the transformer's
+# 439, so ~1.0 A100-h per seed against ~2.5.
+#
+# NOTE: the backbone swap is NOT done here via `override /model/backbone: mlp`
+# in this file's defaults list. ppo_transformer.yaml's own defaults already
+# override /model/backbone to `transformer`; a second override of the same
+# group from an appended +experiment config is silently dropped (confirmed with
+# --cfg job — the composed backbone stays TransformerBackbone). This is exactly
+# why ppo_transformer.yaml's header says to append `model/backbone=mlp` as a
+# plain CLI group swap instead — that form wins because it lands after the
+# primary config's defaults resolve. run_ptr_sweep.sh passes it for this arm.
+
+wandb:
+  name: ptr-mlp-linear-s${seed}
+  tags:
+    - issue-45
+    - ptr-sweep
+    - control
+    - mlp-backbone
+    - linear-head
+  notes: >-
+    Pointer-transfer sweep: MLP trunk + flat linear head, the matched backbone
+    control missing from transformer-diagnosis-45. Cell (mlp, linear) of the
+    2x2 backbone x head factorial.

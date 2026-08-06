@@ -1,0 +1,26 @@
+# @package _global_
+# Diagnosis arm: pre-LN instead of torch's default post-LN.
+#
+# nn.TransformerEncoderLayer defaults to norm_first=False (post-LN), which is
+# the variant that conventionally requires a learning-rate warmup to train
+# stably — the residual branch is unnormalized on the way in, so early
+# gradients are badly scaled. The PPO config has no warmup at all: lr is a
+# constant 3e-4 tuned for the MLP. Pre-LN trains without warmup, which makes
+# it the cheaper half of the fix; +experiment=tf_schedule tests the other.
+#
+# final_norm adds the LayerNorm on the encoder output that is conventional
+# with pre-LN, where the last sublayer's residual is otherwise unnormalized.
+model:
+  backbone:
+    norm_first: true
+    final_norm: true
+
+wandb:
+  name: tf-preln-s42
+  tags:
+    - issue-45
+    - tf-diagnosis
+    - normalization
+  notes: >-
+    Transformer diagnosis: pre-LN (norm_first=true) plus a final LayerNorm, so
+    the trunk trains without the warmup schedule post-LN would need.

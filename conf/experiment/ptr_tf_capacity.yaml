@@ -1,0 +1,39 @@
+# @package _global_
+# pointer-transfer-45, arm 5/8 — depth, re-tested on the pointer baseline.
+#
+# transformer-diagnosis-45 §9.9: capacity was the only non-pointer arm above the
+# reference on both metrics (+0.056 rand, +0.069 snap) at just -8% fps, but its
+# duplicate landed 0.084 *below* the reference on rand. The two runs straddle the
+# control in both directions, so the effect is undetectable at n=1 — "the best
+# remaining candidate, but needs seeds to say anything", and the analysis asks
+# for it bundled with the pointer work rather than run alone.
+#
+# That bundling matters for a second reason. With a flat head, 2 layers had to
+# earn their keep on a representation the head could barely use — it reads a
+# pooled state and emits slot logits. With the pointer head consuming per-option
+# tokens, extra trunk capacity has somewhere to go.
+#
+# Watch train/grad_norm: this arm ran 2-3x the reference (0.18 -> 0.70 -> 0.42)
+# and is one of the four candidates for tf_combined's monotonic 0.96 -> 4.14
+# growth into the max_grad_norm: 1 clip.
+defaults:
+  - override /model/head: pointer_dot
+
+model:
+  backbone:
+    option_tokens: true
+    # ff_dim 512 is the conventional 4x d_model; the shipped 256 is 2x.
+    num_layers: 2
+    ff_dim: 512
+
+wandb:
+  name: ptr-tf-capacity-s${seed}
+  tags:
+    - issue-45
+    - ptr-sweep
+    - pointer-head
+    - capacity
+  notes: >-
+    Pointer-transfer sweep: num_layers 1 -> 2, ff_dim 256 -> 512 on top of the
+    pointer head. Re-test of the one non-pointer arm whose duplicates straddled
+    the control, now at three seeds and on a head that can use the capacity.

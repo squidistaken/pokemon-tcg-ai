@@ -1,0 +1,22 @@
+# Dot-product pointer head: one logit per option, scored from that option's own
+# token rather than from the pooled state (see src/models/heads.py).
+#
+# Same premise as model/head=pointer -- the policy scores what an option *is*,
+# not where it sits -- but with a scaled dot product against a state-derived
+# query instead of a shared MLP over [state, option_i]. Two consequences:
+#
+#   * cheaper: one matrix-vector product per slot, no per-slot MLP, and no
+#     hidden widths to tune;
+#   * the synthetic stop action is scored as a real row of the option table
+#     rather than from a separate state-only branch. That works only because
+#     the token sources give the stop slot its own segment embedding, so it is
+#     distinguishable from a padded slot.
+#
+# in_features, n_actions and option_dim are injected by build_actor_critic,
+# option_dim from the backbone's option_repr_dim -- so this head pairs with
+# either token source (adapter-emitted or trunk-projected) without config.
+#
+# model/head=pointer is the arm with the measured win (docs/architecture/
+# pointer-head.md); this one is the transformer work's formulation and the
+# cheaper hypothesis. Use conf/experiment/ptr_mlp_pointer.yaml to compare them.
+_target_: src.models.heads.PointerPolicyHead

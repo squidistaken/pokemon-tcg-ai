@@ -95,7 +95,7 @@ src/
     heads.py                     PointerHead (per-option scoring, the default) + LinearPolicyHead
                                    (flat slot-indexed logits, the baseline) + ValueHead (scalar critic)
     actor_critic.py              ActorCritic: shared trunk feeding both heads, tensordict-in/tensordict-out
-    transformer.py                Set-transformer building blocks (placeholder, not yet implemented)
+    transformer.py                TransformerBackbone: self-attention trunk with pooling modes, per-entity token groups, and pointer-head option tokens
   policies/
     random_masked_policy.py     Uniform random policy over the action mask (stand-in for the future PPO actor)
     greedy_policy_opponent.py   Greedy opponent baseline built on a saved ActorCritic checkpoint
@@ -167,6 +167,11 @@ state alone, and the adapter hands it the option table as a *masked mean*. Mean 
 permutation-invariant, so under the flat head, shuffling the options leaves the logits bit-identical
 while the correct action moves: the policy is structurally unable to condition on what an action
 does, and the most it can represent is a prior over slot indices.
+
+`model/head=pointer_dot` is the same idea with a scaled dot product instead of a shared MLP: cheaper
+(one product per slot, no hidden widths to tune) and it scores the stop action as a real row of the
+option table rather than from a separate branch. `pointer` is the default because it is the arm with
+the measured win; `pointer_dot` is the transformer work's formulation, still being compared.
 
 That is not a tuning problem, it is a ceiling, and it was the binding constraint on training — see
 [`docs/architecture/pointer-head.md`](docs/architecture/pointer-head.md) for the measurements. `linear` is
@@ -382,11 +387,13 @@ distribution by default, matching training behavior. Pass
 modes re-encode the partial selection before each subsequent choice.
 
 The current portable runtime supports structured-observation checkpoints using
-`MLPBackbone` and `LinearPolicyHead`. The builder strictly reconstructs both the
-training model and portable model, so an unsupported architecture or mismatched
-config fails before an archive is produced. For an old bare state-dict
-checkpoint without embedded config, pass its Hydra config with
-`--config path/to/.hydra/config.yaml`.
+`MLPBackbone` or `TransformerBackbone` (every pooling mode, per-entity token
+groups, learned segment embeddings, and the optional per-option tokens a
+pointer head needs) paired with `LinearPolicyHead` or `PointerPolicyHead`. The
+builder strictly reconstructs both the training model and portable model, so
+an unsupported architecture or mismatched config fails before an archive is
+produced. For an old bare state-dict checkpoint without embedded config, pass
+its Hydra config with `--config path/to/.hydra/config.yaml`.
 
 Every build performs a fail-closed Kaggle preflight before producing output. It
 checks all bundled Python as Python 3.11, rejects dynamic imports, permits only
@@ -401,7 +408,16 @@ the extracted upload bytes. Any failure aborts before the optional CLI submit.
 Slurm support is kept separately in [`slurm-conf/`](slurm-conf/README.md). The
 profiles select a normal Hydra config and add scheduler-specific overrides;
 they do not participate in local Hydra composition. Complete launch configs are
-available as `baseline`, `ppo`, and `ppo_selfplay`.
+available as `baseline`, `ppo`, `ppo_selfplay`, and `ppo_transformer` (the
+Issue-45 self-attention backbone).
+
+The first `ppo_transformer` run underperformed, so the candidate causes are
+split into one `conf/experiment/tf_*.yaml` overlay each — optimizer steps,
+trunk capacity, LR/entropy schedule, pre-LN, CLS readout, per-entity tokens,
+pointer head — plus `tf_combined` stacking them all.
+[`scripts/run_tf_diagnosis.sh`](scripts/run_tf_diagnosis.sh) submits the sweep,
+one A100 job per arm sharing a W&B group; `--dry-run` prints without
+submitting, and naming an arm submits just that one.
 
 ## CI
 

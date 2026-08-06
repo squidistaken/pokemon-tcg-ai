@@ -1,0 +1,48 @@
+# @package _global_
+# pointer-transfer-45, arm 2/8 — the highest-value experiment available.
+#
+# docs/architecture/transformer-diagnosis-45.md P1 §9.5. `tf_pointer` was the
+# only arm of nine to beat the reference outside the noise floor (+0.245 snap,
+# 1.7x the largest same-config difference), and the mechanism it added does not
+# use attention: `option_tokens=true` projects the option rows with a single
+# Linear plus a segment embedding and hands them straight to the head
+# (src/models/transformer.py#L484-495, the `encoded_option_repr=False` default
+# path). They never enter the encoder.
+#
+# So the gain should port to the MLP trunk unchanged, at 2.4x the throughput.
+# Either outcome here is decisive:
+#   reproduces  -> Issue #45 is answering the wrong question; the fix is a head
+#                  change worth ~0.25 win rate at 1068 fps, and the transformer
+#                  has to justify its 2.4x cost on something else.
+#   fails       -> the pointer head genuinely needs the attention trunk, which
+#                  is the first positive result for attention in this project.
+#
+# MLPBackbone.option_tokens now mirrors that path: adapter.encode_entity_tokens
+# (groups=["options"]), a Linear to out_features, plus that group's stop-slot
+# segment embedding — see conf/model/backbone/mlp.yaml.
+#
+# NOTE: the backbone swap is NOT done here via `override /model/backbone: mlp`.
+# ppo_transformer.yaml's own defaults already override /model/backbone to
+# `transformer`; a second override of the same group from an appended
+# +experiment config is silently dropped (confirmed with --cfg job). Append
+# `model/backbone=mlp` as a plain CLI group swap instead, same as
+# ptr_mlp_linear.yaml — run_ptr_sweep.sh does this for both MLP arms.
+defaults:
+  - override /model/head: pointer_dot
+
+model:
+  backbone:
+    # Emits option_repr; the head raises at build time without it.
+    option_tokens: true
+
+wandb:
+  name: ptr-mlp-pointer-s${seed}
+  tags:
+    - issue-45
+    - ptr-sweep
+    - pointer-head
+    - mlp-backbone
+  notes: >-
+    Pointer-transfer sweep: PointerPolicyHead over per-option tokens on the MLP
+    trunk. Tests whether the only effect transformer-diagnosis-45 found needs
+    attention at all, or is a head change available at 1068 fps.

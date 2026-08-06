@@ -136,3 +136,72 @@ def test_build_actor_critic_attaches_adapter(
     out = actor_critic(obs)
     assert out["logits"].shape == (4, N_ACTIONS)
     assert out["state_value"].shape == (4, 1)
+
+
+# ── Option validity (finding 8 / A1) ────────────────────────────────────────
+
+
+def test_yes_no_option_without_card_id_is_valid(adapter, structured_obs_spec) -> None:
+    """
+    A yes/no/end-turn option has ``cats[..., 0]`` set but ``card_id`` stays 0;
+    the pooled ``options`` vector must not be all-zero and the entity token
+    must be marked valid (finding 8: ``card_id``-based validity treated this
+    as padding, so a yes/no/end-turn-only selection pooled to exactly zero).
+    """
+    obs = _zero_obs(structured_obs_spec, batch=1)
+    obs[("observation", "options", "cats")][0, 0, 0] = 1
+    inputs = _adapter_inputs(obs)
+
+    options_index = DEFAULT_IN_KEYS.index(("observation", "options"))
+    pooled_options = adapter.encode_groups(*inputs)[options_index]
+    assert torch.any(pooled_options != 0.0)
+
+    tokens = adapter.encode_entity_tokens(*inputs, groups=["options"])
+    _, validity = tokens["options"]
+    assert bool(validity[0, 0])
+
+
+def test_stop_slot_is_always_valid_in_option_tokens(adapter, structured_obs_spec) -> None:
+    """
+    The synthetic stop slot (the option table's last row) is valid even with
+    zero real options, so a pointer head always has at least one legal token
+    to attend to.
+    """
+    obs = _zero_obs(structured_obs_spec, batch=2)
+    tokens = adapter.encode_entity_tokens(*_adapter_inputs(obs), groups=["options"])
+    _, validity = tokens["options"]
+    assert torch.all(validity[:, -1])
+    assert not torch.any(validity[:, :-1])  # no real option was set
+
+
+# ── Segment identity (finding 1 / A2) ───────────────────────────────────────
+
+
+def test_group_segment_ids_seat_zone_and_stop_slot(adapter, structured_obs_spec) -> None:
+    """
+    Pins the exact segment id layout the class docstring promises: seat for
+    ``pokemon``, one id per zone for ``my``, and real-vs-stop for ``options``.
+    """
+    segment_ids = adapter.group_segment_ids
+
+    rows = structured_obs_spec[("observation", "pokemon", "card_id")].shape[-1]
+    pokemon_segments = segment_ids["pokemon"]
+    assert pokemon_segments.shape == (rows,)
+    assert torch.all(pokemon_segments[: rows // 2] == 0)
+    assert torch.all(pokemon_segments[rows // 2 :] == 1)
+
+    hand_cap = structured_obs_spec[("observation", "my", "hand_ids")].shape[-1]
+    discard_cap = structured_obs_spec[("observation", "my", "discard_ids")].shape[-1]
+    my_segments = segment_ids["my"]
+    assert torch.all(my_segments[:hand_cap] == 0)
+    assert torch.all(my_segments[hand_cap : hand_cap + discard_cap] == 1)
+    assert torch.all(my_segments[hand_cap + discard_cap :] == 2)
+
+    option_segments = segment_ids["options"]
+    assert torch.all(option_segments[:-1] == 0)
+    assert option_segments[-1] == 1
+
+    # globals/select_cats have no entity axis and are absent from the dict,
+    # unlike group_slot_counts, which records 1 for them.
+    assert "globals" not in segment_ids
+    assert "select_cats" not in segment_ids

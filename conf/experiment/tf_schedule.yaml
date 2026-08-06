@@ -1,0 +1,28 @@
+# @package _global_
+# Diagnosis arm: learning-rate and entropy schedules.
+#
+# lr=3e-4 constant was tuned for the MLP. A post-LN transformer is the variant
+# that conventionally needs warmup; PPOTrainer implements annealing but no
+# warmup, so the closest available substitute is a lower constant start plus a
+# linear decay. Pair with +experiment=tf_preln to test the other half of the
+# same hypothesis (pre-LN removes the warmup requirement outright).
+#
+# ent_anneal holds entropy_coeff for ent_warm_frac of training then decays it
+# to 0. The reference run's entropy sat at ~1.0 nats and barely moved, so the
+# policy stayed stochastic throughout — under self-play that leaves it
+# exploitable by its own snapshots late in the run.
+agent:
+  lr: 1.0e-4
+  lr_anneal: true
+  ent_anneal: true
+  ent_warm_frac: 0.5
+
+wandb:
+  name: tf-schedule-s42
+  tags:
+    - issue-45
+    - tf-diagnosis
+    - schedule
+  notes: >-
+    Transformer diagnosis: lr 3e-4 -> 1e-4 with linear decay, plus entropy
+    annealing after 50% of training.

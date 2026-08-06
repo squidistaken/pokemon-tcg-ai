@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 
+from src.hydra_resolvers import register_resolvers
 from src.policies.greedy_policy_opponent import load_actor_critic
 from src.policies.ppo_actor import build_ppo_operator
 from src.training import (
@@ -16,6 +17,8 @@ from src.training import (
 )
 
 load_dotenv(Path(__file__).parents[1] / ".env", override=False)
+# Before Hydra composes anything: the run directory interpolates ${run_uid:}.
+register_resolvers()
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="eval_deck_field")

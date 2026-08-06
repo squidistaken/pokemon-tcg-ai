@@ -1,0 +1,62 @@
+# @package _global_
+# Diagnosis arm: every change at once — the "does any of this help?" probe.
+#
+# Deliberately confounded, and that is the point. The single-change arms
+# attribute an effect; this one asks whether there is an effect worth
+# attributing before eight arms of budget go into isolating it. If this loses
+# to the reference run, the problem is not on this list.
+#
+# Run it first if you only have room for one job.
+#
+# What this run could not have tested (found after the fact, fixed since —
+# see docs/architecture/transformer-diagnosis-45.md's "what changed since"
+# note). It inherits both defects the single-change arms hit separately:
+# `token_groups: [pokemon]` was seat-blind (swapping the two players' pokemon
+# rows left `state_repr` bit-identical, see tf_tokens.yaml's note) and
+# `option_tokens: true` gave the stop slot a representation identical to
+# padding (same logit, 0.056268, for both — see tf_pointer.yaml's note), on
+# top of the pooled `options` vector going exactly zero on yes/no/end-only
+# turns. Both are fixed now (unconditional segment embeddings; option
+# validity is `cats[..., 0] != 0` plus an always-true stop slot). There is no
+# single re-run of this exact "everything at once" arm in the ptr_* sweep —
+# it deliberately decomposes into ptr_tf_pointer, ptr_tf_capacity,
+# ptr_tf_entities and ptr_tf_setattn instead, each isolating one change on
+# the pointer baseline rather than repeating an eight-way confound.
+defaults:
+  - override /model/head: pointer_dot
+
+agent:
+  # 4 -> 64 optimizer steps per collected batch (tf_subbatch).
+  sub_batch_size: 256
+  # Lower start, linear decay, entropy annealed after halfway (tf_schedule).
+  lr: 1.0e-4
+  lr_anneal: true
+  ent_anneal: true
+  ent_warm_frac: 0.5
+
+model:
+  backbone:
+    # Depth comparable to the MLP control (tf_capacity).
+    num_layers: 2
+    ff_dim: 512
+    # Trains without the warmup post-LN would need (tf_preln).
+    norm_first: true
+    final_norm: true
+    # Query the sequence instead of averaging it (tf_pooling).
+    pooling: cls
+    # Attention over individual Pokemon (tf_tokens).
+    token_groups: [pokemon]
+    # Per-option tokens for the pointer head (tf_pointer).
+    option_tokens: true
+
+wandb:
+  name: tf-combined-s42
+  tags:
+    - issue-45
+    - tf-diagnosis
+    - combined
+  notes: >-
+    Transformer diagnosis: all arms stacked (sub_batch 256, lr 1e-4 annealed,
+    entropy annealed, 2 layers, ff_dim 512, pre-LN + final norm, CLS readout,
+    per-entity pokemon tokens, pointer head). Confounded by design — an
+    upper-bound probe, not an attribution.
