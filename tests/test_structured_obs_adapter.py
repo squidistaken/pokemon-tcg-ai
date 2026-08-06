@@ -86,6 +86,33 @@ def test_zone_pooling_is_permutation_invariant(adapter, structured_obs_spec) -> 
     assert not torch.allclose(encoded_a, encoded_c)
 
 
+def test_card_categories_reach_the_representation(adapter) -> None:
+    """
+    Regression test: card type/energy type/weakness/resistance were computed
+    by ``CardDatabase`` but never read, so mutating them used to have no
+    effect on ``_card_repr``. It must now.
+    """
+    card_id = torch.tensor([5])
+    before = adapter._card_repr(card_id).clone()  # noqa: SLF001
+    adapter._card_categories[5] = (adapter._card_categories[5] + 1) % 60  # noqa: SLF001
+    after = adapter._card_repr(card_id)  # noqa: SLF001
+    assert not torch.allclose(before, after)
+
+
+def test_card_attacks_reach_the_representation(adapter) -> None:
+    """
+    Regression test: a card's usable attacks were computed by
+    ``CardDatabase`` but never pooled into its representation, so mutating
+    them used to have no effect on ``_card_repr``. It must now.
+    """
+    card_id = torch.tensor([5])
+    before = adapter._card_repr(card_id).clone()  # noqa: SLF001
+    current = adapter._card_attack_ids[5, 0].item()  # noqa: SLF001
+    adapter._card_attack_ids[5, 0] = 1 if current != 1 else 2  # noqa: SLF001
+    after = adapter._card_repr(card_id)  # noqa: SLF001
+    assert not torch.allclose(before, after)
+
+
 def test_padding_card_id_encodes_to_constant(adapter, structured_obs_spec) -> None:
     """
     ID 0 (none/padding) contributes the same fixed representation on every

@@ -515,7 +515,7 @@ class StructuredObsAdapter(nn.Module):
 
     _card_static: torch.Tensor
     _attack_static: torch.Tensor
-    _card_cats: torch.Tensor
+    _card_categories: torch.Tensor
     _card_attack_ids: torch.Tensor
     _select_category_offsets: torch.Tensor
     _option_category_offsets: torch.Tensor
@@ -585,11 +585,11 @@ class StructuredObsAdapter(nn.Module):
         self._emit_option_tokens = emit_option_tokens
         card_static = state_dict["backbone.adapter._card_static"]
         attack_static = state_dict["backbone.adapter._attack_static"]
-        card_cats = state_dict["backbone.adapter._card_cats"]
+        card_categories = state_dict["backbone.adapter._card_categories"]
         card_attack_ids = state_dict["backbone.adapter._card_attack_ids"]
         self.register_buffer("_card_static", torch.zeros_like(card_static))
         self.register_buffer("_attack_static", torch.zeros_like(attack_static))
-        self.register_buffer("_card_cats", torch.zeros_like(card_cats))
+        self.register_buffer("_card_categories", torch.zeros_like(card_categories))
         self.register_buffer("_card_attack_ids", torch.zeros_like(card_attack_ids))
         self.register_buffer(
             "_select_category_offsets",
@@ -756,7 +756,7 @@ class StructuredObsAdapter(nn.Module):
             [
                 self._card_embedding(card_ids),
                 self._card_static[card_ids],
-                self._embed_categories(self._card_cats[card_ids], self._card_category_offsets),
+                self._embed_categories(self._card_categories[card_ids], self._card_category_offsets),
                 self._masked_mean(self._attack_repr(attack_ids), attack_ids != 0),
             ],
             dim=-1,

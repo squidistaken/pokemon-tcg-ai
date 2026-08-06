@@ -22,7 +22,7 @@ class StructuredObsAdapter(nn.Module):
 
     ── card IDs (context_card_ids, stadium_id, every card in a zone) ──
         ID → nn.Embedding(8, padding_idx=0) + static features(12)
-           + card_cats(4 fields, Embed(4) each) + pooled attack_repr(22) → [58]
+           + card_categories(4 fields, Embed(4) each) + pooled attack_repr(22) → [58]
         [58] → Linear(58→entity_dim) → [entity_dim]
 
     ── table rows (options, pokemon) ──
@@ -159,7 +159,7 @@ class StructuredObsAdapter(nn.Module):
     #: types them as ``Tensor | Module``, which drops shape/operator info.
     _card_static: torch.Tensor
     _attack_static: torch.Tensor
-    _card_cats: torch.Tensor
+    _card_categories: torch.Tensor
     _card_attack_ids: torch.Tensor
     _select_category_offsets: torch.Tensor
     _option_category_offsets: torch.Tensor
@@ -223,7 +223,7 @@ class StructuredObsAdapter(nn.Module):
         database = card_database if card_database is not None else CardDatabase()
         card_static = database.card_features
         attack_static = database.attack_features
-        card_cats = database.card_cats
+        card_categories = database.card_cats
         card_attack_ids = database.card_attack_ids
         self.register_buffer(
             "_card_static", card_static / card_static.abs().amax(dim=0).clamp(min=1.0)
@@ -231,7 +231,7 @@ class StructuredObsAdapter(nn.Module):
         self.register_buffer(
             "_attack_static", attack_static / attack_static.abs().amax(dim=0).clamp(min=1.0)
         )
-        self.register_buffer("_card_cats", card_cats)
+        self.register_buffer("_card_categories", card_categories)
         self.register_buffer("_card_attack_ids", card_attack_ids)
         self._attack_repr_dim = attack_embed_dim + attack_static.shape[1]
         self._card_repr_dim = (
@@ -718,7 +718,7 @@ class StructuredObsAdapter(nn.Module):
             [
                 self._card_embedding(card_ids),
                 self._card_static[card_ids],
-                self._embed_categories(self._card_cats[card_ids], self._card_category_offsets),
+                self._embed_categories(self._card_categories[card_ids], self._card_category_offsets),
                 self._masked_mean(self._attack_repr(attack_ids), attack_ids != 0),
             ],
             dim=-1,
