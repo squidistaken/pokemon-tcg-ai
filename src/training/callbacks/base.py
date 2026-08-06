@@ -53,13 +53,30 @@ class TrainingCallback(ABC):
         :param metrics: Evaluation metrics (e.g. win rate against a baseline).
         """
 
+    # Deliberately concrete and empty, not abstract: adding a required hook
+    # would break every existing backend for a signal most of them have no use
+    # for, and ignoring a failure is the correct default.
+    def on_train_error(self, error: BaseException) -> None:  # noqa: B027
+        """
+        Called when training is ending because of an unhandled exception.
+
+        Always followed by :meth:`on_train_end`, so this is where a backend
+        records *that* the run failed while the summary hook stays the single
+        teardown path. Deliberately concrete rather than abstract: a backend
+        with no notion of failure needs no code, and the default is to ignore
+        it.
+
+        :param error: The exception that ended the run.
+        """
+
     @abstractmethod
     def on_train_end(self, summary: Mapping[str, float]) -> None:
         """
         Called once after the last rollout, including on failure.
 
         The teardown hook (closing files, finishing runs). Must tolerate being
-        called after :meth:`on_train_start` raised or never ran.
+        called after :meth:`on_train_start` raised or never ran, and after
+        :meth:`on_train_error`.
 
         :param summary: Aggregate statistics for the whole run.
         """
@@ -140,6 +157,14 @@ class CallbackList(TrainingCallback):
         :param metrics: Evaluation metrics.
         """
         self._dispatch("on_eval_end", step, metrics)
+
+    def on_train_error(self, error: BaseException) -> None:
+        """
+        Forward the failure to every member.
+
+        :param error: The exception that ended the run.
+        """
+        self._dispatch("on_train_error", error)
 
     def on_train_end(self, summary: Mapping[str, float]) -> None:
         """

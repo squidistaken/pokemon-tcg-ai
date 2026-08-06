@@ -17,6 +17,10 @@ defaults:
 seed: 42
 set_seed: false
 
+# Multi-deck training and evaluation both use this corpus under paths.data_dir.
+# Override with deck_corpus=mapping-resolved for the explicit-mapper experiment.
+deck_corpus: heuristic-resolved
+
 # W&B run settings, read by conf/callbacks/wandb.yaml. Kept at the top level so
 # a run is labelled with `wandb.group=...` regardless of which callbacks group
 # is selected; under `callbacks=none` these are simply unused.

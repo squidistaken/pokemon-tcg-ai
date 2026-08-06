@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -495,6 +496,23 @@ def test_deck_labels_prefer_manifest_archetype() -> None:
     labels = _deck_labels(paths)
     assert len(labels) == len(paths)
     assert all(isinstance(label, str) and label for label in labels)
+
+
+def test_deck_labels_read_versioned_strategy_manifest(tmp_path: Path) -> None:
+    archetype_dir = tmp_path / "fallback-folder"
+    archetype_dir.mkdir()
+    deck = archetype_dir / "resolved-list.csv"
+    deck.write_text("\n".join("1" for _ in range(60)))
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "decks": {"resolved-list": {"archetype": "Manifest Archetype"}},
+            }
+        )
+    )
+
+    assert _deck_labels([str(deck)]) == ["Manifest Archetype"]
 
 
 def test_limit_pool_width_keeps_exactly_n_archetypes(tmp_path: Path) -> None:

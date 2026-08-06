@@ -4,13 +4,15 @@ multirun
 checkpoints
 submissions
 wandb
-slurm-conf/logs/
+slurm-conf/logs/*
+!slurm-conf/logs/.gitkeep
 /logs/
 .vscode
 
 # Decks
 /decks/*
 !/decks/example.csv
+/decks-intermediate-*/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

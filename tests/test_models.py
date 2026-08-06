@@ -6,7 +6,13 @@ from omegaconf import DictConfig, OmegaConf
 from tensordict import TensorDict
 from torchrl.data import Composite
 
-from src.models import LinearPolicyHead, MLPBackbone, TransformerBackbone, ValueHead
+from src.models import (
+    LinearPolicyHead,
+    MLPBackbone,
+    PointerHead,
+    TransformerBackbone,
+    ValueHead,
+)
 from src.models.backbone import activation_class
 from src.models.heads import PointerPolicyHead
 from src.models.structured_obs_adapter import StructuredObsAdapter
@@ -424,15 +430,84 @@ def test_encode_entity_tokens_rejects_scalar_groups(structured_obs_spec) -> None
         adapter.encode_entity_tokens(*inputs, groups=["nonexistent"])
 
 
-def test_incompatible_head_backbone_raises(
-        monkeypatch, structured_model_cfg, structured_obs_spec, action_spec
+def test_pointer_head_without_structured_groups_raises(
+        pointer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
-    Pairing an option-requiring head with an option-less backbone is rejected.
+    A pointer head over a non-structured observation is rejected.
+
+    Token emission is derived from the chosen head, so a config *can no longer*
+    pair a pointer head with an adapter that withholds tokens. The one
+    remaining mismatch is a backbone whose in_keys name no structured group at
+    all, leaving no adapter to produce them.
     """
-    monkeypatch.setattr(LinearPolicyHead, "requires_option_repr", True, raising=False)
+    pointer_model_cfg.model.backbone.in_keys = [["observation", "globals"]]
     with pytest.raises(ValueError, match="per-option tokens"):
-        build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+        build_actor_critic(pointer_model_cfg, structured_obs_spec, action_spec)
+
+
+def test_pointer_head_is_permutation_equivariant(
+        pointer_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    Reordering the option rows reorders the logits to match.
+
+    This is the property the flat head lacks: it reads the option table only
+    through a permutation-invariant mean, so its logits are unchanged by a
+    permutation while the correct action moves, leaving slot index the only
+    thing it can learn.
+    """
+    actor_critic = build_actor_critic(pointer_model_cfg, structured_obs_spec, action_spec)
+    n_options = 5
+    obs = _dummy_obs(structured_obs_spec, batch=1)
+    obs[("observation", "options", "card_id")][:, :n_options] = torch.arange(1, n_options + 1)
+
+    original = actor_critic.policy_logits(obs)[0]
+    permutation = torch.tensor([4, 1, 0, 3, 2])
+    reordered = obs.clone()
+    options = cast(TensorDict, reordered[("observation", "options")])
+    index = torch.arange(options["card_id"].shape[-1])
+    index[:n_options] = permutation
+    for leaf in list(options.keys(include_nested=True, leaves_only=True)):
+        options.set(leaf, options.get(leaf)[:, index])
+    permuted = actor_critic.policy_logits(reordered)[0]
+
+    assert torch.allclose(original[:n_options][permutation], permuted[:n_options], atol=1e-5)
+    assert torch.allclose(original[-1], permuted[-1], atol=1e-5)
+
+
+def test_flat_head_is_permutation_invariant(
+        structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    The flat baseline's logits do *not* follow a permutation of the options.
+
+    Pinned deliberately: this is the defect the pointer heads exist to fix, and
+    a regression here would mean the two had silently converged.
+    """
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    n_options = 5
+    obs = _dummy_obs(structured_obs_spec, batch=1)
+    obs[("observation", "options", "card_id")][:, :n_options] = torch.arange(1, n_options + 1)
+
+    original = actor_critic.policy_logits(obs)[0]
+    reordered = obs.clone()
+    options = cast(TensorDict, reordered[("observation", "options")])
+    index = torch.arange(options["card_id"].shape[-1])
+    index[:n_options] = torch.tensor([4, 1, 0, 3, 2])
+    for leaf in list(options.keys(include_nested=True, leaves_only=True)):
+        options.set(leaf, options.get(leaf)[:, index])
+
+    assert torch.allclose(original, actor_critic.policy_logits(reordered)[0], atol=1e-6)
+
+
+def test_pointer_head_requires_option_tokens() -> None:
+    """
+    Calling the pointer head without option tokens fails loudly.
+    """
+    head = PointerHead(in_features=8, n_actions=5, option_dim=6, num_cells=[8])
+    with pytest.raises(ValueError, match="requires per-option tokens"):
+        head(torch.randn(2, 8), None)
 
 
 # ── Entity identity (finding 1 / A2) ────────────────────────────────────────

@@ -15,12 +15,24 @@ class MLPBackbone(Backbone):
     Turns every input into a per-sample feature vector, concatenates them
     along the last dimension, and runs the result through a fully-connected
     stack. This is the honest control every richer (per-option-token)
-    backbone must beat. By default it emits no per-option tokens
-    (:attr:`produces_option_repr` is False) and pairs with
-    :class:`~src.models.heads.LinearPolicyHead`; set ``option_tokens=True`` to
-    also emit ``option_repr`` and pair with
-    :class:`~src.models.heads.PointerPolicyHead` instead — the pointer head's
-    gain, if any, without paying the transformer's attention cost.
+    backbone must beat.
+
+    **Option tokens.** There are two ways this trunk can come to emit
+    ``option_repr`` for a pointer head, and it never does both:
+
+    - the attached adapter was built with ``emit_option_tokens``, in which case
+      its per-option encodings pass through untouched at ``adapter.
+      option_token_dim`` — no extra parameters, and the configuration the
+      pointer head's win was measured in (``docs/architecture/pointer-head.md``);
+    - ``option_tokens=True`` here, which projects them to :attr:`out_features`
+      and adds a stop-slot segment embedding, matching what
+      :class:`~src.models.transformer.TransformerBackbone` does.
+
+    With neither, it emits no tokens (:attr:`produces_option_repr` is False)
+    and pairs with :class:`~src.models.heads.LinearPolicyHead`. Either token
+    path pairs with either pointer head;
+    :func:`~src.policies.ppo_actor.build_actor_critic` sizes the head from
+    :attr:`option_repr_dim` so the widths cannot drift apart.
 
     With a :class:`~src.models.structured_obs_adapter.StructuredObsAdapter`
     attached (the standard pairing, wired by
@@ -64,15 +76,24 @@ class MLPBackbone(Backbone):
             :attr:`~src.models.structured_obs_adapter.StructuredObsAdapter.group_segment_ids`).
             Sets :attr:`produces_option_repr`. Requires an ``adapter`` built
             with ``entity_dim`` set (the default) and an ``options`` group.
+            Mutually exclusive with an adapter built with
+            ``emit_option_tokens``, which supplies the same tokens unprojected.
         :raises ValueError: If the adapter's output width disagrees with
-            ``input_dim``, or ``option_tokens`` is set without a usable
-            adapter.
+            ``input_dim``, ``option_tokens`` is set without a usable adapter,
+            or both option-token sources are configured at once.
         """
         super().__init__(in_keys=in_keys or ["observation"], out_features=out_features)
         if adapter is not None and adapter.out_features != input_dim:
             raise ValueError(
                 f"Adapter produces {adapter.out_features} features but the MLP expects "
                 f"input_dim={input_dim}."
+            )
+        adapter_emits = bool(adapter is not None and getattr(adapter, "emits_option_tokens", False))
+        if option_tokens and adapter_emits:
+            raise ValueError(
+                "option_tokens=True and an adapter built with emit_option_tokens both "
+                "supply option_repr; pick one. The adapter's tokens pass through at "
+                "entity_dim, this backbone's are projected to out_features."
             )
         if option_tokens and adapter is None:
             raise ValueError(
@@ -96,7 +117,14 @@ class MLPBackbone(Backbone):
         self.input_dim = input_dim
         self.adapter = adapter
         self.option_tokens = bool(option_tokens)
-        self.produces_option_repr = self.option_tokens
+        #: Whether the tokens arrive from the adapter's own forward instead of
+        #: being built here. The MLP never looks at them either way: it sees
+        #: only the pooled state vector and passes the table through.
+        self.adapter_option_tokens = adapter_emits
+        # Instance-level override of the class default: whether this trunk emits
+        # per-option tokens is a property of how it was wired, not of the
+        # backbone type.
+        self.produces_option_repr = self.option_tokens or self.adapter_option_tokens
         self.mlp = MLP(
             in_features=input_dim,
             out_features=out_features,
@@ -116,6 +144,20 @@ class MLPBackbone(Backbone):
             )
             nn.init.normal_(self.option_segment_embedding, std=0.02)
 
+    @property
+    def option_repr_dim(self) -> int:
+        """
+        Width of one emitted option token.
+
+        :return: :attr:`out_features` when this backbone projects the tokens
+            itself, or the adapter's untouched encoding width when they pass
+            through from ``emit_option_tokens``.
+        :raises ValueError: If this backbone emits no option tokens.
+        """
+        if self.adapter_option_tokens:
+            return int(cast(nn.Module, self.adapter).option_token_dim)
+        return super().option_repr_dim
+
     def forward(self, *inputs: torch.Tensor | TensorDictBase):
         """
         Vectorize, concatenate and encode the inputs into ``state_repr``.
@@ -125,14 +167,18 @@ class MLPBackbone(Backbone):
             tensordict group handed to the adapter (or naively flattened
             leaf by leaf when no adapter is attached).
         :return: ``state_repr`` of shape ``(*batch, out_features)``, or a
-            ``(state_repr, option_repr)`` pair when :attr:`option_tokens` is
-            set, with ``option_repr`` shaped ``(*batch, n_slots, out_features)``.
+            ``(state_repr, option_repr)`` pair when option tokens are wired,
+            with ``option_repr`` shaped
+            ``(*batch, n_slots, option_repr_dim)``.
         """
         if len(inputs) != len(self.in_keys):
             raise ValueError(
                 f"MLPBackbone expected {len(self.in_keys)} inputs for keys "
                 f"{self.in_keys}, got {len(inputs)}."
             )
+        if self.adapter_option_tokens:
+            state_features, adapter_tokens = cast(nn.Module, self.adapter)(*inputs)
+            return self.mlp(state_features), adapter_tokens
         if self.adapter is not None:
             state_repr = self.mlp(self.adapter(*inputs))
         else:

@@ -28,7 +28,7 @@
 # if that shows up as a plateau against first_snapshot while eval/random keeps
 # climbing.
 defaults:
-  - override /model/head: pointer
+  - override /model/head: pointer_dot
 
 model:
   backbone:

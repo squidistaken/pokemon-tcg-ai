@@ -38,7 +38,7 @@
 # -7% fps then, and remeasured since at 1.90 ms -> 2.30 ms unbatched CPU
 # forward (MLP: 1.53 ms) — see conf/model/backbone/transformer.yaml.
 defaults:
-  - override /model/head: pointer
+  - override /model/head: pointer_dot
 
 model:
   backbone:

@@ -23,7 +23,7 @@
 # ptr_tf_entities and ptr_tf_setattn instead, each isolating one change on
 # the pointer baseline rather than repeating an eight-way confound.
 defaults:
-  - override /model/head: pointer
+  - override /model/head: pointer_dot
 
 agent:
   # 4 -> 64 optimizer steps per collected batch (tf_subbatch).

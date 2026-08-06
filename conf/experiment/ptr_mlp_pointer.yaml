@@ -28,7 +28,7 @@
 # `model/backbone=mlp` as a plain CLI group swap instead, same as
 # ptr_mlp_linear.yaml — run_ptr_sweep.sh does this for both MLP arms.
 defaults:
-  - override /model/head: pointer
+  - override /model/head: pointer_dot
 
 model:
   backbone:

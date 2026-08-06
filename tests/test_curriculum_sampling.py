@@ -154,6 +154,54 @@ def test_sampler_deals_from_the_drawn_archetypes() -> None:
         assert deck1[0] in index.decks_for(0)
 
 
+def test_explore_prob_bypasses_the_published_distribution() -> None:
+    """
+    With explore_prob=1, every draw must ignore the published distribution.
+
+    This is the mechanism that lets an oversized corpus keep discovering
+    matchups the learner has never published, instead of the sampler being
+    stuck replaying whatever it happened to draw before the first publish.
+    """
+    index = make_index({"a": 1, "b": 1, "c": 1})
+    handles = CurriculumHandles.allocate(CAPACITY)
+    published = index.pair_id(0, 1)
+    handles.publish(torch.tensor([published]), torch.tensor([1.0]))
+    sampler = CurriculumDeckSampler([DECK] * 3, index, handles, seed=0, explore_prob=1.0)
+
+    seen = set()
+    for _ in range(50):
+        sampler.sample()
+        seen.add(sampler.level_id)
+
+    assert seen != {published}, "explore_prob=1 must not always reproduce the published draw"
+
+
+def test_explore_prob_zero_matches_prior_behaviour() -> None:
+    """
+    The default must draw only from the published distribution, unchanged.
+    """
+    index = make_index({"a": 2, "b": 2, "c": 2})
+    handles = CurriculumHandles.allocate(CAPACITY)
+    wanted = index.pair_id(0, 2)
+    handles.publish(torch.tensor([wanted]), torch.tensor([1.0]))
+    sampler = CurriculumDeckSampler([DECK] * 6, index, handles, seed=0, explore_prob=0.0)
+
+    for _ in range(20):
+        sampler.sample()
+        assert sampler.level_id == wanted
+
+
+def test_explore_prob_rejects_out_of_range_values() -> None:
+    """
+    A probability outside [0, 1] is a construction-time mistake.
+    """
+    index = make_index({"a": 1, "b": 1})
+    handles = CurriculumHandles.allocate(CAPACITY)
+
+    with pytest.raises(ValueError, match="explore_prob"):
+        CurriculumDeckSampler([DECK] * 2, index, handles, explore_prob=1.5)
+
+
 def test_sampler_follows_a_republished_distribution() -> None:
     """
     A worker must pick up the learner's next distribution, not cache the first.

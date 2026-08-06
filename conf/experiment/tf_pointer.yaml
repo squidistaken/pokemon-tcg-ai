@@ -30,7 +30,7 @@
 # and from padding. See conf/experiment/ptr_tf_pointer.yaml, the same config
 # with both fixes, re-run at 3 seeds.
 defaults:
-  - override /model/head: pointer
+  - override /model/head: pointer_dot
 
 model:
   backbone:

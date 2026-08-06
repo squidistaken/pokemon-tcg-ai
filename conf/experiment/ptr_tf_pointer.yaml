@@ -15,7 +15,7 @@
 #
 # Cell (transformer, pointer) of the 2x2 backbone x head factorial.
 defaults:
-  - override /model/head: pointer
+  - override /model/head: pointer_dot
 
 model:
   backbone:

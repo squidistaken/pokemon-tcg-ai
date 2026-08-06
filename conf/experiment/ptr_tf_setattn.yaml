@@ -43,7 +43,7 @@
 #     not encoded_option_repr) at construction rather than letting it run
 #     silently wrong.
 defaults:
-  - override /model/head: pointer
+  - override /model/head: pointer_dot
 
 model:
   backbone:

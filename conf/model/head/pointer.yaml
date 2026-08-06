@@ -1,9 +1,24 @@
-# Pointer head: one logit per option, scored from that option's own token
-# rather than from the pooled state (see src/models/heads.py). in_features and
-# n_actions are injected by build_actor_critic from the specs.
+# Per-option scoring head: one shared MLP scores every action slot from
+# [state_repr, option_repr_i], so the logit for a slot depends on what that
+# option *is* rather than on its index.
 #
-# Needs a backbone that emits option_repr — with the transformer trunk that
-# means `model.backbone.option_tokens=true`. build_actor_critic raises a clear
-# error if the pairing is wrong, so a mismatch fails at construction rather
-# than at the first forward.
-_target_: src.models.heads.PointerPolicyHead
+# This is the head the structured observation was built for. The flat
+# alternative (model/head=linear) reads only the pooled state, and because the
+# option table reaches it as a permutation-invariant mean it can represent
+# nothing beyond a prior over slot indices -- measurably a ceiling, not a
+# tuning problem (docs/architecture/pointer-head.md: 0.922 against the flat
+# head's 0.825, same task, same budget, same seed).
+#
+# Requires option tokens. build_actor_critic switches them on automatically for
+# this head: from the adapter by default, or from the trunk itself when the
+# backbone sets option_tokens (see model/backbone/transformer.yaml). in_features,
+# n_actions and option_dim are all injected there, the last from the backbone's
+# option_repr_dim, so the head cannot be sized against the wrong token width.
+#
+# model/head=pointer_dot is the cheaper alternative: a scaled dot product per
+# slot instead of an MLP, scoring the stop row directly rather than branching.
+_target_: src.models.heads.PointerHead
+# Hidden widths of the shared scorer. Kept small: it is applied once per option
+# slot per forward pass, so width here costs more than width in the trunk.
+num_cells: [128, 128]
+activation: tanh
