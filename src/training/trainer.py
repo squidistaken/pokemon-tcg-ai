@@ -24,6 +24,27 @@ logger = logging.getLogger(__name__)
 # formatted generically.
 _CORE_METRICS = ("frames", "episodes", "win_rate", "draw_rate", "fps")
 
+# Substrings torchrl uses when a ParallelEnv worker process has died. The
+# engine aborts the process outright on some card interactions (a C++
+# std::runtime_error crossing the extern "C" boundary calls std::terminate), so
+# this is not an exception the environment can catch -- the worker is simply
+# gone, and the collector reports it as one of these.
+_WORKER_DEATH_SIGNATURES = (
+    "worker",
+    "At least one process failed",
+)
+
+
+def _is_worker_death(error: BaseException) -> bool:
+    """
+    Whether a collector error is a dead environment worker rather than a bug.
+
+    :param error: Exception raised while iterating the collector.
+    :return: True if the message matches torchrl's worker-death reports.
+    """
+    message = str(error)
+    return any(signature in message for signature in _WORKER_DEATH_SIGNATURES)
+
 
 @contextmanager
 def _deferred_interrupt() -> Generator[None, None, None]:
@@ -78,6 +99,7 @@ class Trainer(BaseTrainer):
             run_config: Mapping[str, Any] | None = None,
             evaluator: Evaluator | MultiEvaluator | None = None,
             eval_interval: int = 0,
+            max_collector_restarts: int = 10,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -100,6 +122,14 @@ class Trainer(BaseTrainer):
             collected win-rate is pinned near 0.5 by construction.
         :param eval_interval: Frames between evaluations; ``0`` disables them
             even when an evaluator is supplied.
+        :param max_collector_restarts: How many times a dead environment worker
+            may be recovered from by rebuilding the collector and carrying on.
+            The learner (model, optimizer, curriculum, frame counter) lives in
+            this process and is untouched by a worker dying, so the only cost
+            is the in-flight batch and a few seconds of fork time. This is a
+            budget for the whole run, not per occurrence, so a permanently
+            broken environment still fails instead of restarting forever.
+            ``0`` restores the previous behaviour of dying on the first one.
         """
         self._env_factories = env_factories
         self._policy = policy
@@ -112,6 +142,7 @@ class Trainer(BaseTrainer):
         self._run_config = run_config if run_config is not None else {}
         self._evaluator = evaluator
         self._eval_interval = eval_interval
+        self._max_collector_restarts = max_collector_restarts
 
     def train(self) -> dict[str, float]:
         """
@@ -120,67 +151,148 @@ class Trainer(BaseTrainer):
         :return: Aggregate statistics: frames, episodes, win/draw rate and fps,
             covering the frames collected before any interruption.
         """
-        # Opt out of torchrl's automatic policy-transform registration: env
-        # transforms are managed explicitly by the env factories, and the
-        # policies used here read "action_mask" directly without needing the
-        # InitTracker transform the collector's heuristic would append.
-        collector = Collector(
-            create_env_fn=self._make_vec_env(),
-            policy=self._policy,
-            frames_per_batch=self._frames_per_batch,
-            total_frames=self._total_frames,
-            auto_register_policy_transforms=False,
-            **self._collector_kwargs(),
-        )
         frames = 0
         episodes = 0
         wins = 0
         draws = 0
         last_eval_frames = 0
         start_time = time.time()
+        collector: Collector | None = None
+        restarts_left = self._max_collector_restarts
         try:
             self._callbacks.on_train_start(self._run_config)
             with tqdm(total=self._total_frames, unit="frame") as progress_bar:
-                for data in collector:
-                    self._callbacks.on_rollout_start(frames)
-                    assert isinstance(data, TensorDict)
-                    batch_frames = data.numel()
-                    frames += batch_frames
-                    done = cast(Tensor, data["next", "done"]).reshape(-1)
-                    final_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[done]
-                    episodes += int(done.sum())
-                    wins += int((final_rewards > 0).sum())
-                    draws += int((final_rewards == 0).sum())
-                    
-                    # Perform update step (return surrgate loss)
-                    losses = self._update(data)
-                    
-                    metrics = self._metrics(
-                        frames, episodes, wins, draws, time.time() - start_time, losses
-                    )
-                    progress_bar.update(batch_frames)
-                    self._log_progress(progress_bar, metrics)
-                    self._callbacks.on_rollout_end(frames, metrics)
-                    if self._should_evaluate(frames, last_eval_frames):
-                        last_eval_frames = frames
-                        assert self._evaluator is not None
-                        self._callbacks.on_eval_end(
-                            frames, self._evaluator.evaluate(self._policy)
+                while frames < self._total_frames:
+                    # Only children this collector starts are ours to reap if it
+                    # dies; anything already running (e.g. the W&B service) is not.
+                    preexisting = {child.pid for child in torch_mp.active_children()}
+                    collector = self._make_collector(self._total_frames - frames)
+                    try:
+                        for data in collector:
+                            self._callbacks.on_rollout_start(frames)
+                            assert isinstance(data, TensorDict)
+                            batch_frames = data.numel()
+                            frames += batch_frames
+                            done = cast(Tensor, data["next", "done"]).reshape(-1)
+                            final_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[done]
+                            episodes += int(done.sum())
+                            wins += int((final_rewards > 0).sum())
+                            draws += int((final_rewards == 0).sum())
+
+                            losses = self._update(data)
+
+                            metrics = self._metrics(
+                                frames, episodes, wins, draws, time.time() - start_time, losses
+                            )
+                            progress_bar.update(batch_frames)
+                            self._log_progress(progress_bar, metrics)
+                            self._callbacks.on_rollout_end(frames, metrics)
+                            if self._should_evaluate(frames, last_eval_frames):
+                                last_eval_frames = frames
+                                assert self._evaluator is not None
+                                self._callbacks.on_eval_end(
+                                    frames, self._evaluator.evaluate(self._policy)
+                                )
+                    except RuntimeError as error:
+                        if restarts_left <= 0 or not _is_worker_death(error):
+                            raise
+                        restarts_left -= 1
+                        logger.warning(
+                            "Environment worker died at %d frames (%s). Discarding the "
+                            "in-flight batch and rebuilding the collector; %d restart(s) "
+                            "left. The learner's weights, optimizer and frame count are "
+                            "unaffected.",
+                            frames,
+                            error,
+                            restarts_left,
                         )
+                        self._abandon_collector(collector, preexisting)
+                        collector = None
+                        continue
+                    self._shutdown_collector(collector)
+                    collector = None
+                    break
         except KeyboardInterrupt:
             logger.warning(
                 "Interrupted at %d frames; shutting down and reporting partial results. "
                 "Press Ctrl-C again only if shutdown hangs.",
                 frames,
             )
+        except BaseException as error:
+            # Recorded before the teardown below so metric backends can mark the
+            # run failed. Without this a crashed run closes as cleanly as a
+            # finished one and is indistinguishable from a short successful run.
+            self._callbacks.on_train_error(error)
+            raise
         finally:
             with _deferred_interrupt():
                 if self._evaluator is not None:
                     self._evaluator.close()
-                collector.shutdown()
+                if collector is not None:
+                    self._shutdown_collector(collector)
             summary = self._metrics(frames, episodes, wins, draws, time.time() - start_time)
             self._callbacks.on_train_end(summary)
         return summary
+
+    def _make_collector(self, total_frames: int) -> Collector:
+        """
+        Build a collector over a freshly constructed vectorized environment.
+
+        Opts out of torchrl's automatic policy-transform registration: env
+        transforms are managed explicitly by the env factories, and the policies
+        used here read ``action_mask`` directly without needing the InitTracker
+        transform the collector's heuristic would append.
+
+        :param total_frames: Frames this collector should still collect, i.e.
+            the run's remaining budget rather than its total.
+        :return: A collector ready to iterate.
+        """
+        return Collector(
+            create_env_fn=self._make_vec_env(),
+            policy=self._policy,
+            frames_per_batch=self._frames_per_batch,
+            total_frames=total_frames,
+            auto_register_policy_transforms=False,
+            **self._collector_kwargs(),
+        )
+
+    @staticmethod
+    def _shutdown_collector(collector: Collector) -> None:
+        """
+        Shut a collector down, tolerating an already-broken worker pool.
+
+        :param collector: Collector to tear down.
+        """
+        try:
+            collector.shutdown()
+        except Exception:
+            logger.debug("Collector shutdown raised; continuing.", exc_info=True)
+
+    @staticmethod
+    def _abandon_collector(collector: Collector, preexisting_pids: set[int | None]) -> None:
+        """
+        Tear down a collector whose worker pool has already partly died.
+
+        torchrl's own shutdown path re-checks worker health and raises when it
+        finds the dead one, so it cannot be relied on to clean up after exactly
+        the failure being recovered from. Any worker it leaves behind is
+        terminated here, or the next collector's workers would contend with
+        orphans holding the previous run's shared memory.
+
+        :param collector: Collector to abandon.
+        :param preexisting_pids: PIDs of child processes that predate this
+            collector and must be left alone.
+        """
+        with _deferred_interrupt():
+            Trainer._shutdown_collector(collector)
+            for child in torch_mp.active_children():
+                if child.pid in preexisting_pids:
+                    continue
+                child.terminate()
+                child.join(timeout=10.0)
+                if child.is_alive():
+                    child.kill()
+                    child.join(timeout=10.0)
 
     def _should_evaluate(self, frames: int, last_eval_frames: int) -> bool:
         """

@@ -166,26 +166,33 @@ Win rates below are **windowed** (differenced from the cumulative counters),
 because `train/win_rate` as logged is an integral from frame 0 and understates
 the endpoint.
 
-| | windowed win rate vs random |
-|---|---|
-| uniform random | 0.530 |
-| `legal[0]` heuristic | 0.820 |
-| flat head, **5M** frames, self-play (eval) | 0.625 |
-| **pointer head, 600k frames** | **0.922** |
-
-Learning curve for the pointer arm:
-
-| progress | frames | windowed win rate |
+| arm | final windowed win rate | `loss_critic` |
 |---|---|---|
-| 25% | 147k | 0.777 |
-| 50% | 295k | 0.903 |
-| 75% | 442k | 0.923 |
-| 100% | 606k | 0.922 |
+| uniform random (reference) | 0.530 | — |
+| `legal[0]` heuristic (reference) | 0.820 | — |
+| flat head (`model/head=linear`) | 0.825 | 0.240 → 0.138 |
+| **pointer head** (`model/head=pointer`) | **0.922** | 0.240 → **0.073** |
 
-It clears the `legal[0]` ceiling — the thing the flat head could only
-approximate — by ~10 points, on **8× less data** than the run that scored 0.625.
-The critic improves in step (`loss_critic` 0.24 → 0.09 over the same run),
+| progress | flat head | pointer head |
+|---|---|---|
+| 147k frames | 0.621 | 0.777 |
+| 295k frames | 0.758 | 0.903 |
+| 442k frames | 0.793 | 0.923 |
+| 606k frames | 0.826 | 0.922 |
+
+**The control lands on the predicted ceiling.** The flat head converges to
+0.825 against a `legal[0]` heuristic's 0.820 — it saturates precisely at the
+best available slot-index prior, which is the entire hypothesis class the
+permutation-invariant encoding leaves it. The pointer head clears that by ~10
+points and is still the better arm at every checkpoint, not just at the end.
+The critic separates the same way, ending at roughly half the flat head's loss,
 consistent with the pooling having been the shared constraint.
+
+Note this task (single mirror deck, random opponent) is easier than the
+multi-deck self-play setting where the defect was first noticed, so the flat
+head does better here than the 0.625 that run's evaluator reported. The
+like-for-like comparison is the two arms above: same task, same budget, same
+seed.
 
 ---
 
