@@ -101,7 +101,8 @@ class TestResolveCheckpointDir:
         assert resolved.is_dir()
 
     @staticmethod
-    def test_rejects_a_directory_another_run_owns(hydra_output_dir: Path) -> None:
+    @pytest.mark.usefixtures("hydra_output_dir")
+    def test_rejects_a_directory_another_run_owns() -> None:
         """The second run into one directory fails instead of overwriting."""
         _resolve_checkpoint_dir(_cfg("checkpoints"))
         with pytest.raises(RuntimeError, match="already exists"):
