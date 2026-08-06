@@ -140,7 +140,7 @@ def test_pointer_head_is_permutation_equivariant(
     original = actor_critic.policy_logits(obs)[0]
     permutation = torch.tensor([4, 1, 0, 3, 2])
     reordered = obs.clone()
-    options = reordered[("observation", "options")]
+    options = cast(TensorDict, reordered[("observation", "options")])
     index = torch.arange(options["card_id"].shape[-1])
     index[:n_options] = permutation
     for leaf in list(options.keys(include_nested=True, leaves_only=True)):
@@ -167,7 +167,7 @@ def test_flat_head_is_permutation_invariant(
 
     original = actor_critic.policy_logits(obs)[0]
     reordered = obs.clone()
-    options = reordered[("observation", "options")]
+    options = cast(TensorDict, reordered[("observation", "options")])
     index = torch.arange(options["card_id"].shape[-1])
     index[:n_options] = torch.tensor([4, 1, 0, 3, 2])
     for leaf in list(options.keys(include_nested=True, leaves_only=True)):
