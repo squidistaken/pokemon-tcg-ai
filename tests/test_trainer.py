@@ -94,3 +94,147 @@ def test_opponent_pool_resampling() -> None:
     for _ in range(20):
         weighted_pool.on_reset()
         assert weighted_pool.active is first
+
+
+class DyingCollector:
+    """
+    Collector wrapper that raises torchrl's worker-death error after one batch.
+
+    A real death cannot be staged in-process (the engine aborts the whole
+    worker), but the trainer only ever sees it as this ``RuntimeError``, so
+    reproducing the message exercises the same recovery path.
+
+    Wraps rather than patches the instance because ``__iter__`` is looked up on
+    the type, so assigning it to a collector instance would be ignored.
+    """
+
+    def __init__(self, collector) -> None:
+        """
+        :param collector: The real collector to delegate to.
+        """
+        self._collector = collector
+
+    def __iter__(self):
+        """
+        Yield exactly one batch, then die the way a lost worker does.
+
+        :return: Generator over collected batches.
+        :raises RuntimeError: After the first batch.
+        """
+        for batch in self._collector:
+            yield batch
+            raise RuntimeError("Cannot proceed, worker 0 dead.")
+
+    def shutdown(self) -> None:
+        """
+        Tear the wrapped collector down.
+        """
+        self._collector.shutdown()
+
+
+class WorkerDeathTrainer(Trainer):
+    """
+    Trainer whose first ``failures`` collectors die after one batch each.
+    """
+
+    def __init__(self, *args, failures: int = 1, **kwargs) -> None:
+        """
+        :param args: Forwarded to :class:`~src.training.trainer.Trainer`.
+        :param failures: How many collectors should die before one survives.
+        :param kwargs: Forwarded to :class:`~src.training.trainer.Trainer`.
+        """
+        super().__init__(*args, **kwargs)
+        self.remaining_failures = failures
+        self.collectors_built = 0
+
+    def _make_collector(self, total_frames: int):
+        """
+        Build a collector, wrapped to die while failures remain.
+
+        :param total_frames: Frames the collector should still collect.
+        :return: The collector, possibly wrapped in :class:`DyingCollector`.
+        """
+        self.collectors_built += 1
+        collector = super()._make_collector(total_frames)
+        if self.remaining_failures <= 0:
+            return collector
+        self.remaining_failures -= 1
+        return DyingCollector(collector)
+
+
+def test_trainer_recovers_from_a_dead_worker() -> None:
+    """
+    A dead environment worker costs the in-flight batch, not the run.
+
+    The learner lives in this process and is untouched when a worker dies, so
+    the collector is rebuilt and collection continues toward the same budget
+    rather than the run ending early.
+    """
+    trainer = WorkerDeathTrainer(
+        env_factories=make_env_factories(make_cfg()),
+        policy=RandomMaskedPolicy(),
+        frames_per_batch=64,
+        total_frames=256,
+        use_parallel_env=False,
+        failures=2,
+    )
+
+    stats = trainer.train()
+
+    assert stats["frames"] == 256
+    assert trainer.collectors_built == 3
+    assert trainer.remaining_failures == 0
+
+
+def test_trainer_stops_restarting_once_the_budget_is_spent() -> None:
+    """
+    An environment that dies forever fails the run instead of looping.
+    """
+    trainer = WorkerDeathTrainer(
+        env_factories=make_env_factories(make_cfg()),
+        policy=RandomMaskedPolicy(),
+        frames_per_batch=64,
+        total_frames=1024,
+        use_parallel_env=False,
+        failures=99,
+        max_collector_restarts=2,
+    )
+
+    try:
+        trainer.train()
+    except RuntimeError as error:
+        assert "worker 0 dead" in str(error)
+    else:
+        raise AssertionError("expected the run to fail once restarts ran out")
+    assert trainer.collectors_built == 3
+
+
+def test_trainer_does_not_restart_on_an_ordinary_error() -> None:
+    """
+    Only worker deaths are recovered from; a real bug still fails fast.
+    """
+
+    class BuggyTrainer(Trainer):
+        """Trainer whose update raises a non-worker error."""
+
+        def _update(self, data):  # noqa: ARG002, PLR6301
+            """
+            :param data: Ignored.
+            :raises RuntimeError: Always.
+            """
+            raise RuntimeError("shape mismatch in loss")
+
+    trainer = BuggyTrainer(
+        env_factories=make_env_factories(make_cfg()),
+        policy=RandomMaskedPolicy(),
+        frames_per_batch=64,
+        total_frames=256,
+        use_parallel_env=False,
+    )
+
+    try:
+        trainer.train()
+    except RuntimeError as error:
+        assert "shape mismatch" in str(error)
+    else:
+        raise AssertionError("expected the bug to propagate")

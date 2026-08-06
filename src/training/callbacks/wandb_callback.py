@@ -77,6 +77,7 @@ class WeightsAndBiases(TrainingCallback):
         self._log_checkpoints = log_checkpoints
         self._run: Run | None = None
         self._latest_archetype_rates: dict[str, float] = {}
+        self._failure: BaseException | None = None
 
     def on_train_start(self, run_config: Mapping[str, Any]) -> None:
         """
@@ -198,12 +199,32 @@ class WeightsAndBiases(TrainingCallback):
             return
         self._run.log({f"{prefix}/{key}": value for key, value in metrics.items()}, step=step)
 
+    def on_train_error(self, error: BaseException) -> None:
+        """
+        Remember that the run is ending in failure.
+
+        Recorded rather than acted on immediately, because the run still has to
+        be closed by :meth:`on_train_end`; this only decides the exit code it
+        closes with.
+
+        :param error: The exception that ended the run.
+        """
+        self._failure = error
+        if self._run is not None:
+            self._run.summary["summary/error"] = f"{type(error).__name__}: {error}"
+
     def on_train_end(self, summary: Mapping[str, float]) -> None:
         """
         Record the run aggregates and close the run.
 
         Aggregates go to the summary, not the step series: they describe the
         whole run, so they are what the W&B run table sorts on.
+
+        A run that ended in failure is finished with a non-zero exit code, so
+        W&B marks it ``crashed`` rather than ``finished``. Without that, a run
+        that died partway through is indistinguishable in the UI from a short
+        successful one -- which is exactly how a mid-run environment crash came
+        to look like a completed 475k-frame run.
 
         :param summary: Aggregate statistics for the whole run.
         """
@@ -217,6 +238,11 @@ class WeightsAndBiases(TrainingCallback):
             )
         for key, value in summary.items():
             self._run.summary[f"summary/{key}"] = value
-        self._run.finish()
-        logger.info("W&B run finished: %s", self._run.id)
+        run_id = self._run.id
+        if self._failure is None:
+            self._run.finish()
+            logger.info("W&B run finished: %s", run_id)
+        else:
+            self._run.finish(exit_code=1)
+            logger.warning("W&B run marked failed: %s (%s)", run_id, self._failure)
         self._run = None
