@@ -111,12 +111,14 @@ src/
     multi_evaluator.py           MultiEvaluator: runs several Evaluators, namespacing metrics per reference opponent
     curriculum.py                Curriculum: owns the level buffer, scores each collected batch, republishes the distribution
     cross_play.py                Round-robins frozen checkpoints into a win-rate matrix + Bradley-Terry Elo ranking
+    pipe_timeout.py              apply_pipe_timeout: how fast an unresponsive ParallelEnv worker is detected (torchrl defaults to 2h47m)
     callbacks/                  Metric sinks; the trainer emits, these decide where it goes
       base.py                     TrainingCallback hooks + CallbackList (fan-out, propagates failures)
       snapshot_callback.py        SnapshotCallback: freezes the learner into the self-play league at a frame interval
       curriculum_callback.py      CurriculumStateCallback: dumps the level buffer's win/loss tallies at a frame interval
       cross_play_callback.py      CrossPlayCallback: scores the learner against its own snapshots, ranks them at run end
       wandb_callback.py           WeightsAndBiases: the only module that imports wandb
+      wandb_fork_guard.py         WandbForkGuard: detaches W&B's blocking exit hooks in forked ParallelEnv workers
   train.py                    Hydra entry point (python -m src.train)
   eval_deck_field.py          Scores a saved agent per archetype across a deck field (python -m src.eval_deck_field)
 

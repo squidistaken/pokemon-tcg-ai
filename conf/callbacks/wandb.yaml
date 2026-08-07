@@ -14,3 +14,4 @@ callbacks:
     notes: ${wandb.notes}
     dir: ${wandb.dir}
     log_checkpoints: ${wandb.log_checkpoints}
+    console: ${wandb.console}

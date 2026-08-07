@@ -8,11 +8,13 @@ import pytest
 import torch
 from omegaconf import DictConfig, OmegaConf
 from tensordict import TensorDict
+from torchrl import _utils as torchrl_utils
 
 from src.env.opponent_pool import OpponentPool
 from src.env.random_opponent import RandomOpponent
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training.env_factory import make_env_factories
+from src.training.pipe_timeout import apply_pipe_timeout
 from src.training.trainer import _MAX_BARREN_RESTARTS, Trainer, _is_worker_death
 
 DECK_PATH = str(Path(__file__).parents[1] / "decks" / "example.csv")
@@ -392,3 +394,47 @@ def test_trainer_survives_a_real_worker_process_dying() -> None:
     assert stats["frames"] == 512
     assert len(trainer.pools) == 2
     assert set(trainer.pools[0]).isdisjoint(trainer.pools[1])
+
+
+def test_pipe_timeout_overrides_the_torchrl_default() -> None:
+    """
+    The configured detection timeout reaches torchrl before a pool is built.
+
+    Both sides of the pool read torchrl's module attribute when the workers
+    start, so setting it is what makes a shorter timeout take effect; an
+    environment variable set after import would not, since torchrl reads it
+    once.
+    """
+    original = torchrl_utils.BATCHED_PIPE_TIMEOUT
+    try:
+        apply_pipe_timeout(180.0)
+        assert torchrl_utils.BATCHED_PIPE_TIMEOUT == 180.0
+    finally:
+        torchrl_utils.BATCHED_PIPE_TIMEOUT = original
+
+
+def test_pipe_timeout_of_none_keeps_the_torchrl_default() -> None:
+    """
+    Opting out with None leaves torchrl's own timeout untouched.
+    """
+    original = torchrl_utils.BATCHED_PIPE_TIMEOUT
+    try:
+        apply_pipe_timeout(None)
+        assert original == torchrl_utils.BATCHED_PIPE_TIMEOUT
+    finally:
+        torchrl_utils.BATCHED_PIPE_TIMEOUT = original
+
+
+@pytest.mark.parametrize("seconds", [0.0, -1.0])
+def test_pipe_timeout_rejects_non_positive_values(seconds: float) -> None:
+    """
+    Zero is a config error, not an opt-out.
+
+    Reading it as "keep the default" would let a typo silently restore the
+    2h47m detection wait, and taking it literally would fail the pool on its
+    first step. Neither is what someone writing 0 wants, so it raises.
+    """
+    original = torchrl_utils.BATCHED_PIPE_TIMEOUT
+    with pytest.raises(ValueError, match="must be positive or None"):
+        apply_pipe_timeout(seconds)
+    assert original == torchrl_utils.BATCHED_PIPE_TIMEOUT

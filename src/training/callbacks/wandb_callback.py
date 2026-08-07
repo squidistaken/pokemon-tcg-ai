@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from wandb.sdk.wandb_run import Run
 
 from src.training.callbacks.base import TrainingCallback
+from src.training.callbacks.wandb_fork_guard import WandbForkGuard
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,9 @@ _ARCHETYPE_PREFIX = "archetype_win_rate/"
 
 WandbMode = Literal["online", "offline", "disabled"]
 _VALID_MODES: tuple[str, ...] = get_args(WandbMode)
+
+#: Console-capture modes W&B accepts, in the order of how much they intercept.
+_VALID_CONSOLE_MODES: tuple[str, ...] = ("auto", "off", "wrap", "redirect")
 
 
 class WeightsAndBiases(TrainingCallback):
@@ -45,6 +49,7 @@ class WeightsAndBiases(TrainingCallback):
             notes: str | None = None,
             dir: str | None = None,
             log_checkpoints: bool = True,
+            console: str = "redirect",
     ) -> None:
         """
         :param project: W&B project to log the run under.
@@ -59,12 +64,24 @@ class WeightsAndBiases(TrainingCallback):
         :param dir: Parent directory for W&B's local run files.
         :param log_checkpoints: Mirror written model checkpoints as versioned
             W&B model artifacts.
+        :param console: How W&B captures console output. ``redirect`` replaces
+            the process's file descriptors, which also captures what the forked
+            ``ParallelEnv`` workers write; ``wrap`` only sees writes made in this
+            process; ``off`` captures nothing. Exposed because the workers write
+            through inherited pipes under ``redirect``, which is one candidate
+            for the mid-run worker hangs (see :class:`WandbForkGuard`), and
+            switching it is how that candidate is tested.
         :raises ValueError: If ``mode`` is not a mode W&B accepts. Checked here so
             a config typo fails before the environments are built.
         """
         if mode not in _VALID_MODES:
             raise ValueError(
                 f"Invalid W&B mode {mode!r}; expected one of {', '.join(_VALID_MODES)}."
+            )
+        if console not in _VALID_CONSOLE_MODES:
+            raise ValueError(
+                f"Invalid W&B console mode {console!r}; expected one of "
+                f"{', '.join(_VALID_CONSOLE_MODES)}."
             )
         self._project = project
         self._entity = entity
@@ -76,6 +93,8 @@ class WeightsAndBiases(TrainingCallback):
         self._notes = notes
         self._dir = dir
         self._log_checkpoints = log_checkpoints
+        self._console = console
+        self._fork_guard = WandbForkGuard()
         self._run: Run | None = None
         self._latest_archetype_rates: dict[str, float] = {}
         self._failure: BaseException | None = None
@@ -107,7 +126,7 @@ class WeightsAndBiases(TrainingCallback):
             # low-level redirection captures their stdout and stderr too, while
             # W&B's default stream wrapping only sees writes in this process.
             settings=wandb.Settings(
-                console="redirect",
+                console=cast(Any, self._console),
                 # ``redirect`` preserves low-level worker output in output.log,
                 # but those records may not populate W&B's Logs tab. Send the
                 # application's Python logs there through W&B's supported
@@ -115,6 +134,9 @@ class WeightsAndBiases(TrainingCallback):
                 capture_loggers={"root": "INFO"},
             ),
         )
+        # Before the collector forks its workers, so none of them inherits a
+        # finalizer that would block their exit and with it the parent's.
+        self._fork_guard.install()
         logger.info(
             "W&B run started: %s (%s, mode=%s)",
             self._run.name,
