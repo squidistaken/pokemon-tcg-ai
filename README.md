@@ -147,10 +147,8 @@ submission/
   cg_api.py                    Pure-Python observation parser (no native simulator dependency)
   runtime.py                   Torch-only structured encoder/model/greedy inference implementation
 checkpoint/                  Assets generated for the repository-root inference entry point
-decks/                       Example deck CSVs
-docs/                        Design docs (torchrl_environment.md, game.md, research/curriculum-design.md,
-                             training-performance.md: measured throughput and recommended num_workers,
-                             research/curriculum-experiment-01.md: PLR vs uniform results)
+decks/                       Deck collections
+docs/                        Design docs (torchrl_environment.md, game.md, research/curriculum-design.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
 main.py                      Alternate inference entry point; not used by make_submission.py
 slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts

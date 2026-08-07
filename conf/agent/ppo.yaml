@@ -25,6 +25,12 @@ lmbda: 0.98
 # standard PPO formulation; keeps the surrogate's scale independent of the
 # reward magnitude.
 average_gae: true
+# Chunks the GAE critic pass along the worker dimension. Unset, torchrl runs the
+# whole collected batch through the critic in one vmap over a stacked
+# current/next pair, peaking at ~2x the batch; at frames_per_batch 16384 that is
+# the allocation the WSL GPU scheduler refuses (docs/wsl-crash-diagnosis.md).
+# Exact, not an approximation: worker rows are independent trajectories.
+gae_num_chunks: 8
 # Adam learning rate.
 lr: 3.0e-4
 # Optimization epochs over each collected batch. Kept low because the sixteen

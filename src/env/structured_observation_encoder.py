@@ -114,12 +114,12 @@ class StructuredObservationEncoder(ObservationEncoder):
             self,
             max_options: int = 96,
             bench_cap: int = 8,
-            hand_cap: int = 30,
+            hand_cap: int = 60,
             discard_cap: int = 60,
             prize_cap: int = 6,
             deck_cap: int = 60,
             looking_cap: int = 60,
-            energy_cap: int = 40,
+            energy_cap: int = 60,
             evolution_cap: int = 2,
     ) -> None:
         """
@@ -138,8 +138,10 @@ class StructuredObservationEncoder(ObservationEncoder):
             engine's hard ``BENCH_SIZE_MAX``; the default in-game bench
             is 5, but some card effects raise capacity up to this ceiling.
         :param hand_cap: Padded size of the agent's hand table. No engine
-            limit on hand size; 30 is headroom well above hands seen in
-            practice, not a rule-derived value.
+            limit on hand size, but a player owns exactly ``DECK_SIZE``
+            cards for the whole game, so 60 is the true ceiling and this
+            can no longer truncate. Was 30 as empirical headroom until
+            self-play produced 31-card hands.
         :param discard_cap: Padded size of each discard-pile table.
             Matches ``DECK_SIZE``: a discard pile can never exceed a full
             deck's worth of cards.
@@ -151,9 +153,10 @@ class StructuredObservationEncoder(ObservationEncoder):
         :param looking_cap: Padded size of the "looking" card table.
             Matches ``DECK_SIZE``, for the same reason as ``deck_cap``.
         :param energy_cap: Padded number of attached energy cards per
-            Pokemon. No engine limit, so no cap is truly safe: a stalling
-            game keeps attaching, and this has already been raised twice
-            (16 -> 24 -> 40) after self-play runs exceeded it. Note that
+            Pokemon. No engine limit, and this has been raised three times
+            (16 -> 24 -> 40 -> 60) after self-play runs exceeded it. 60 is
+            the last raise worth making: a player owns ``DECK_SIZE`` cards
+            in total, so no single Pokemon can carry more. Note that
             overflow only drops the surplus cards' identities: the
             attachment count and the per-type histogram in ``features``
             are both computed from the untruncated list, and the model

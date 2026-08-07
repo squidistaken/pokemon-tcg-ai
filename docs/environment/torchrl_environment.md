@@ -67,7 +67,7 @@ Engine Observation --> StructuredObservationEncoder --> TensorDict
 - **Agent-relative**: owner = 1 (agent), 2 (opponent). Agent rows in `pokemon` precede opponent's.
 - **Boolean masks**: `True` = occupied (including face-down cards with ID 0).
 - **Floats are raw**: normalization is model-side.
-- **Truncation**: zones exceeding their cap are silently truncated (one-time warning). Caps are constructor parameters (`bench_cap=8`, `hand_cap=30`, `discard_cap=60`, `prize_cap=6`, `energy_cap=40`, etc.).
+- **Truncation**: zones exceeding their cap are silently truncated (one-time warning). Caps are constructor parameters (`bench_cap=8`, `hand_cap=60`, `discard_cap=60`, `prize_cap=6`, `energy_cap=60`, etc.).
 
 ### Schema
 

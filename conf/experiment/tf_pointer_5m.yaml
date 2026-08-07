@@ -1,0 +1,85 @@
+# @package _global_
+# 5M-frame PPO self-play run on the transformer backbone with the pointer head.
+#
+# Launch with scripts/train_transformer_pointer_5m.sh, or directly:
+#
+#   python -m src.train --config-name ppo_selfplay_multideck +experiment=tf_pointer_5m
+#
+# Backbone comparison against run pyo9oiis (5M frames, MLP backbone, same
+# pointer head, W&B group pointer-head-5m-20260806): corpus, curriculum,
+# optimizer and seed are held at that run's values so the trunk is what varies.
+# Expect ~3.5h. The one break from that control is train.pool_size below.
+defaults:
+  - override /model/backbone: transformer
+  - override /model/head: pointer
+
+model:
+  backbone:
+    # option_tokens is the mechanism, not attention: each option row gets one
+    # Linear plus a segment embedding, so the policy scores what an option *is*.
+    # The only arm in docs/architecture/transformer-diagnosis-45.md to beat its
+    # reference outside the noise floor.
+    option_tokens: true
+    # conf/experiment/ptr_tf_capacity.yaml's depth arm, whose duplicates
+    # straddled the control. This run varies the trunk and its depth together,
+    # so a flat result will not say which. Watch train/grad_norm: that arm ran
+    # 2-3x the reference against max_grad_norm 1.0.
+    num_layers: 2
+    ff_dim: 512
+
+agent:
+  device: cuda
+  # At the agent/ppo.yaml defaults, repeated here as the first thing to cut
+  # under memory pressure: halving sub_batch_size roughly halves activation
+  # memory per step and leaves the PPO objective and the data untouched.
+  # Lowering frames_per_batch instead would change the update itself.
+  sub_batch_size: 1024
+  frames_per_batch: 16384
+
+env:
+  num_workers: 32
+  # capacity 1500 against ~18k archetype pairs cannot hold the corpus, so
+  # explore_prob > 0 is required or the sampler raises. Close to inert at this
+  # level count, but it was equally inert for pyo9oiis, which is what makes it a
+  # fair control; conf/env/curriculum_v2.yaml is where it actually functions.
+  curriculum:
+    enabled: true
+    capacity: 1500
+    explore_prob: 0.3
+
+collector:
+  total_frames: 5000000
+
+train:
+  # Memory headroom after 3o2jilac died at 770k/5M frames: each of the 32
+  # workers holds its own copy of every league member, so 5 -> 2 drops resident
+  # opponent models from 160 to 64. It also changes the opponent distribution,
+  # so this is a memory-headroom run first and a backbone comparison second.
+  pool_size: 2
+  # Left at the self-play default: raising it would restore the league span the
+  # cut above lost, but it would also move eval/first_snapshot's anchor.
+  snapshot_interval: 50000
+  # 50 episodes rather than pyo9oiis's 200, buying ~75 min of wall clock for a
+  # ~7.1pp standard error per round. Read the trend over the 20 rounds, not any
+  # single point, and re-evaluate offline when a number needs to be precise.
+  eval_interval: 250000
+  eval_episodes: 50
+  # 246 extra W&B series at ~1.5 games per archetype per round.
+  eval_per_archetype: false
+
+set_seed: true
+
+wandb:
+  group: tf-pointer-5m-20260806
+  name: tf-pointer-2l-5m-s${seed}-pool2
+  tags:
+    - transformer
+    - pointer-head
+    - option-tokens
+    - capacity
+    - 5m
+    - pool2
+  notes: >-
+    Backbone comparison against pyo9oiis (MLP trunk, same pointer head):
+    TransformerBackbone with option tokens at 2 layers / ff_dim 512, league cut
+    to pool_size 2 for memory headroom after 3o2jilac died at 770k frames.

@@ -205,12 +205,12 @@ class StructuredObservationEncoder:
         self,
         max_options: int,
         bench_cap: int = 8,
-        hand_cap: int = 30,
+        hand_cap: int = 60,
         discard_cap: int = 60,
         prize_cap: int = 6,
         deck_cap: int = 60,
         looking_cap: int = 60,
-        energy_cap: int = 40,
+        energy_cap: int = 60,
         evolution_cap: int = 2,
     ) -> None:
         self._max_options = max_options
