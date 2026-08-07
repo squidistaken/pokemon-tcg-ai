@@ -270,14 +270,15 @@ def _max_collector_restarts(cfg: DictConfig) -> int:
     return int(cfg.collector.get("max_restarts", 0))
 
 
-def _pipe_timeout(cfg: DictConfig) -> float:
+def _pipe_timeout(cfg: DictConfig) -> float | None:
     """
     Read how long the worker pool may wait on itself before raising.
 
     :param cfg: Hydra configuration with a ``collector`` section.
-    :return: Seconds; ``0`` keeps torchrl's 10000-second default.
+    :return: Seconds, or None to keep torchrl's 10000-second default.
     """
-    return float(cfg.collector.get("pipe_timeout", 0.0))
+    seconds = cfg.collector.get("pipe_timeout", None)
+    return None if seconds is None else float(seconds)
 
 
 def _rebuild_env_factories(

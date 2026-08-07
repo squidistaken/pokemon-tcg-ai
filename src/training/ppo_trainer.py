@@ -88,7 +88,7 @@ class PPOTrainer(Trainer):
             curriculum: Curriculum | None = None,
             max_collector_restarts: int = 0,
             rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]] | None = None,
-            pipe_timeout: float = 0.0,
+            pipe_timeout: float | None = None,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -165,7 +165,8 @@ class PPOTrainer(Trainer):
         :param rebuild_env_factories: Per-restart factory builder, forwarded to
             :class:`~src.training.trainer.Trainer`.
         :param pipe_timeout: Worker-pool detection timeout, forwarded to
-            :class:`~src.training.trainer.Trainer`.
+            :class:`~src.training.trainer.Trainer`. ``None`` keeps torchrl's
+            default.
         """
         self._actor_critic = actor_critic
         self._curriculum = curriculum

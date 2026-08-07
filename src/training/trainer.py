@@ -139,7 +139,7 @@ class Trainer(BaseTrainer):
             eval_interval: int = 0,
             max_collector_restarts: int = 0,
             rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]] | None = None,
-            pipe_timeout: float = 0.0,
+            pipe_timeout: float | None = None,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -175,8 +175,8 @@ class Trainer(BaseTrainer):
         :param pipe_timeout: Seconds a worker and its parent wait on each other
             before raising, overriding torchrl's 10000-second default. This is
             purely how fast an unresponsive worker is *detected*;
-            ``max_collector_restarts`` is what recovers from it. ``0`` keeps
-            torchrl's default. See
+            ``max_collector_restarts`` is what recovers from it. ``None``
+            keeps torchrl's default. See
             :func:`~src.training.pipe_timeout.apply_pipe_timeout`.
         """
         self._env_factories = env_factories

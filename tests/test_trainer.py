@@ -413,13 +413,28 @@ def test_pipe_timeout_overrides_the_torchrl_default() -> None:
         torchrl_utils.BATCHED_PIPE_TIMEOUT = original
 
 
-def test_pipe_timeout_of_zero_keeps_the_torchrl_default() -> None:
+def test_pipe_timeout_of_none_keeps_the_torchrl_default() -> None:
     """
-    Opting out leaves torchrl's own timeout untouched.
+    Opting out with None leaves torchrl's own timeout untouched.
     """
     original = torchrl_utils.BATCHED_PIPE_TIMEOUT
     try:
-        apply_pipe_timeout(0.0)
+        apply_pipe_timeout(None)
         assert original == torchrl_utils.BATCHED_PIPE_TIMEOUT
     finally:
         torchrl_utils.BATCHED_PIPE_TIMEOUT = original
+
+
+@pytest.mark.parametrize("seconds", [0.0, -1.0])
+def test_pipe_timeout_rejects_non_positive_values(seconds: float) -> None:
+    """
+    Zero is a config error, not an opt-out.
+
+    Reading it as "keep the default" would let a typo silently restore the
+    2h47m detection wait, and taking it literally would fail the pool on its
+    first step. Neither is what someone writing 0 wants, so it raises.
+    """
+    original = torchrl_utils.BATCHED_PIPE_TIMEOUT
+    with pytest.raises(ValueError, match="must be positive or None"):
+        apply_pipe_timeout(seconds)
+    assert original == torchrl_utils.BATCHED_PIPE_TIMEOUT

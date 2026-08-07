@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 TORCHRL_DEFAULT_PIPE_TIMEOUT = 10000.0
 
 
-def apply_pipe_timeout(seconds: float) -> None:
+def apply_pipe_timeout(seconds: float | None) -> None:
     """
     Shorten how long a ``ParallelEnv`` pool waits on itself before raising.
 
@@ -28,11 +28,21 @@ def apply_pipe_timeout(seconds: float) -> None:
     of it turned two recoverable incidents into 5.6 idle hours of an 8.9-hour
     run.
 
-    :param seconds: New timeout. Values at or below zero leave torchrl's default
-        in place, which is how a caller opts out.
+    :param seconds: New timeout. ``None`` opts out, leaving torchrl's default in
+        place; any number must be positive.
+    :raises ValueError: If ``seconds`` is zero or negative. Such a value is
+        rejected rather than read as an opt-out, because a config typo would
+        then silently restore the 2h47m wait this exists to remove -- and a
+        literal zero-second timeout, which is what the number looks like it
+        asks for, would fail the pool on its first step.
     """
-    if seconds <= 0:
+    if seconds is None:
         return
+    if seconds <= 0:
+        raise ValueError(
+            f"pipe_timeout must be positive or None, got {seconds}. Use None to "
+            f"keep torchrl's {TORCHRL_DEFAULT_PIPE_TIMEOUT:.0f}s default."
+        )
     torchrl_utils.BATCHED_PIPE_TIMEOUT = float(seconds)
     logger.debug(
         "Worker-pool timeout set to %.0fs (torchrl default is %.0fs).",
