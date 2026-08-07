@@ -417,12 +417,13 @@ class PPOTrainer(Trainer):
 
         for _ in range(self._num_epochs):
             perm = torch.randperm(batch, device=self._device)
-            data_shuffled = data_flat[perm]
             epoch_kl = 0.0
             n_minibatches = 0
 
             for start in range(0, batch, self._sub_batch_size):
-                mb = data_shuffled[start : start + self._sub_batch_size]
+                # Indexed per minibatch: materialising data_flat[perm] clones the
+                # whole batch on the GPU once per epoch (docs/wsl-crash-diagnosis.md).
+                mb = data_flat[perm[start : start + self._sub_batch_size]]
 
                 with self._autocast_ctx:
                     loss_vals = self._loss_fwd(mb)
