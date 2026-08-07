@@ -63,6 +63,7 @@ class PPOTrainer(Trainer):
             gamma: float = 0.99,
             lmbda: float = 0.95,
             average_gae: bool = True,
+            gae_num_chunks: int | None = None,
             lr: float = 3.0e-4,
             num_epochs: int = 4,
             sub_batch_size: int = 256,
@@ -108,6 +109,13 @@ class PPOTrainer(Trainer):
             divide by the std) over each collected batch. On by default: this is
             the standard PPO formulation and it keeps the surrogate objective's
             scale independent of the reward magnitude.
+        :param gae_num_chunks: Split the GAE critic pass into this many chunks
+            along the worker dimension. ``None`` runs the whole collected batch
+            through the critic in one ``vmap`` over a stacked current/next pair,
+            which peaks at roughly twice the batch and is what exhausts VRAM at
+            ``frames_per_batch`` 16384. Chunking is exact: worker rows are
+            independent trajectories and GAE reduces along time, so the values
+            are concatenated back unchanged.
         :param lr: Adam learning rate (the annealing start value).
         :param num_epochs: Optimization epochs over each collected batch.
         :param sub_batch_size: Minibatch size for the inner epoch loop.
@@ -213,6 +221,7 @@ class PPOTrainer(Trainer):
             lmbda=lmbda,
             value_network=self._operator.get_value_operator(),
             average_gae=average_gae,
+            num_chunks=gae_num_chunks,
         )
         self._loss = ClipPPOLoss(
             actor_network=cast(
@@ -417,12 +426,13 @@ class PPOTrainer(Trainer):
 
         for _ in range(self._num_epochs):
             perm = torch.randperm(batch, device=self._device)
-            data_shuffled = data_flat[perm]
             epoch_kl = 0.0
             n_minibatches = 0
 
             for start in range(0, batch, self._sub_batch_size):
-                mb = data_shuffled[start : start + self._sub_batch_size]
+                # Indexed per minibatch: materialising data_flat[perm] clones the
+                # whole batch on the GPU once per epoch (docs/wsl-crash-diagnosis.md).
+                mb = data_flat[perm[start : start + self._sub_batch_size]]
 
                 with self._autocast_ctx:
                     loss_vals = self._loss_fwd(mb)

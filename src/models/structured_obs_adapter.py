@@ -64,12 +64,12 @@ class StructuredObsAdapter(nn.Module):
         stadium_id                              1              1   [1, 64]
         options                   max_options + 1 = 129        4*  [129, 64]
         pokemon                  2 × (1 + bench_cap) = 18       4   [18, 64]
-        my            hand 30 + discard 60 + prize 6 = 96      13   [96, 64]
+        my           hand 60 + discard 60 + prize 6 = 126      13   [126, 64]
         opp                    discard 60 + prize 6 = 66       10   [66, 64]
         select_deck                    deck_cap = 60            3   [60, 64]
         looking                     looking_cap = 60            1   [60, 64]
                                      ───                      ───
-                                     434                      ~38
+                                     462                      ~38
 
         * 3 real options + the always-valid synthetic stop slot.
 
