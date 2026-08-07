@@ -5,6 +5,7 @@ from types import ModuleType
 from typing import Any, override
 
 import pytest
+import torch
 from tensordict import TensorDict
 
 from src.policies.random_masked_policy import RandomMaskedPolicy
@@ -157,6 +158,7 @@ class FakeRun:
         self.url = "https://wandb.test/fake-run-id"
         self.summary: dict[str, Any] = {}
         self.logged: list[tuple[dict[str, float], int | None]] = []
+        self.log_lines: list[str] = []
         self.artifacts: list[tuple[str, str | None, str | None, list[str] | None]] = []
         self.finished = False
 
@@ -174,6 +176,10 @@ class FakeRun:
         Mark the run as closed.
         """
         self.finished = True
+
+    def write_logs(self, text: str) -> None:
+        """Capture text written directly to W&B's Logs tab."""
+        self.log_lines.append(text)
 
     def log_artifact(
         self,
@@ -417,6 +423,7 @@ def test_wandb_callback_records_config_and_namespaces_metrics(
     assert module.init_kwargs["dir"] == "/scratch/runs/one"
     assert module.init_kwargs["config"] == {"seed": 7}
     assert module.init_kwargs["settings"].console == "redirect"
+    assert module.init_kwargs["settings"].capture_loggers == {"root": "INFO"}
 
     callback.on_rollout_end(64, {"win_rate": 0.5, "loss_objective": -0.2})
     assert run.logged[-1] == ({"train/win_rate": 0.5, "train/loss_objective": -0.2}, 64)
@@ -581,6 +588,66 @@ def test_wandb_marks_a_failed_run_crashed(fake_wandb, monkeypatch: pytest.Monkey
 
     assert exit_codes == [1]
     assert "worker 20 dead" in str(run.summary["summary/error"])
+    assert run.log_lines == ["RuntimeError: Cannot proceed, worker 20 dead."]
+
+
+def test_wandb_training_failure_publishes_traceback(
+    fake_wandb: tuple[FakeWandbModule, FakeRun],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    A simulated OOM during training is sent to W&B before the run is closed.
+
+    The fake run intercepts ``write_logs`` at the SDK boundary, so this covers
+    the complete trainer/callback failure path without contacting W&B or
+    allocating enough memory to cause a real OOM.
+    """
+
+    class FakeCollector:
+        """Yield one synthetic rollout without creating environments or workers."""
+
+        def __iter__(self):
+            done = torch.zeros(64, 1, dtype=torch.bool)
+            done[-1] = True
+            reward = torch.zeros(64, 1)
+            yield TensorDict(
+                {"next": TensorDict({"done": done, "reward": reward}, batch_size=[64])},
+                batch_size=[64],
+            )
+
+        def shutdown(self) -> None:
+            pass
+
+    class OutOfMemoryTrainer(FailingTrainer):
+        @override
+        def _make_collector(self, remaining_frames: int) -> FakeCollector:
+            return FakeCollector()
+
+        @override
+        def _update(self, data: TensorDict) -> dict[str, float] | None:
+            raise torch.OutOfMemoryError("CUDA out of memory (simulated)")
+
+    _, run = fake_wandb
+    exit_codes: list[int | None] = []
+    monkeypatch.setattr(run, "finish", lambda exit_code=None: exit_codes.append(exit_code))
+    trainer = OutOfMemoryTrainer(
+        env_factories=[],
+        policy=RandomMaskedPolicy(),
+        frames_per_batch=64,
+        total_frames=128,
+        use_parallel_env=False,
+        callbacks=[WeightsAndBiases(project="pokemon-tcg-ai", mode="offline")],
+    )
+
+    with pytest.raises(torch.OutOfMemoryError, match="CUDA out of memory \\(simulated\\)"):
+        trainer.train()
+
+    assert exit_codes == [1]
+    assert len(run.log_lines) == 1
+    outgoing_message = run.log_lines[0]
+    assert "Traceback (most recent call last):" in outgoing_message
+    assert "in _update" in outgoing_message
+    assert "OutOfMemoryError: CUDA out of memory (simulated)" in outgoing_message
 
 
 def test_wandb_marks_a_clean_run_finished(fake_wandb, monkeypatch: pytest.MonkeyPatch) -> None:
