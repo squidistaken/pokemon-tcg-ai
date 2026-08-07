@@ -19,6 +19,34 @@ checkpoint_dir: checkpoints
 # Number of most-recent snapshots kept in the opponent pool.
 pool_size: 5
 
+# Continue a previous run's policy: load this checkpoint's weights into the
+# freshly built network before training. Weights only -- the snapshot format
+# carries no optimizer state, so Adam's moments restart from zero and the first
+# rollouts after a warm start are noisier than the ones before it. The league
+# also starts empty, refilling from the warm-started weights.
+# null trains from initialization.
+init_checkpoint: null
+# Frames the loaded checkpoint already collected, which the continued run counts
+# from so its metrics, snapshot filenames and evaluation intervals carry on
+# rather than restarting at zero. null reads the count out of the checkpoint,
+# which is what any snapshot written by this repo records; set it explicitly
+# only for a legacy checkpoint that stores none. collector.total_frames is
+# unaffected -- it still means frames to collect in *this* run.
+start_frames: null
+# Rolling file holding the optimizer state, so an interrupted run can be picked
+# up rather than restarted. Written alongside the league snapshots but kept out
+# of them: optimizer moments roughly triple a snapshot's size, and only the
+# newest is ever read. Relative paths resolve inside the Hydra run directory.
+# null writes none, which leaves this run resumable by weights only.
+train_state_path: train_state.pt
+# Frames between training-state writes. 0 writes only at the end of the run.
+train_state_interval: 250000
+# Continue from a train_state.pt: restores the optimizer moments alongside the
+# weights, so Adam does not restart cold the way train.init_checkpoint alone
+# does. Takes precedence over init_checkpoint for the weights, since the two
+# came from the same step. null starts the optimizer fresh.
+resume_state: null
+
 # How the league draws the opponent for each episode:
 #   uniform -> every member equally likely (plain fictitious self-play).
 #   pfsp    -> weight members by the learner's win rate against them, so the

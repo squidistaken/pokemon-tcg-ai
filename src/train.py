@@ -1,5 +1,6 @@
+import logging
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -7,11 +8,14 @@ import hydra
 import torch
 from dotenv import load_dotenv
 from hydra.core.hydra_config import HydraConfig
+from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 from torchrl.data import Categorical, Composite
 from torchrl.envs import EnvBase
 
 from src.hydra_resolvers import register_resolvers
+from src.models.actor_critic import ActorCritic
+from src.policies.greedy_policy_opponent import checkpoint_state_dict
 from src.policies.ppo_actor import build_actor_critic
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training import (
@@ -36,6 +40,8 @@ from src.training.env_factory import OpponentFactory, _build_sampler_spec
 load_dotenv(Path(__file__).parents[1] / ".env", override=False)
 # Before Hydra composes anything: the run directory interpolates ${run_uid:}.
 register_resolvers()
+
+logger = logging.getLogger(__name__)
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
@@ -126,6 +132,7 @@ def _build_ppo_trainer(
     obs_spec, action_spec = build_probe_specs(cfg)
 
     actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
+    start_frames, resume_state = _warm_start(cfg, actor_critic)
 
     checkpoint_dir = _resolve_checkpoint_dir(cfg)
     is_best_response = bool(cfg.train.get("best_response", False))
@@ -257,7 +264,99 @@ def _build_ppo_trainer(
             cfg, opponent_factory=opponent_factory, curriculum=curriculum
         ),
         pipe_timeout=_pipe_timeout(cfg),
+        start_frames=start_frames,
+        train_state_path=_resolve_train_state_path(cfg),
+        train_state_interval=int(cfg.train.get("train_state_interval", 0) or 0),
+        resume_state=resume_state,
     )
+
+
+def _warm_start(
+    cfg: DictConfig, actor_critic: ActorCritic
+) -> tuple[int, Mapping[str, Any] | None]:
+    """
+    Continue a previous run's policy, from either kind of saved state.
+
+    ``train.resume_state`` names a training state
+    (:class:`~src.training.callbacks.train_state_callback.TrainStateCallback`),
+    which carries the optimizer alongside the weights and so continues training
+    properly. ``train.init_checkpoint`` names a league snapshot, which carries
+    weights only: Adam's moment estimates restart from zero and the first
+    rollouts after such a warm start are noisier than the ones that preceded it.
+    The self-play league starts empty either way, refilling from the loaded
+    weights rather than from scratch.
+
+    The inherited frame count comes from the loaded file rather than the config,
+    so a continued run cannot silently disagree with what it continues about
+    where it started. ``train.start_frames`` overrides it for legacy checkpoints
+    that record no frame count.
+
+    :param cfg: Hydra configuration with a ``train`` section.
+    :param actor_critic: Freshly built network to load the weights into.
+    :return: Frames the loaded state had already collected (``0`` without a warm
+        start), and the optimizer state to resume from (``None`` to start cold).
+    :raises ValueError: If the named file is missing, or records no frame count
+        and ``train.start_frames`` does not supply one.
+    """
+    resume_configured = cfg.train.get("resume_state")
+    configured = resume_configured or cfg.train.get("init_checkpoint")
+    if not configured:
+        return int(cfg.train.get("start_frames", 0) or 0), None
+
+    source = Path(to_absolute_path(str(configured)))
+    key = "train.resume_state" if resume_configured else "train.init_checkpoint"
+    if not source.is_file():
+        raise ValueError(f"{key} {source} does not exist.")
+    payload = torch.load(source, map_location="cpu", weights_only=False)
+    actor_critic.load_state_dict(checkpoint_state_dict(payload), strict=True)
+
+    override = cfg.train.get("start_frames")
+    if override is not None:
+        start_frames = int(override)
+    elif isinstance(payload, Mapping) and payload.get("frames") is not None:
+        start_frames = int(payload["frames"])
+    else:
+        raise ValueError(
+            f"{key} {source} records no frame count, so the continued run cannot "
+            f"number its snapshots after it. Set train.start_frames explicitly."
+        )
+
+    resume_state = (
+        payload.get("optimizer") if isinstance(payload, Mapping) else None
+    )
+    if resume_configured and resume_state is None:
+        raise ValueError(
+            f"train.resume_state {source} carries no optimizer state. Point it at "
+            f"a file written by TrainStateCallback, or use train.init_checkpoint "
+            f"to warm-start from weights alone."
+        )
+    logger.info(
+        "Warm start: loaded %s at %d frames (%s).",
+        source,
+        start_frames,
+        "optimizer restored" if resume_state is not None else "weights only",
+    )
+    return start_frames, resume_state
+
+
+def _resolve_train_state_path(cfg: DictConfig) -> Path | None:
+    """
+    Resolve where this run writes its resumable training state.
+
+    Relative paths anchor to the Hydra run directory for the same reason
+    :func:`_resolve_checkpoint_dir` does it: two runs sharing one path would
+    overwrite each other's optimizer state.
+
+    :param cfg: Hydra configuration with a ``train`` section.
+    :return: Absolute destination, or None when the run writes no state.
+    """
+    configured = cfg.train.get("train_state_path")
+    if not configured:
+        return None
+    path = Path(str(configured))
+    if path.is_absolute():
+        return path
+    return Path(HydraConfig.get().runtime.output_dir) / path
 
 
 def _max_collector_restarts(cfg: DictConfig) -> int:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Callable, Iterable, Mapping
+from pathlib import Path
 from typing import Any, cast
 
 import torch
@@ -17,7 +18,7 @@ from torchrl.objectives.value import GAE
 
 from src.models.actor_critic import ActorCritic
 from src.policies.ppo_actor import build_ppo_operator
-from src.training.callbacks import TrainingCallback
+from src.training.callbacks import TrainingCallback, TrainStateCallback
 from src.training.curriculum import Curriculum
 from src.training.evaluator import Evaluator
 from src.training.loss._helpers import _sum_loss_keys
@@ -89,6 +90,10 @@ class PPOTrainer(Trainer):
             max_collector_restarts: int = 0,
             rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]] | None = None,
             pipe_timeout: float | None = None,
+            start_frames: int = 0,
+            train_state_path: str | Path | None = None,
+            train_state_interval: int = 0,
+            resume_state: Mapping[str, Any] | None = None,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -167,6 +172,17 @@ class PPOTrainer(Trainer):
         :param pipe_timeout: Worker-pool detection timeout, forwarded to
             :class:`~src.training.trainer.Trainer`. ``None`` keeps torchrl's
             default.
+        :param start_frames: Frames inherited from a warm-start checkpoint,
+            forwarded to :class:`~src.training.trainer.Trainer`. Reporting only;
+            ``total_frames`` still counts the frames this run collects.
+        :param train_state_path: Rolling file the optimizer state is written to,
+            so an interrupted run can be continued without restarting Adam's
+            moments. None writes no training state.
+        :param train_state_interval: Frames between training-state writes.
+            ``0`` writes only at the end of the run.
+        :param resume_state: Optimizer state dict from a previous run's training
+            state, loaded into the fresh optimizer. None starts Adam cold, which
+            is what a warm start from a weights-only snapshot must do.
         """
         self._actor_critic = actor_critic
         self._curriculum = curriculum
@@ -211,6 +227,7 @@ class PPOTrainer(Trainer):
             max_collector_restarts=max_collector_restarts,
             rebuild_env_factories=rebuild_env_factories,
             pipe_timeout=pipe_timeout,
+            start_frames=start_frames,
         )
         self._device = torch.device(device)
         self._num_epochs = num_epochs
@@ -240,6 +257,23 @@ class PPOTrainer(Trainer):
         # The optimizer is hardcoded here, but there is no real reason for us
         # to change it.
         self._optim = torch.optim.Adam(self._loss.parameters(), lr=lr)
+        if resume_state is not None:
+            self._optim.load_state_dict(resume_state)
+            logger.info(
+                "Restored optimizer state; Adam's moments continue rather than "
+                "restarting from zero."
+            )
+        # Attached here rather than in the caller because the optimizer whose
+        # state it preserves does not exist until this point.
+        if train_state_path is not None:
+            self._callbacks.append(
+                TrainStateCallback(
+                    actor_critic=actor_critic,
+                    optimizer=self._optim,
+                    path=train_state_path,
+                    interval=train_state_interval,
+                )
+            )
 
         self._clip_params = list(self._loss.parameters())
 
