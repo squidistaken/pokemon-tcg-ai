@@ -219,13 +219,19 @@ class TCGEnv(EnvBase):
             getattr(self._opponent, "active_is_anchor", True)
         )
 
-        for _ in range(self.MAX_RESET_ATTEMPTS):
+        for attempt in range(self.MAX_RESET_ATTEMPTS):
             self._handle.finish()
             self._agent_seat = self._rng.randint(0, 1)
             self._selection_count = 0
             self._truncate_flag = False
             self._chosen = []
-            if self._steps_since_switch >= self._deck_switch_steps:
+            # `attempt > 0` forces a fresh matchup on every retry. The
+            # switch-interval test alone would not: the first attempt zeroes
+            # `_steps_since_switch`, so with `deck_switch_steps > 0` every
+            # later attempt re-deals the *same* pair that just failed to
+            # produce an agent decision, and the loop can only burn all
+            # MAX_RESET_ATTEMPTS and kill the worker.
+            if attempt > 0 or self._steps_since_switch >= self._deck_switch_steps:
                 # Seat-aware: _agent_seat is already drawn above, and a sampler
                 # that pins the agent's deck or scores an ordered matchup needs
                 # to know which of the two decks the agent will receive.

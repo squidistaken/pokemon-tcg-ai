@@ -3,12 +3,20 @@ Compare two policies against a shared frozen opponent with held-out decks.
 
 Evaluates both against the same (opponent checkpoint + held-out opponent deck)
 pairs and reports mean and worst-decile win rate.
+
+Run from the repository root::
+
+    uv run python scripts/compare_policies.py --help
 """
 
 import argparse
 import json
 import statistics
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
 import torch
 from omegaconf import OmegaConf

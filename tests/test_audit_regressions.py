@@ -462,3 +462,111 @@ def test_evolution_stats_group_reprints_of_the_same_card_by_name() -> None:
     assert stat.games_pre_evo_played == 2, "both printings count as the pre-evolution"
     assert stat.games_evolved == 1
     assert stat.conversion_rate == 0.5
+
+
+def test_uniform_league_does_not_label_snapshot_games_as_anchor(tmp_path) -> None:
+    """
+    A league member that is a learner snapshot is not a fixed reference.
+    """
+    from src.env.snapshot_opponent_pool import SnapshotOpponentPool
+
+    def warmup(_observation):
+        return []
+
+    def snapshot(_observation):
+        return []
+
+    (tmp_path / "snapshot_000000000001.pt").write_bytes(b"placeholder")
+    pool = SnapshotOpponentPool(
+        checkpoint_dir=tmp_path,
+        load_snapshot=lambda _path: snapshot,
+        warmup_opponents=[warmup],
+        pool_size=5,
+        seed=0,
+    )
+    pool.on_reset()
+
+    assert pool.snapshot_count == 1
+    assert pool.active is snapshot
+    assert pool.active_is_anchor is False
+    # The warmup member is the anchor, and still reports as one.
+    pool.set_opponents([warmup])
+    assert pool.active_is_anchor is True
+
+
+def test_curriculum_sampler_seed_controls_the_matchup_draw() -> None:
+    """
+    Two samplers seeded differently must not walk one matchup sequence.
+    """
+    from src.env.archetype_index import ArchetypeIndex
+    from src.env.curriculum_deck_sampler import CurriculumDeckSampler
+    from src.env.curriculum_handles import CurriculumHandles
+
+    decks = [[index] for index in range(8)]
+    archetypes = ArchetypeIndex(
+        [f"a{index}" for index in range(8)], [[index] for index in range(8)]
+    )
+    handles = CurriculumHandles.allocate(64)
+    pairs = archetypes.pair_count
+    handles.publish(torch.arange(pairs), torch.full((pairs,), 1.0 / pairs))
+
+    def levels(seed: int) -> list[int]:
+        # Pinned so the only difference between the two runs is the sampler
+        # seed -- exactly the state forked workers share.
+        torch.manual_seed(0)
+        sampler = CurriculumDeckSampler(decks, archetypes, handles, seed=seed)
+        drawn = []
+        for _ in range(12):
+            sampler.sample()
+            drawn.append(sampler.level_id)
+        return drawn
+
+    assert levels(1) != levels(2)
+    # Still reproducible: the same seed replays the same matchups.
+    assert levels(1) == levels(1)
+
+
+def test_reset_redeals_decks_after_a_failed_battle_setup(monkeypatch) -> None:
+    """
+    A retried reset must draw a fresh matchup, not replay the failed one.
+    """
+    from src.env.tcg_env import TCGEnv
+
+    class CountingSampler:
+        """Deals a fresh pair each call and records how often it was asked."""
+
+        last_labels = None
+
+        def __init__(self) -> None:
+            self.deals = 0
+
+        def sample(self):
+            self.deals += 1
+            return list(DECK), list(DECK)
+
+        def seed(self, seed):
+            self.last_seed = seed
+
+    sampler = CountingSampler()
+    env = TCGEnv(
+        deck_sampler=sampler,
+        max_options=MAX_OPTIONS,
+        deck_switch_steps=1000,
+        seed=0,
+    )
+
+    attempts = {"n": 0}
+    real_advance = env._advance_to_agent  # noqa: SLF001
+
+    def failing_advance(observation):
+        attempts["n"] += 1
+        if attempts["n"] <= 2:
+            env._truncate_flag = True  # noqa: SLF001
+            return observation
+        return real_advance(observation)
+
+    monkeypatch.setattr(env, "_advance_to_agent", failing_advance)
+    env.reset()
+    env.close()
+
+    assert sampler.deals == 3

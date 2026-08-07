@@ -80,6 +80,16 @@ class SnapshotOpponentPool(OpponentPool):
         """
         return len(self._loaded)
 
+    @property
+    def active_is_anchor(self) -> bool:
+        """
+        Whether the member playing this episode is a fixed reference opponent.
+
+        :return: True if the drawn member is a warmup opponent.
+        """
+        active = self.active
+        return any(member is active for member in self._warmup_opponents)
+
     def on_reset(self) -> None:
         """
         Rescan for new snapshots, then draw the member for the next episode.

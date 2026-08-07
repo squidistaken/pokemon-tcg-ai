@@ -42,22 +42,22 @@ deck_sampling: uniform
 deck_holdout_frac: 0.2
 
 deck_pool:
-  - ${paths.data_dir}/alakazam-dudunsparce
-  - ${paths.data_dir}/cynthias-garchomp
-  - ${paths.data_dir}/dragapult
-  - ${paths.data_dir}/dragapult-blaziken
-  - ${paths.data_dir}/dragapult-dusknoir
-  - ${paths.data_dir}/festival-lead
-  - ${paths.data_dir}/flareon-noctowl
-  - ${paths.data_dir}/grimmsnarl-froslass
-  - ${paths.data_dir}/lucario-hariyama
-  - ${paths.data_dir}/mega-lucario
-  - ${paths.data_dir}/mega-venusaur
-  - ${paths.data_dir}/ns-zoroark
-  - ${paths.data_dir}/ogerpon-meganium
-  - ${paths.data_dir}/other
-  - ${paths.data_dir}/raging-bolt-ogerpon
-  - ${paths.data_dir}/rockets-honchkrow
-  - ${paths.data_dir}/rockets-mewtwo
-  - ${paths.data_dir}/rockets-porygon-z
-  - ${paths.data_dir}/slowking
+  - ${paths.data_dir}/${deck_corpus}/alakazam-dudunsparce
+  - ${paths.data_dir}/${deck_corpus}/cynthias-garchomp
+  - ${paths.data_dir}/${deck_corpus}/dragapult
+  - ${paths.data_dir}/${deck_corpus}/dragapult-blaziken
+  - ${paths.data_dir}/${deck_corpus}/dragapult-dusknoir
+  - ${paths.data_dir}/${deck_corpus}/festival-lead
+  - ${paths.data_dir}/${deck_corpus}/flareon-noctowl
+  - ${paths.data_dir}/${deck_corpus}/grimmsnarl-froslass
+  - ${paths.data_dir}/${deck_corpus}/lucario-hariyama
+  - ${paths.data_dir}/${deck_corpus}/mega-lucario
+  - ${paths.data_dir}/${deck_corpus}/mega-venusaur
+  - ${paths.data_dir}/${deck_corpus}/ns-zoroark
+  - ${paths.data_dir}/${deck_corpus}/ogerpon-meganium
+  - ${paths.data_dir}/${deck_corpus}/other
+  - ${paths.data_dir}/${deck_corpus}/raging-bolt-ogerpon
+  - ${paths.data_dir}/${deck_corpus}/rockets-honchkrow
+  - ${paths.data_dir}/${deck_corpus}/rockets-mewtwo
+  - ${paths.data_dir}/${deck_corpus}/rockets-porygon-z
+  - ${paths.data_dir}/${deck_corpus}/slowking
