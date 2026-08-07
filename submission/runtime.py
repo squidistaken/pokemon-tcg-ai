@@ -992,6 +992,7 @@ def _build_adapter(
         card_embed_dim=int(adapter_config.get("card_embed_dim", 8)),
         attack_embed_dim=int(adapter_config.get("attack_embed_dim", 8)),
         category_embed_dim=int(adapter_config.get("category_embed_dim", 4)),
+        zone_pooling=str(adapter_config.get("zone_pooling", "mean")),
     )
 
 
@@ -1322,7 +1323,14 @@ class LinearPolicyHead(nn.Module):
     #: This head reads only ``state_repr``.
     requires_option_repr = False
 
-    def __init__(self, in_features: int, n_actions: int) -> None:
+    def __init__(
+        self,
+        in_features: int,
+        n_actions: int,
+        head_config: Mapping[str, Any],
+        state_dict: Mapping[str, torch.Tensor],
+    ) -> None:
+        del head_config, state_dict
         super().__init__()
         self.linear = nn.Linear(in_features, n_actions)
 
@@ -1348,7 +1356,14 @@ class PointerPolicyHead(nn.Module):
     #: This head cannot run on ``state_repr`` alone.
     requires_option_repr = True
 
-    def __init__(self, in_features: int, n_actions: int) -> None:
+    def __init__(
+        self,
+        in_features: int,
+        n_actions: int,
+        head_config: Mapping[str, Any],
+        state_dict: Mapping[str, torch.Tensor],
+    ) -> None:
+        del head_config, state_dict
         super().__init__()
         self.n_actions = n_actions
         self.query = nn.Linear(in_features, in_features)
@@ -1370,6 +1385,76 @@ class PointerPolicyHead(nn.Module):
         return (option_repr * query).sum(dim=-1) / self._scale
 
 
+class PointerHead(nn.Module):
+    """
+    Pointer head scoring ``[state_repr, option_repr_i]`` with a shared MLP.
+
+    The dot-product :class:`PointerPolicyHead` above compresses that comparison
+    into a single scaled product; this variant runs a shared two-layer scorer
+    over the concatenation instead, which is the training default. The synthetic
+    stop action has no option row to score, so its logit comes from a separate
+    state-only branch rather than from a row of the option table.
+
+    Widths come from the saved weights rather than the config: ``scorer.0``
+    consumes ``state_repr`` and one option token side by side, so its input
+    width minus ``in_features`` is the option width the backbone must emit.
+
+    :param in_features: Width of the incoming ``state_repr``.
+    :param n_actions: Size of the action space; the last index is stop.
+    :param head_config: Trained head config, read for the hidden activation.
+    :param state_dict: Checkpoint weights, measured for the layer widths.
+    """
+
+    #: This head cannot run on ``state_repr`` alone.
+    requires_option_repr = True
+
+    def __init__(
+        self,
+        in_features: int,
+        n_actions: int,
+        head_config: Mapping[str, Any],
+        state_dict: Mapping[str, torch.Tensor],
+    ) -> None:
+        super().__init__()
+        self.n_actions = n_actions
+        self.n_option_slots = n_actions - 1
+        scorer_input = state_dict["policy_head.scorer.0.weight"].shape[1]
+        self.option_dim = int(scorer_input) - in_features
+        if self.option_dim <= 0:
+            raise ValueError(
+                f"PointerHead scorer takes {scorer_input} inputs, which leaves no "
+                f"option width alongside a {in_features}-wide state."
+            )
+        hidden = [
+            int(state_dict[f"policy_head.scorer.{index}.weight"].shape[0])
+            for index in range(0, 2 * len(head_config.get("num_cells", [])), 2)
+        ]
+        activation = str(head_config.get("activation", "tanh"))
+        self.scorer = _mlp(in_features + self.option_dim, hidden, 1, activation)
+        self.stop_scorer = _mlp(in_features, hidden, 1, activation)
+
+    def forward(
+        self,
+        state_repr: torch.Tensor,
+        option_repr: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if option_repr is None:
+            raise ValueError("PointerHead needs per-option tokens.")
+        if option_repr.shape[-2] < self.n_option_slots:
+            raise ValueError(
+                f"option_repr has {option_repr.shape[-2]} slots but the action space "
+                f"needs {self.n_option_slots} scored options."
+            )
+        options = option_repr[..., : self.n_option_slots, :]
+        broadcast_state = state_repr.unsqueeze(-2).expand(
+            *state_repr.shape[:-1], self.n_option_slots, state_repr.shape[-1]
+        )
+        option_logits = self.scorer(
+            torch.cat([broadcast_state, options], dim=-1)
+        ).squeeze(-1)
+        return torch.cat([option_logits, self.stop_scorer(state_repr)], dim=-1)
+
+
 class ValueHead(nn.Module):
     """Checkpoint-compatible critic, retained only for strict loading."""
 
@@ -1387,6 +1472,7 @@ _BACKBONES: dict[str, type[nn.Module]] = {
 _POLICY_HEADS: dict[str, type[nn.Module]] = {
     "src.models.heads.LinearPolicyHead": LinearPolicyHead,
     "src.models.heads.PointerPolicyHead": PointerPolicyHead,
+    "src.models.heads.PointerHead": PointerHead,
 }
 
 
@@ -1414,7 +1500,9 @@ class ActorCritic(nn.Module):
             )
         embed_dim = int(config["embed_dim"])
         self.backbone = _BACKBONES[backbone_target](state_dict, config)
-        self.policy_head = _POLICY_HEADS[head_target](embed_dim, max_options + 1)
+        self.policy_head = _POLICY_HEADS[head_target](
+            embed_dim, max_options + 1, config["head"], state_dict
+        )
         self.value_head = ValueHead(
             embed_dim, [int(value) for value in config["value_head"]["num_cells"]]
         )
