@@ -142,6 +142,8 @@ class Trainer(BaseTrainer):
     :meth:`_update` with the advantage/loss/optimizer step.
     """
 
+    _callbacks: CallbackList
+
     def __init__(
             self,
             env_factories: list[Callable[[], EnvBase]],
