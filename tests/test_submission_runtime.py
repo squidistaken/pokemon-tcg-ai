@@ -5,9 +5,9 @@ from typing import Any, cast
 
 import pytest
 import torch
-from cg.api import Observation
 from omegaconf import DictConfig, OmegaConf
 
+from cg.api import Observation
 from src.env.battle_handle import BattleHandle
 from src.env.deck import load_deck
 from src.env.random_opponent import RandomOpponent
