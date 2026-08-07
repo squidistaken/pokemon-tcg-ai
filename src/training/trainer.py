@@ -70,11 +70,14 @@ class _RunTotals:
     in-flight batch: the counters, the policy, the optimizer and the curriculum
     all survive untouched.
 
-    :param frames: Frames collected so far.
+    :param frames: Frames collected so far *by this run*.
     :param episodes: Episodes finished so far.
     :param wins: Episodes won so far.
     :param draws: Episodes drawn so far.
-    :param last_eval_frames: Frame count at the most recent evaluation.
+    :param last_eval_frames: Absolute frame count at the most recent evaluation.
+    :param start_frames: Frames a warm-started run inherits from the checkpoint
+        it continues, so reported counts carry on from there rather than
+        restarting at zero.
     """
 
     frames: int = 0
@@ -82,6 +85,21 @@ class _RunTotals:
     wins: int = 0
     draws: int = 0
     last_eval_frames: int = 0
+    start_frames: int = 0
+
+    @property
+    def absolute_frames(self) -> int:
+        """
+        Frame count as reported outward, spanning the run being continued.
+
+        The collection loop budgets against :attr:`frames` (what *this* process
+        must still collect), while snapshots, metrics and evaluation intervals
+        are keyed to this absolute count, so a continued run's checkpoints sort
+        after its predecessor's instead of colliding with them.
+
+        :return: Inherited frames plus frames collected so far.
+        """
+        return self.start_frames + self.frames
 
 
 @contextmanager
@@ -140,6 +158,7 @@ class Trainer(BaseTrainer):
             max_collector_restarts: int = 0,
             rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]] | None = None,
             pipe_timeout: float | None = None,
+            start_frames: int = 0,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -178,6 +197,11 @@ class Trainer(BaseTrainer):
             ``max_collector_restarts`` is what recovers from it. ``None``
             keeps torchrl's default. See
             :func:`~src.training.pipe_timeout.apply_pipe_timeout`.
+        :param start_frames: Frames already collected by the run this one
+            continues, taken from the warm-start checkpoint. ``total_frames``
+            still means frames to collect *now*, so this only shifts what the
+            run reports: metrics, snapshot filenames and evaluation intervals
+            all count from here. ``0`` is a fresh run.
         """
         self._env_factories = env_factories
         self._policy = policy
@@ -193,6 +217,7 @@ class Trainer(BaseTrainer):
         self._max_collector_restarts = max_collector_restarts
         self._rebuild_env_factories = rebuild_env_factories
         self._pipe_timeout = pipe_timeout
+        self._start_frames = start_frames
         # The Collector rounds its budget up to a whole number of batches, so
         # anchoring the loop to the same rounded figure keeps the remaining
         # frames handed to a restarted Collector exactly divisible. Passing the
@@ -222,14 +247,20 @@ class Trainer(BaseTrainer):
         :return: Aggregate statistics: frames, episodes, win/draw rate and fps,
             covering the frames collected before any interruption.
         """
-        totals = _RunTotals()
+        totals = _RunTotals(
+            last_eval_frames=self._start_frames, start_frames=self._start_frames
+        )
         start_time = time.time()
         restarts = 0
         barren_restarts = 0
         collector: Collector | None = None
         try:
             self._callbacks.on_train_start(self._run_config)
-            with tqdm(total=self._total_frames, unit="frame") as progress_bar:
+            with tqdm(
+                total=self._start_frames + self._total_frames,
+                initial=self._start_frames,
+                unit="frame",
+            ) as progress_bar:
                 while totals.frames < self._budget:
                     if restarts:
                         self._prepare_restart(restarts)
@@ -247,7 +278,7 @@ class Trainer(BaseTrainer):
                             logger.error(
                                 "Worker pool died at %d frames after %d restart(s); "
                                 "the restart budget (collector.max_restarts) is spent.",
-                                totals.frames,
+                                totals.absolute_frames,
                                 restarts,
                             )
                             raise
@@ -266,7 +297,7 @@ class Trainer(BaseTrainer):
                             "Worker pool died at %d frames (%s). Restarting collection "
                             "(%d of %d); the in-flight batch and all battles in "
                             "progress are discarded.",
-                            totals.frames,
+                            totals.absolute_frames,
                             error,
                             restarts,
                             self._max_collector_restarts,
@@ -280,7 +311,7 @@ class Trainer(BaseTrainer):
             logger.warning(
                 "Interrupted at %d frames; shutting down and reporting partial results. "
                 "Press Ctrl-C again only if shutdown hangs.",
-                totals.frames,
+                totals.absolute_frames,
             )
         except BaseException as error:
             # Recorded before the teardown below so metric backends can mark the
@@ -295,11 +326,12 @@ class Trainer(BaseTrainer):
             if collector is not None:
                 self._shutdown_collector(collector)
             summary = self._metrics(
-                totals.frames,
+                totals.absolute_frames,
                 totals.episodes,
                 totals.wins,
                 totals.draws,
                 time.time() - start_time,
+                collected_frames=totals.frames,
             )
             if restarts:
                 logger.warning(
@@ -329,7 +361,7 @@ class Trainer(BaseTrainer):
         :param start_time: Wall-clock start of the run, for the fps figure.
         """
         for data in collector:
-            self._callbacks.on_rollout_start(totals.frames)
+            self._callbacks.on_rollout_start(totals.absolute_frames)
             assert isinstance(data, TensorDict)
             batch_frames = data.numel()
             totals.frames += batch_frames
@@ -343,21 +375,22 @@ class Trainer(BaseTrainer):
             losses = self._update(data)
 
             metrics = self._metrics(
-                totals.frames,
+                totals.absolute_frames,
                 totals.episodes,
                 totals.wins,
                 totals.draws,
                 time.time() - start_time,
                 losses,
+                collected_frames=totals.frames,
             )
             progress_bar.update(batch_frames)
             self._log_progress(progress_bar, metrics)
-            self._callbacks.on_rollout_end(totals.frames, metrics)
-            if self._should_evaluate(totals.frames, totals.last_eval_frames):
-                totals.last_eval_frames = totals.frames
+            self._callbacks.on_rollout_end(totals.absolute_frames, metrics)
+            if self._should_evaluate(totals.absolute_frames, totals.last_eval_frames):
+                totals.last_eval_frames = totals.absolute_frames
                 assert self._evaluator is not None
                 self._callbacks.on_eval_end(
-                    totals.frames, self._evaluator.evaluate(self._policy)
+                    totals.absolute_frames, self._evaluator.evaluate(self._policy)
                 )
 
     def _make_collector(self, remaining_frames: int) -> Collector:
@@ -460,18 +493,24 @@ class Trainer(BaseTrainer):
             draws: int,
             elapsed: float,
             losses: dict[str, float] | None = None,
+            collected_frames: int | None = None,
     ) -> dict[str, float]:
         """
         Build the metrics mapping for the run so far.
 
-        :param frames: Total frames collected so far.
+        :param frames: Frame count as reported, spanning a warm-started run's
+            inherited frames.
         :param episodes: Total episodes finished so far.
         :param wins: Total wins so far.
         :param draws: Total draws so far.
         :param elapsed: Wall-clock seconds since training started.
         :param losses: Loss values from the last update, merged in if present.
+        :param collected_frames: Frames this process actually collected, which
+            is what the throughput figure is per second *of*. None means the
+            run collected everything it reports, i.e. no warm start.
         :return: Metrics keyed by :data:`_CORE_METRICS` plus any loss keys.
         """
+        throughput_frames = frames if collected_frames is None else collected_frames
         metrics: dict[str, float] = {
             "frames": frames,
             "episodes": episodes,
@@ -479,7 +518,7 @@ class Trainer(BaseTrainer):
             "draw_rate": draws / max(episodes, 1),
             # Guarded because a fast first batch can land inside the clock's
             # resolution, making elapsed 0.
-            "fps": frames / max(elapsed, 1e-9),
+            "fps": throughput_frames / max(elapsed, 1e-9),
         }
         if losses:
             metrics.update(losses)

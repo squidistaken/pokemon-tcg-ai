@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
 from tensordict import TensorDict
 
@@ -296,6 +297,52 @@ class Curriculum:
         staging.replace(destination)
         logger.debug("Wrote curriculum state to %s", destination)
 
+    def load_state(self, path: str | Path) -> None:
+        """
+        Restore buffer entries written by :meth:`save_state`.
+
+        A continued run that skips this rediscovers every matchup from nothing,
+        throwing away the visit counts and win/loss tallies that decide which
+        matchups the sampler prioritizes -- the curriculum's whole state.
+
+        The saved archetype names are checked against the current index because
+        a level is addressed by ``pair_id = agent * count + opponent``. That
+        encoding is only meaningful against the archetype list it was computed
+        from: load a state built over a different corpus and every entry silently
+        refers to the wrong matchup, which no later error would reveal.
+
+        :param path: File written by :meth:`save_state`.
+        :raises ValueError: If the file's archetypes differ from this run's, or
+            it holds more entries than this run's buffer can.
+        """
+        state = torch.load(Path(path), map_location="cpu", weights_only=False)
+        saved_archetypes = list(state["archetypes"])
+        current = list(self._archetypes.names)
+        if saved_archetypes != current:
+            raise ValueError(
+                f"curriculum state at {path} was built over {len(saved_archetypes)} "
+                f"archetypes and this run has {len(current)}; matchup ids are "
+                f"positions in that list, so the entries would be misattributed. "
+                f"Point env.curriculum.init_state at a state from a run over this "
+                f"same deck corpus, or leave it unset to start fresh."
+            )
+        saved_entries = len(state["buffer"]["pair_id"])
+        if saved_entries > self._buffer.capacity:
+            raise ValueError(
+                f"curriculum state at {path} holds {saved_entries} entries but "
+                f"env.curriculum.capacity is {self._buffer.capacity}. Loading it "
+                f"would push the buffer past the capacity its eviction policy "
+                f"assumes. Raise the capacity to at least {saved_entries}."
+            )
+        self._buffer.load_state_dict(state["buffer"])
+        self.publish()
+        logger.info(
+            "Restored curriculum: %d scored matchup(s) over %d archetypes from %s",
+            self._buffer.size,
+            len(current),
+            path,
+        )
+
     def _observe_row(
             self,
             accumulator: _OpenEpisode,
@@ -436,7 +483,7 @@ def build_curriculum(cfg: DictConfig) -> Curriculum | None:
         capacity,
         "" if not oversized else f", discovering lazily (explore_prob={explore_prob})",
     )
-    return Curriculum(
+    curriculum = Curriculum(
         archetypes=archetypes,
         handles=CurriculumHandles.allocate(capacity),
         buffer=buffer,
@@ -444,3 +491,12 @@ def build_curriculum(cfg: DictConfig) -> Curriculum | None:
         anchor_only_scoring=bool(settings.get("anchor_only_scoring", False)),
         explore_prob=explore_prob,
     )
+    init_state = settings.get("init_state")
+    if init_state:
+        state_path = Path(to_absolute_path(str(init_state)))
+        if not state_path.is_file():
+            raise ValueError(
+                f"env.curriculum.init_state {state_path} does not exist."
+            )
+        curriculum.load_state(state_path)
+    return curriculum

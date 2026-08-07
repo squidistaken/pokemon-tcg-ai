@@ -86,6 +86,14 @@ curriculum:
   # those over a window of training, which a single end-of-run total cannot
   # provide. Null derives an interval from the batch size.
   state_interval: null
+  # Continue a previous run's level buffer from one of those dumps, so a
+  # continued run keeps the visit counts and win/loss tallies that decide which
+  # matchups the sampler prioritizes instead of rediscovering the corpus. The
+  # dump must come from a run over this same deck corpus: a matchup is
+  # identified by its position in the archetype list, so a state built over a
+  # different list would silently address the wrong matchups, and loading one
+  # raises. Null starts with an empty buffer.
+  init_state: null
 # Padded size of the option space (stop action excluded); must exceed the
 # largest option list the engine can offer, or options get truncated.
 max_options: 128
