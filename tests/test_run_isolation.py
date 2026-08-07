@@ -15,7 +15,7 @@ from unittest import mock
 import pytest
 import yaml
 from hydra.core.hydra_config import HydraConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from src.hydra_resolvers import run_uid
 from src.train import _resolve_checkpoint_dir
@@ -23,7 +23,7 @@ from src.train import _resolve_checkpoint_dir
 CONF_ROOT = Path(__file__).parents[1] / "conf"
 
 
-def _cfg(checkpoint_dir: str) -> OmegaConf:
+def _cfg(checkpoint_dir: str) -> DictConfig:
     """
     Build the minimal config ``_resolve_checkpoint_dir`` reads.
 

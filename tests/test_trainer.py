@@ -1,6 +1,8 @@
 import os
 import signal
+from multiprocessing.process import BaseProcess
 from pathlib import Path
+from typing import cast
 
 import pytest
 import torch
@@ -344,8 +346,10 @@ class _WorkerKillingTrainer(Trainer):
         # ParallelEnv exposes its processes only privately and offers no public
         # accessor; an AttributeError here is the right failure if torchrl ever
         # renames it, rather than a test that quietly kills nothing.
-        workers = collector.env._workers  # noqa: SLF001 - no public accessor
-        self.pools.append([worker.pid for worker in workers])
+        workers = cast(
+            list[BaseProcess], collector.env._workers  # noqa: SLF001 - no public accessor
+        )
+        self.pools.append([cast(int, worker.pid) for worker in workers])
         original_update = self._update
 
         def update_then_kill(data):

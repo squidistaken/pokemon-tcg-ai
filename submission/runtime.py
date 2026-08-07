@@ -664,7 +664,6 @@ class StructuredObsAdapter(nn.Module):
     ) -> list[torch.Tensor]:
         """Encode each group separately, in ``group_names`` order."""
         parts: list[torch.Tensor] = []
-        option_tokens: torch.Tensor | None = None
         for name in group_names:
             value = observation[name]
             if name == "globals":
@@ -675,8 +674,6 @@ class StructuredObsAdapter(nn.Module):
                 parts.append(self._encode_card_ids(value))
             elif name == "options":
                 parts.append(self._encode_options(value))
-                if self._emit_option_tokens:
-                    option_tokens = self._option_encoder(self._option_rows(value))
             elif name == "pokemon":
                 parts.append(self._encode_pokemon(value))
             else:

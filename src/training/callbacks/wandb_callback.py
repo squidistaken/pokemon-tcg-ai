@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
@@ -105,7 +106,14 @@ class WeightsAndBiases(TrainingCallback):
             # ParallelEnv workers inherit the parent's file descriptors. Using
             # low-level redirection captures their stdout and stderr too, while
             # W&B's default stream wrapping only sees writes in this process.
-            settings=wandb.Settings(console="redirect"),
+            settings=wandb.Settings(
+                console="redirect",
+                # ``redirect`` preserves low-level worker output in output.log,
+                # but those records may not populate W&B's Logs tab. Send the
+                # application's Python logs there through W&B's supported
+                # logger integration as well.
+                capture_loggers={"root": "INFO"},
+            ),
         )
         logger.info(
             "W&B run started: %s (%s, mode=%s)",
@@ -216,6 +224,10 @@ class WeightsAndBiases(TrainingCallback):
         self._failure = error
         if self._run is not None:
             self._run.summary["summary/error"] = f"{type(error).__name__}: {error}"
+            # The run is finished during callback teardown, before the
+            # interpreter prints an uncaught exception. Publish the traceback
+            # now so it is visible in W&B's Logs tab while the run is active.
+            self._run.write_logs("".join(traceback.format_exception(error)).rstrip())
 
     def on_train_end(self, summary: Mapping[str, float]) -> None:
         """
