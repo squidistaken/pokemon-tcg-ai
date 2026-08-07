@@ -221,6 +221,7 @@ def _build_ppo_trainer(
         gamma=cfg.agent.gamma,
         lmbda=cfg.agent.lmbda,
         average_gae=cfg.agent.get("average_gae", True),
+        gae_num_chunks=cfg.agent.get("gae_num_chunks", None),
         lr=cfg.agent.lr,
         num_epochs=cfg.agent.num_epochs,
         sub_batch_size=cfg.agent.sub_batch_size,
