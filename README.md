@@ -90,8 +90,9 @@ src/
     random_opponent.py          Uniform-random opponent baseline
   models/                     Actor-critic network, independent of the policy/training wiring
     backbone.py                  Backbone ABC + MLPBackbone (SetTransformer/TemporalTransformer/Recurrent planned)
-    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, set-pools zones,
-                                   and emits the per-option token table the pointer head scores
+    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, set-pools zones
+                                   (per seat for the board, see adapter.pokemon_seat_split), and emits the
+                                   per-option token table the pointer head scores
     heads.py                     PointerHead (per-option scoring, the default) + LinearPolicyHead
                                    (flat slot-indexed logits, the baseline) + ValueHead (scalar critic)
     actor_critic.py              ActorCritic: shared trunk feeding both heads, tensordict-in/tensordict-out
