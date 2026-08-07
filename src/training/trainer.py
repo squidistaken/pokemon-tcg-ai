@@ -17,6 +17,7 @@ from src.training.base_trainer import BaseTrainer
 from src.training.callbacks import CallbackList, TrainingCallback
 from src.training.evaluator import Evaluator
 from src.training.multi_evaluator import MultiEvaluator
+from src.training.pipe_timeout import apply_pipe_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,7 @@ class Trainer(BaseTrainer):
             eval_interval: int = 0,
             max_collector_restarts: int = 0,
             rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]] | None = None,
+            pipe_timeout: float = 0.0,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -170,6 +172,12 @@ class Trainer(BaseTrainer):
             original factories, which is fine for a stochastic policy but
             re-deals the same deck/seat sequence. Unused when
             ``max_collector_restarts`` is 0.
+        :param pipe_timeout: Seconds a worker and its parent wait on each other
+            before raising, overriding torchrl's 10000-second default. This is
+            purely how fast an unresponsive worker is *detected*;
+            ``max_collector_restarts`` is what recovers from it. ``0`` keeps
+            torchrl's default. See
+            :func:`~src.training.pipe_timeout.apply_pipe_timeout`.
         """
         self._env_factories = env_factories
         self._policy = policy
@@ -184,6 +192,7 @@ class Trainer(BaseTrainer):
         self._eval_interval = eval_interval
         self._max_collector_restarts = max_collector_restarts
         self._rebuild_env_factories = rebuild_env_factories
+        self._pipe_timeout = pipe_timeout
         # The Collector rounds its budget up to a whole number of batches, so
         # anchoring the loop to the same rounded figure keeps the remaining
         # frames handed to a restarted Collector exactly divisible. Passing the
@@ -547,6 +556,7 @@ class Trainer(BaseTrainer):
 
         :return: ParallelEnv (fork workers) or SerialEnv over the factories.
         """
+        apply_pipe_timeout(self._pipe_timeout)
         if self._use_parallel_env:
             torch_mp.set_start_method(self._mp_start_method, force=True)
             return ParallelEnv(

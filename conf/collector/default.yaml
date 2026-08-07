@@ -16,3 +16,18 @@ total_frames: 16384
 # on the first death instead -- what you want when debugging the engine rather
 # than training through it.
 max_restarts: 20
+
+# Seconds a ParallelEnv worker and its parent wait on each other before giving
+# up, overriding torchrl's BATCHED_PIPE_TIMEOUT default of 10000 (2h47m).
+#
+# That default is the recovery latency, not the failure: when one worker stops
+# answering, the parent spins on it and the other 31 sit idle waiting for work,
+# and nobody raises until the timeout expires. Two such incidents cost a 5M-frame
+# run 5.6 of its 8.9 hours -- 63% of the wall clock spent waiting to find out
+# something was already wrong. `max_restarts` then recovers in seconds.
+#
+# The floor is how long a legitimate step or reset can take: a batch of 16384
+# frames across 32 workers runs in ~33s, and a single step is far below that, so
+# 180 leaves ample headroom. Raise it if a slow reset ever trips it; set 0 to
+# keep torchrl's default.
+pipe_timeout: 180
