@@ -114,6 +114,18 @@ class CallbackList(TrainingCallback):
         """
         return len(self._callbacks)
 
+    def append(self, callback: TrainingCallback) -> None:
+        """
+        Attach one more member, invoked after those already present.
+
+        For a callback that cannot be built before the trainer is: the
+        training-state writer needs the optimizer, which does not exist until
+        the trainer's own constructor has run.
+
+        :param callback: Member to attach.
+        """
+        self._callbacks.append(callback)
+
     def _dispatch(self, hook: str, *args: Any) -> None:
         """
         Call ``hook`` on every member in order.

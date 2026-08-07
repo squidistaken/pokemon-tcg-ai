@@ -5,6 +5,7 @@ from .callbacks import (
     CurriculumStateCallback,
     SnapshotCallback,
     TrainingCallback,
+    TrainStateCallback,
     WeightsAndBiases,
 )
 from .curriculum import Curriculum, build_curriculum
@@ -29,6 +30,7 @@ __all__ = [
     "MultiEvaluator",
     "PPOTrainer",
     "SnapshotCallback",
+    "TrainStateCallback",
     "Trainer",
     "TrainingCallback",
     "WeightsAndBiases",
