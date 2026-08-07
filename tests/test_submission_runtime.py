@@ -208,6 +208,38 @@ def test_torch_only_transformer_matches_training_logits(
         torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
 
 
+@pytest.mark.parametrize("backbone", ["mlp", "transformer"])
+def test_seat_split_adapter_matches_training_logits(
+    backbone: str,
+    structured_model_cfg: DictConfig,
+    transformer_model_cfg: DictConfig,
+    structured_obs_spec,
+    action_spec,
+) -> None:
+    """
+    ``adapter.pokemon_seat_split`` widens the ``pokemon`` group, which resizes
+    the first projection of *both* trunks, so the portable runtime has to read
+    the flag out of the embedded config to rebuild the same shapes. Covered on
+    each backbone because they consume that width through different modules
+    (``MLPBackbone``'s input layer, the transformer's ``token_projections``).
+    """
+    torch.manual_seed(23)
+    base = structured_model_cfg if backbone == "mlp" else transformer_model_cfg
+    cfg = cast(
+        DictConfig,
+        OmegaConf.merge(base, {"model": {"adapter": {"pokemon_seat_split": True}}}),
+    )
+    actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec).eval()
+    policy = Policy({"state_dict": actor_critic.state_dict()}, _portable_config(cfg))
+    fixtures = torch.load(_FIXTURES_PATH, weights_only=False)
+
+    for case_name in fixtures.keys():  # noqa: SIM118 - TensorDict iteration differs.
+        case = fixtures[case_name]
+        expected = actor_critic.policy_logits(case)
+        actual = policy.model.policy_logits(case["observation"].to_dict())
+        torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
+
+
 def test_transformer_strict_loads_checkpoint_predating_segment_embeddings(
     transformer_model_cfg: DictConfig,
     structured_obs_spec,

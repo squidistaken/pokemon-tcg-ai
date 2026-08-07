@@ -105,6 +105,19 @@ class StructuredObservationEncoder(ObservationEncoder):
     GLOBAL_FEATURE_COUNT = 41
     OPTION_CATEGORICAL_COUNT = 4
     OPTION_SCALAR_COUNT = 6
+    #: Live state of the in-play Pokemon an option acts on, written onto the
+    #: option's own row: ``[resolved, hp, maxHp, hp fraction, energy count,
+    #: tool count, is-active]``. All zero when the option targets no Pokemon,
+    #: with column 0 the flag that separates "no target" from "a target whose
+    #: values happen to be zero".
+    #:
+    #: ``target_id`` already carries *which card* is targeted, but a card ID is
+    #: shared by every copy of that card. Without this block two "attach
+    #: energy" options over two copies of the same Pokemon differ only in a raw
+    #: index scalar, so the policy can tell them apart but cannot rank them --
+    #: and no feedforward network can recover the difference by indexing the
+    #: ``pokemon`` table with that scalar.
+    OPTION_TARGET_FEATURE_COUNT = 7
     POKEMON_FEATURE_COUNT = 20
     ENERGY_TYPE_COUNT = 12
     # Eight game fields followed by selection-present/min/max/option-count.
@@ -186,6 +199,9 @@ class StructuredObservationEncoder(ObservationEncoder):
         self._np_option_owner = np.zeros(n_slots, dtype=np.int64)
         self._np_option_cats = np.zeros((n_slots, self.OPTION_CATEGORICAL_COUNT), dtype=np.int64)
         self._np_option_scalars = np.full((n_slots, self.OPTION_SCALAR_COUNT), -1.0, dtype=np.float32)
+        self._np_option_target = np.zeros(
+            (n_slots, self.OPTION_TARGET_FEATURE_COUNT), dtype=np.float32
+        )
 
         self._np_pokemon_card_id = np.zeros(self._pokemon_rows, dtype=np.int64)
         self._np_pokemon_tool_id = np.zeros(self._pokemon_rows, dtype=np.int64)
@@ -237,6 +253,10 @@ class StructuredObservationEncoder(ObservationEncoder):
                 owner=Unbounded(shape=(n_action_slots,), dtype=torch.int64),
                 cats=Unbounded(shape=(n_action_slots, self.OPTION_CATEGORICAL_COUNT), dtype=torch.int64),
                 scalars=Unbounded(shape=(n_action_slots, self.OPTION_SCALAR_COUNT), dtype=torch.float32),
+                target_state=Unbounded(
+                    shape=(n_action_slots, self.OPTION_TARGET_FEATURE_COUNT),
+                    dtype=torch.float32,
+                ),
             ),
             pokemon=Composite(
                 card_id=Unbounded(shape=(self._pokemon_rows,), dtype=torch.int64),
@@ -471,12 +491,14 @@ class StructuredObservationEncoder(ObservationEncoder):
         owner = self._np_option_owner
         cats = self._np_option_cats
         scalars = self._np_option_scalars
+        target_state = self._np_option_target
         card_id.fill(0)
         target_id.fill(0)
         attack_id.fill(0)
         owner.fill(0)
         cats.fill(0)
         scalars.fill(-1.0)
+        target_state.fill(0.0)
         options = select.option if select is not None else []
         if len(options) > self._max_options:
             raise ValueError(
@@ -499,6 +521,27 @@ class StructuredObservationEncoder(ObservationEncoder):
             card_id[slot], target_id[slot], attack_id[slot] = OptionReferenceResolver.resolve(
                 state, select, option, agent_seat
             )
+            # The targeted Pokemon's *live* state, which target_id cannot carry:
+            # it is a card ID, identical across every copy of that card.
+            target = OptionReferenceResolver.resolve_target_pokemon(
+                state, option, agent_seat
+            )
+            if target is not None:
+                is_active = any(
+                    entry is target
+                    for entry in state.players[
+                        option.playerIndex if option.playerIndex is not None else agent_seat
+                    ].active
+                )
+                target_state[slot, 0] = 1.0
+                target_state[slot, 1] = float(target.hp)
+                target_state[slot, 2] = float(target.maxHp)
+                target_state[slot, 3] = (
+                    target.hp / target.maxHp if target.maxHp > 0 else 0.0
+                )
+                target_state[slot, 4] = float(len(target.energyCards))
+                target_state[slot, 5] = float(len(target.tools))
+                target_state[slot, 6] = 1.0 if is_active else 0.0
         return TensorDict(
             {
                 "card_id": torch.from_numpy(card_id).clone(),
@@ -507,6 +550,7 @@ class StructuredObservationEncoder(ObservationEncoder):
                 "owner": torch.from_numpy(owner).clone(),
                 "cats": torch.from_numpy(cats).clone(),
                 "scalars": torch.from_numpy(scalars).clone(),
+                "target_state": torch.from_numpy(target_state).clone(),
             },
             batch_size=torch.Size(()),
         )

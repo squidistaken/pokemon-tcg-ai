@@ -12,6 +12,57 @@ class OptionReferenceResolver:
     """
 
     @staticmethod
+    def resolve_target_pokemon(
+        state: State,
+        option: Option,
+        agent_seat: int,
+    ) -> Pokemon | None:
+        """
+        Resolve the in-play Pokemon an option acts on, as an object.
+
+        :meth:`resolve` already dereferences the same reference, but returns
+        only the target's *card ID*. A card ID is identical for every copy of
+        that card, so it cannot express that *this* Charizard is at 40 HP with
+        two energy attached while the one beside it is untouched. Two
+        "attach energy" options over two copies of the same card would encode
+        identically apart from their raw ``inPlayIndex`` scalar, leaving the
+        policy able to tell them apart but not to rank them.
+
+        Returning the Pokemon lets the encoder put that instance's live state
+        onto the option row, which is the only route to it: a feedforward
+        network cannot use an index scalar to look a row up in the ``pokemon``
+        table.
+
+        Mirrors :meth:`resolve`'s reference handling exactly -- attached-card
+        options point at their carrier through ``area``/``index``, while
+        attach/evolve options point at their destination through
+        ``inPlayArea``/``inPlayIndex``.
+
+        :param state: Current engine state.
+        :param option: Option to resolve.
+        :param agent_seat: Player index of the agent, used as the owner for
+            option types whose references omit ``playerIndex``.
+        :return: The referenced Pokemon, or None when the option does not act
+            on one (or the reference is absent/out of range).
+        """
+        owner_index = (
+            option.playerIndex if option.playerIndex is not None else agent_seat
+        )
+        if option.type in (
+            OptionType.TOOL_CARD,
+            OptionType.ENERGY_CARD,
+            OptionType.ENERGY,
+        ):
+            return OptionReferenceResolver._pokemon_at(
+                state, owner_index, option.area, option.index
+            )
+        if option.type in (OptionType.ATTACH, OptionType.EVOLVE):
+            return OptionReferenceResolver._pokemon_at(
+                state, owner_index, option.inPlayArea, option.inPlayIndex
+            )
+        return None
+
+    @staticmethod
     def resolve(
         state: State,
         select: SelectData,

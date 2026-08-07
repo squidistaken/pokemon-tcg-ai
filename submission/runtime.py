@@ -54,6 +54,35 @@ class OptionReferenceResolver:
     """Resolve engine option references to concrete card and attack IDs."""
 
     @staticmethod
+    def resolve_target_pokemon(
+        state: State,
+        option: Option,
+        agent_seat: int,
+    ) -> Pokemon | None:
+        """
+        Return the in-play Pokemon an option acts on, mirroring the training
+        resolver. ``target_id`` carries only the target's card ID, which is
+        shared by every copy of that card; this is what lets the option row
+        carry that instance's live state.
+        """
+        owner_index = (
+            option.playerIndex if option.playerIndex is not None else agent_seat
+        )
+        if option.type in (
+            OptionType.TOOL_CARD,
+            OptionType.ENERGY_CARD,
+            OptionType.ENERGY,
+        ):
+            return OptionReferenceResolver._pokemon_at(
+                state, owner_index, option.area, option.index
+            )
+        if option.type in (OptionType.ATTACH, OptionType.EVOLVE):
+            return OptionReferenceResolver._pokemon_at(
+                state, owner_index, option.inPlayArea, option.inPlayIndex
+            )
+        return None
+
+    @staticmethod
     def resolve(
         state: State,
         select: SelectData,
@@ -198,6 +227,7 @@ class StructuredObservationEncoder:
     GLOBAL_FEATURE_COUNT = 41
     OPTION_CATEGORICAL_COUNT = 4
     OPTION_SCALAR_COUNT = 6
+    OPTION_TARGET_FEATURE_COUNT = 7
     POKEMON_FEATURE_COUNT = 20
     ENERGY_TYPE_COUNT = 12
 
@@ -359,6 +389,9 @@ class StructuredObservationEncoder:
             "scalars": torch.full(
                 (n_slots, self.OPTION_SCALAR_COUNT), -1.0, dtype=torch.float32
             ),
+            "target_state": torch.zeros(
+                (n_slots, self.OPTION_TARGET_FEATURE_COUNT), dtype=torch.float32
+            ),
         }
         options = select.option if select is not None else []
         if len(options) > self._max_options:
@@ -392,6 +425,29 @@ class StructuredObservationEncoder:
             entries["card_id"][slot] = card_id
             entries["target_id"][slot] = target_id
             entries["attack_id"][slot] = attack_id
+            target = OptionReferenceResolver.resolve_target_pokemon(
+                state, option, agent_seat
+            )
+            if target is not None:
+                owner = (
+                    option.playerIndex
+                    if option.playerIndex is not None
+                    else agent_seat
+                )
+                is_active = any(
+                    entry is target for entry in state.players[owner].active
+                )
+                entries["target_state"][slot] = torch.tensor(
+                    [
+                        1.0,
+                        float(target.hp),
+                        float(target.maxHp),
+                        target.hp / target.maxHp if target.maxHp > 0 else 0.0,
+                        float(len(target.energyCards)),
+                        float(len(target.tools)),
+                        1.0 if is_active else 0.0,
+                    ]
+                )
         return entries
 
     def _encode_pokemon(self, state: State, agent_seat: int) -> dict[str, torch.Tensor]:
@@ -522,6 +578,7 @@ class StructuredObsAdapter(nn.Module):
     _card_category_offsets: torch.Tensor
     _global_scales: torch.Tensor
     _pokemon_feature_scales: torch.Tensor
+    _option_target_scales: torch.Tensor
 
     CATEGORY_VOCAB_SIZE = 64
     SELECT_CATEGORY_FIELD_COUNT = 2
@@ -529,6 +586,8 @@ class StructuredObsAdapter(nn.Module):
     CARD_CATEGORY_FIELD_COUNT = 4
     OWNER_VALUE_COUNT = 3
     OPTION_SCALAR_SCALE = 60.0
+    #: Mirrors the training adapter's OPTION_TARGET_SCALES.
+    OPTION_TARGET_SCALES = (1.0, 400.0, 400.0, 1.0, 16.0, 2.0, 1.0)
     GAME_SCALES = (50.0, 20.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     SELECT_SCALES = (1.0, 6.0, 6.0, 96.0, 6.0, 30.0, 5.0, 1.0, 1.0)
     PLAYER_SCALES = (
@@ -577,12 +636,16 @@ class StructuredObsAdapter(nn.Module):
         category_embed_dim: int,
         zone_pooling: str = "mean",
         emit_option_tokens: bool = False,
+        pokemon_seat_split: bool = False,
+        option_target_state: bool = False,
     ) -> None:
         super().__init__()
         if zone_pooling not in ("mean", "mean_max_sum"):
             raise ValueError(f"Unsupported zone_pooling: {zone_pooling}")
         self._zone_pooling = zone_pooling
         self._emit_option_tokens = emit_option_tokens
+        self._pokemon_seat_split = pokemon_seat_split
+        self._option_target_state = option_target_state
         card_static = state_dict["backbone.adapter._card_static"]
         attack_static = state_dict["backbone.adapter._attack_static"]
         card_categories = state_dict["backbone.adapter._card_categories"]
@@ -613,6 +676,11 @@ class StructuredObsAdapter(nn.Module):
         self.register_buffer(
             "_pokemon_feature_scales",
             torch.tensor(self.POKEMON_FEATURE_SCALES, dtype=torch.float32),
+        )
+        self.register_buffer(
+            "_option_target_scales",
+            torch.tensor(self.OPTION_TARGET_SCALES, dtype=torch.float32),
+            persistent=False,
         )
         self._card_embedding = nn.Embedding(
             card_static.shape[0], card_embed_dim, padding_idx=0
@@ -879,7 +947,12 @@ class StructuredObsAdapter(nn.Module):
                 ),
                 self._embed_categories(options["cats"], self._option_category_offsets),
                 scaled,
-            ],
+            ]
+            + (
+                [options["target_state"] / self._option_target_scales]
+                if self._option_target_state
+                else []
+            ),
             dim=-1,
         )
 
@@ -908,10 +981,26 @@ class StructuredObsAdapter(nn.Module):
         return self._flatten_rows(rows)
 
     def _encode_pokemon(self, pokemon: Mapping[str, torch.Tensor]) -> torch.Tensor:
+        """
+        Mirrors the training adapter's ``_encode_pokemon``, including the
+        ``pokemon_seat_split`` layout: the row axis is agent active + bench
+        then opponent active + bench, so the two seats are its two halves.
+        """
         rows = self._pokemon_rows(pokemon)
-        if self._pool:
-            return self._masked_pool(self._pokemon_encoder(rows), pokemon["mask"])
-        return self._flatten_rows(rows)
+        if not self._pool:
+            return self._flatten_rows(rows)
+        encoded = self._pokemon_encoder(rows)
+        mask = pokemon["mask"]
+        if not self._pokemon_seat_split:
+            return self._masked_pool(encoded, mask)
+        half = encoded.shape[-2] // 2
+        return torch.cat(
+            [
+                self._masked_pool(encoded[..., :half, :], mask[..., :half]),
+                self._masked_pool(encoded[..., half:, :], mask[..., half:]),
+            ],
+            dim=-1,
+        )
 
     def _encode_zone_group(
         self, name: str, zones: Mapping[str, torch.Tensor]
@@ -993,6 +1082,8 @@ def _build_adapter(
         attack_embed_dim=int(adapter_config.get("attack_embed_dim", 8)),
         category_embed_dim=int(adapter_config.get("category_embed_dim", 4)),
         zone_pooling=str(adapter_config.get("zone_pooling", "mean")),
+        pokemon_seat_split=bool(adapter_config.get("pokemon_seat_split", False)),
+        option_target_state=bool(adapter_config.get("option_target_state", False)),
     )
 
 
@@ -1026,6 +1117,8 @@ class MLPBackbone(nn.Module):
             category_embed_dim=int(adapter_config.get("category_embed_dim", 4)),
             zone_pooling=str(adapter_config.get("zone_pooling", "mean")),
             emit_option_tokens=emit_option_tokens,
+            pokemon_seat_split=bool(adapter_config.get("pokemon_seat_split", False)),
+            option_target_state=bool(adapter_config.get("option_target_state", False)),
         )
         self.produces_option_repr = emit_option_tokens
         backbone_config = config["backbone"]

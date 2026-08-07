@@ -5,10 +5,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import wandb
 from omegaconf import DictConfig
 from torchrl.data import Categorical, Composite
 
+import wandb
 from src.env.battle_handle import BattleHandle
 from src.env.deck_sampler import DeckSampler, build_deck_sampler
 from src.env.snapshot_opponent_pool import SNAPSHOT_SUFFIX

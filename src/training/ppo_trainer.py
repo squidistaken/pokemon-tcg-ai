@@ -27,6 +27,24 @@ from src.training.trainer import Trainer
 
 logger = logging.getLogger(__name__)
 
+#: Non-optimizable diagnostics averaged over the applied minibatches and
+#: reported alongside the ``loss_*`` terms. These are the standard reads on
+#: whether PPO is healthy, and none of them can be inferred from the losses:
+#: ``entropy`` is the unweighted policy entropy (``loss_entropy`` is it already
+#: scaled by a coefficient that anneals), ``clip_fraction`` says how much of the
+#: batch the surrogate is clipping, ``ESS`` how degenerate the importance
+#: weights have become, ``kl_approx`` how far the epochs drift off-policy, and
+#: ``explained_variance`` whether the critic predicts returns at all.
+#:
+#: Each is accumulated only on the minibatches where it came back finite, and
+#: is simply absent from the update's metrics when no minibatch produced one --
+#: ``entropy`` never exists without an entropy bonus, and
+#: ``explained_variance`` is the one that genuinely can be non-finite, on a
+#: tiny or near-constant-target batch. That guard is why they are kept out of
+#: the ``loss_``-prefixed terms :func:`_sum_loss_keys` puts in the backward
+#: pass and out of the finite-loss check.
+_LOGGED_DIAGNOSTICS = ("entropy", "clip_fraction", "ESS", "kl_approx", "explained_variance")
+
 
 class PPOTrainer(Trainer):
     """
@@ -430,8 +448,9 @@ class PPOTrainer(Trainer):
         :param data: One ``(B, T)`` batch from the collector. The stored
             ``action_log_prob`` from collection is the old policy's, as PPO
             requires.
-        :return: Mean losses / grad-norm / policy entropy over all applied
-            minibatch updates, or ``None`` if every minibatch had a NaN/Inf loss.
+        :return: Mean losses, grad-norm and the :data:`_LOGGED_DIAGNOSTICS`
+            over all applied minibatch updates, or ``None`` if every minibatch
+            had a NaN/Inf loss.
         """
         self._maybe_anneal()
         data = data.to(self._device)
@@ -450,8 +469,8 @@ class PPOTrainer(Trainer):
         batch = data_flat.batch_size[0]
         loss_accum: dict[str, float] = {}
         grad_norm_accum = 0.0
-        entropy_accum = 0.0
-        entropy_counts = 0
+        diagnostic_accum: dict[str, float] = {}
+        diagnostic_counts: dict[str, int] = {}
         loss_counts = 0
         skipped_minibatches = 0
 
@@ -493,10 +512,10 @@ class PPOTrainer(Trainer):
                     self._optim.step()
                 self._optim.zero_grad(set_to_none=True)
 
-                # Log only the optimizable ``loss_*`` terms (plus grad-norm
-                # below). Diagnostics like ``explained_variance`` are
-                # deliberately excluded: they can be non-finite on tiny/near-
-                # constant-target batches and would poison a finite-loss check.
+                # The optimizable ``loss_*`` terms, unconditionally: they are
+                # the ones that just passed the finite-loss check above. The
+                # non-optimizable diagnostics are accumulated separately below,
+                # because they need a per-key finiteness guard.
                 for key, value in loss_vals.items():
                     if (
                         key.startswith("loss_")
@@ -507,21 +526,18 @@ class PPOTrainer(Trainer):
                 grad_norm_accum += float(grad_norm)
                 loss_counts += 1
 
-                # Policy entropy is the exception to the loss-only rule above:
-                # it is the diagnostic for whether the policy is collapsing to a
-                # single action, and ``loss_entropy`` cannot stand in for it
-                # because that is the entropy already scaled by a coefficient
-                # which anneals over the run. Guarded on finiteness like the
-                # other diagnostics, and simply absent when the loss runs
-                # without an entropy bonus and so never computes it.
-                entropy = loss_vals.get("entropy")
-                if (
-                    isinstance(entropy, torch.Tensor)
-                    and entropy.numel() == 1
-                    and torch.isfinite(entropy)
-                ):
-                    entropy_accum += float(entropy.detach())
-                    entropy_counts += 1
+                # The non-optimizable reads on PPO's health, each guarded on
+                # finiteness so a single bad batch drops one sample rather than
+                # poisoning the average; see _LOGGED_DIAGNOSTICS.
+                for key in _LOGGED_DIAGNOSTICS:
+                    value = loss_vals.get(key)
+                    if (
+                        isinstance(value, torch.Tensor)
+                        and value.numel() == 1
+                        and torch.isfinite(value)
+                    ):
+                        diagnostic_accum[key] = diagnostic_accum.get(key, 0.0) + float(value.detach())
+                        diagnostic_counts[key] = diagnostic_counts.get(key, 0) + 1
 
                 if self._target_kl is not None and "kl_approx" in loss_vals:
                     epoch_kl += float(loss_vals["kl_approx"])
@@ -555,8 +571,9 @@ class PPOTrainer(Trainer):
             return None
         result = {key: value / loss_counts for key, value in loss_accum.items()}
         result["grad_norm"] = grad_norm_accum / loss_counts
-        if entropy_counts > 0:
-            result["entropy"] = entropy_accum / entropy_counts
+        result.update(
+            {key: total / diagnostic_counts[key] for key, total in diagnostic_accum.items()}
+        )
         if self._curriculum is not None:
             result.update(self._curriculum.metrics())
         logger.debug("Update %d finished: %s", self._updates_done, result)
