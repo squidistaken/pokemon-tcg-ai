@@ -41,6 +41,12 @@ wandb:
   dir: ${hydra:runtime.output_dir}
   # Mirror the final PPO checkpoint as a W&B model artifact.
   log_checkpoints: true
+  # How W&B captures console output. `redirect` replaces the process's file
+  # descriptors and so also captures what the forked ParallelEnv workers print;
+  # `wrap` sees only this process; `off` captures nothing. Set to `wrap` to test
+  # whether routing 32 workers' output through inherited pipes is what hangs a
+  # worker mid-run.
+  console: redirect
 
 # Keep Hydra's own logs and multirun artifacts under the configured output
 # location as well. The default expands to Hydra's usual outputs/date/time

@@ -74,6 +74,7 @@ def main(cfg: DictConfig) -> None:
             run_config=run_config,
             max_collector_restarts=_max_collector_restarts(cfg),
             rebuild_env_factories=_rebuild_env_factories(cfg),
+            pipe_timeout=_pipe_timeout(cfg),
         )
 
     stats = trainer.train()
@@ -255,6 +256,7 @@ def _build_ppo_trainer(
         rebuild_env_factories=_rebuild_env_factories(
             cfg, opponent_factory=opponent_factory, curriculum=curriculum
         ),
+        pipe_timeout=_pipe_timeout(cfg),
     )
 
 
@@ -266,6 +268,17 @@ def _max_collector_restarts(cfg: DictConfig) -> int:
     :return: Restarts allowed; ``0`` fails the run on the first worker death.
     """
     return int(cfg.collector.get("max_restarts", 0))
+
+
+def _pipe_timeout(cfg: DictConfig) -> float | None:
+    """
+    Read how long the worker pool may wait on itself before raising.
+
+    :param cfg: Hydra configuration with a ``collector`` section.
+    :return: Seconds, or None to keep torchrl's 10000-second default.
+    """
+    seconds = cfg.collector.get("pipe_timeout", None)
+    return None if seconds is None else float(seconds)
 
 
 def _rebuild_env_factories(
