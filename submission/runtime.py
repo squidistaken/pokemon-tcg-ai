@@ -1070,6 +1070,22 @@ def _group_names(backbone_config: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _head_needs_option_repr(config: Mapping[str, Any]) -> bool:
+    """
+    Whether the checkpoint's policy head scores per-option tokens.
+
+    Read off the head's own class rather than sniffed from a state-dict key:
+    the two pointer heads name their parameters differently, so any single key
+    to look for silently misses one of them and the runtime then builds a
+    backbone that emits nothing for it to score.
+
+    :param config: The checkpoint's embedded model config.
+    :return: True when the head cannot run on ``state_repr`` alone.
+    """
+    head_class = _POLICY_HEADS.get(str(config["head"]["_target_"]))
+    return bool(head_class is not None and head_class.requires_option_repr)
+
+
 def _build_adapter(
     state_dict: Mapping[str, torch.Tensor],
     config: Mapping[str, Any],
@@ -1106,10 +1122,15 @@ class MLPBackbone(nn.Module):
     ) -> None:
         super().__init__()
         adapter_config = config.get("adapter", {})
-        # Both of these are read off the checkpoint rather than assumed: older
-        # checkpoints predate the pointer head and the richer zone pooling, and
-        # must keep loading exactly as they were trained.
-        emit_option_tokens = "policy_head.scorer.0.weight" in state_dict
+        backbone_config = config["backbone"]
+        # Mirrors build_actor_critic: the head decides whether per-option tokens
+        # are needed at all, and the trunk's own option_tokens decides which of
+        # the two sources supplies them. Derived rather than assumed because
+        # older checkpoints predate the pointer head entirely and must keep
+        # loading exactly as they were trained.
+        emit_option_tokens = _head_needs_option_repr(config) and not bool(
+            backbone_config.get("option_tokens", False)
+        )
         self.adapter = StructuredObsAdapter(
             state_dict,
             card_embed_dim=int(adapter_config.get("card_embed_dim", 8)),
@@ -1120,8 +1141,7 @@ class MLPBackbone(nn.Module):
             pokemon_seat_split=bool(adapter_config.get("pokemon_seat_split", False)),
             option_target_state=bool(adapter_config.get("option_target_state", False)),
         )
-        self.produces_option_repr = emit_option_tokens
-        backbone_config = config["backbone"]
+        self.adapter_option_tokens = emit_option_tokens
         self.group_names = _group_names(backbone_config)
         input_dim = state_dict["backbone.mlp.0.weight"].shape[1]
         self.mlp = _mlp(
@@ -1131,7 +1151,10 @@ class MLPBackbone(nn.Module):
             str(backbone_config.get("activation", "tanh")),
         )
         self.option_tokens = bool(backbone_config.get("option_tokens", False))
-        self.produces_option_repr = self.option_tokens
+        # Either path supplies the pointer head: the trunk projects the option
+        # rows itself, or the adapter hands them over unprojected. Training
+        # rejects both at once, so at most one is ever set.
+        self.produces_option_repr = self.option_tokens or self.adapter_option_tokens
         if self.option_tokens:
             option_weight = state_dict["backbone.option_projection.weight"]
             self.option_projection: nn.Module = nn.Linear(
@@ -1154,6 +1177,11 @@ class MLPBackbone(nn.Module):
         self, observation: Mapping[str, Any]
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         state_repr = self.mlp(self.adapter(observation, self.group_names))
+        if self.adapter_option_tokens:
+            option_rows, _ = self.adapter.encode_entity_tokens(
+                observation, ["options"]
+            )["options"]
+            return state_repr, option_rows
         if not self.option_tokens:
             return state_repr
         option_rows, _ = self.adapter.encode_entity_tokens(observation, ["options"])[
@@ -1456,11 +1484,16 @@ class PointerPolicyHead(nn.Module):
         head_config: Mapping[str, Any],
         state_dict: Mapping[str, torch.Tensor],
     ) -> None:
-        del head_config, state_dict
+        del head_config
         super().__init__()
         self.n_actions = n_actions
-        self.query = nn.Linear(in_features, in_features)
-        self._scale = float(in_features) ** 0.5
+        # The query is projected to the option width, which equals in_features
+        # only when the tokens come from a trunk emitting them at its own
+        # width. Off the adapter they are entity_dim wide instead, so the
+        # width is measured rather than assumed.
+        self.option_dim = int(state_dict["policy_head.query.weight"].shape[0])
+        self.query = nn.Linear(in_features, self.option_dim)
+        self._scale = float(self.option_dim) ** 0.5
 
     def forward(
         self,
@@ -1518,10 +1551,15 @@ class PointerHead(nn.Module):
                 f"PointerHead scorer takes {scorer_input} inputs, which leaves no "
                 f"option width alongside a {in_features}-wide state."
             )
-        hidden = [
-            int(state_dict[f"policy_head.scorer.{index}.weight"].shape[0])
-            for index in range(0, 2 * len(head_config.get("num_cells", [])), 2)
-        ]
+        # Depth measured from the weights, not from head_config["num_cells"]:
+        # training defaults that key to None and derives a single hidden layer
+        # from in_features, so a checkpoint that took the default records
+        # layers the config does not mention.
+        hidden = []
+        index = 0
+        while f"policy_head.scorer.{index + 2}.weight" in state_dict:
+            hidden.append(int(state_dict[f"policy_head.scorer.{index}.weight"].shape[0]))
+            index += 2
         activation = str(head_config.get("activation", "tanh"))
         self.scorer = _mlp(in_features + self.option_dim, hidden, 1, activation)
         self.stop_scorer = _mlp(in_features, hidden, 1, activation)
@@ -1593,19 +1631,21 @@ class ActorCritic(nn.Module):
             )
         embed_dim = int(config["embed_dim"])
         self.backbone = _BACKBONES[backbone_target](state_dict, config)
-        self.policy_head = _POLICY_HEADS[head_target](
+        # Checked before the head is built, not after: a pointer head sizes its
+        # projections against option tokens, so on a trunk that emits none it
+        # would fail first on its own missing weights and bury the real reason.
+        head_class = _POLICY_HEADS[head_target]
+        if head_class.requires_option_repr and not self.backbone.produces_option_repr:
+            raise ValueError(
+                f"Head {head_class.__name__} needs per-option tokens, but "
+                f"backbone {type(self.backbone).__name__} does not emit them."
+            )
+        self.policy_head = head_class(
             embed_dim, max_options + 1, config["head"], state_dict
         )
         self.value_head = ValueHead(
             embed_dim, [int(value) for value in config["value_head"]["num_cells"]]
         )
-        if self.policy_head.requires_option_repr and not (
-            self.backbone.produces_option_repr
-        ):
-            raise ValueError(
-                f"Head {type(self.policy_head).__name__} needs per-option tokens, but "
-                f"backbone {type(self.backbone).__name__} does not emit them."
-            )
 
     def policy_logits(self, observation: Mapping[str, Any]) -> torch.Tensor:
         """Action logits for one observation, skipping the critic."""

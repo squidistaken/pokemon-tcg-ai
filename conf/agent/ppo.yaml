@@ -49,6 +49,15 @@ max_grad_norm: 1.0
 # Device for the model and the PPO update ("cpu" or "cuda"). Environments
 # always step on CPU; the collector moves data to this device for updates.
 device: cpu
+# Share of the GPU this process may reserve (null disables the cap).
+# Uncapped, the allocator grows until the driver refuses -- which on WSL is not
+# a Python error but `dxgkio_make_resident: Ioctl failed: -12` followed by
+# "CUDA driver error: device not ready" on every later call, killing the run
+# from a dead context nothing can recover. Capped, the same pressure surfaces
+# as a catchable torch.OutOfMemoryError, and the remainder stays available to
+# whatever else shares the card (a desktop compositor holds ~1.6 GB of 24 GB
+# here before training starts).
+cuda_memory_fraction: 0.9
 
 # Early-stop the epoch loop once mean approx-KL exceeds
 # target_kl_multiplier * target_kl (null disables; checked between epochs).
