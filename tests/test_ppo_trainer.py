@@ -4,6 +4,7 @@ from typing import cast
 import pytest
 import torch
 from omegaconf import DictConfig, OmegaConf
+from tensordict import TensorDictBase
 from torchrl.collectors import Collector
 from torchrl.envs import SerialEnv
 
@@ -50,7 +51,7 @@ def _make_trainer(actor_critic, action_spec, opponent_factory=None, **kwargs) ->
     return PPOTrainerForTests(**params)
 
 
-def _collect_one_batch(trainer: PPOTrainerForTests) -> object:
+def _collect_one_batch(trainer: PPOTrainerForTests) -> TensorDictBase:
     """
     Collect a single 64-frame batch with a trainer's own collection policy.
 
@@ -66,7 +67,7 @@ def _collect_one_batch(trainer: PPOTrainerForTests) -> object:
         auto_register_policy_transforms=False,
     )
     try:
-        return next(iter(collector)).clone()
+        return cast(TensorDictBase, next(iter(collector)).clone())
     finally:
         collector.shutdown()
 
@@ -243,7 +244,7 @@ def test_value_head_activation_from_config_reaches_module(
         ),
     )
     actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec)
-    mlp_modules = list(actor_critic.value_head.mlp.modules())
+    mlp_modules = list(actor_critic.value_head.modules())
     assert any(isinstance(module, torch.nn.ReLU) for module in mlp_modules)
     assert not any(isinstance(module, torch.nn.Tanh) for module in mlp_modules)
 

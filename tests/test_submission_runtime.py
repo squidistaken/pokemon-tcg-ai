@@ -5,6 +5,7 @@ from typing import Any, cast
 
 import pytest
 import torch
+from cg.api import Observation
 from omegaconf import DictConfig, OmegaConf
 
 from src.env.battle_handle import BattleHandle
@@ -15,7 +16,7 @@ from src.env.structured_observation_encoder import (
 )
 from src.models.transformer import TransformerBackbone as TrainingTransformerBackbone
 from src.policies.ppo_actor import build_actor_critic
-from submission.cg_api import Observation, to_observation_class
+from submission.cg_api import to_observation_class
 from submission.runtime import Policy, StructuredObservationEncoder
 from submission.runtime import TransformerBackbone as PortableTransformerBackbone
 from tests.conftest import DECK_PATH, MAX_OPTIONS
