@@ -38,8 +38,8 @@ deck_mirror_prob: null
 #                  in proportion to how often it was actually seen in play.
 #   winrate     -> weight by tournament record W/(W+L).
 #   placing     -> weight by 1/placing (better finishes sampled more).
-# Weighting is per *list*, not per archetype: the counts are summed over
-# nothing, each entry standing for the one list it describes. In
+# Weighting is per *list*, not per archetype: counts are never summed across
+# lists, each manifest entry standing for the one list it describes. In
 # heuristic-resolved that spreads 50,485 observations over 28,670 lists, of
 # which 76.7% were seen exactly once and hold 43.6% of the mass -- so this
 # sharpens the draw toward the few heavily-played lists (the top 100 hold
