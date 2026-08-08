@@ -38,14 +38,18 @@ deck_mirror_prob: null
 #                  in proportion to how often it was actually seen in play.
 #   winrate     -> weight by tournament record W/(W+L).
 #   placing     -> weight by 1/placing (better finishes sampled more).
-# Weighting is per *list*, not per archetype: counts are never summed across
+# The deck actually dealt is drawn per *list*: counts are never summed across
 # lists, each manifest entry standing for the one list it describes. In
 # heuristic-resolved that spreads 50,485 observations over 28,670 lists, of
 # which 76.7% were seen exactly once and hold 43.6% of the mass -- so this
 # sharpens the draw toward the few heavily-played lists (the top 100 hold
 # 11.8%) without collapsing onto them.
 # Applies to the plain pool draw and to the curriculum's within-archetype deal
-# alike. Training only; evaluation always samples the held-out pool uniformly.
+# alike. With the curriculum enabled the same weights are additionally summed
+# per archetype, but only to bias which matchup the discovery draw explores
+# (CurriculumDeckSampler._explore_pair); a level is an archetype pair, so that
+# draw has no list-level equivalent. The list dealt within it stays per-list.
+# Training only; evaluation always samples the held-out pool uniformly.
 deck_weighting: null
 # Fraction of the pool held out from training and used only for evaluation, so
 # eval measures generalization to unseen decks. 0.0 trains on the whole pool.
@@ -66,8 +70,8 @@ deck_holdout_frac: 0.0
 deck_pool_width: null
 # Which archetypes deck_pool_width keeps:
 #   observation -> the most-observed ones, by summed manifest observation_count.
-#                  This is the only place counts are summed per archetype; the
-#                  sampling weights in deck_weighting stay strictly per-list.
+#                  Summing here decides which archetypes the pool keeps; the
+#                  deck_weighting draw that deals a list stays per-list.
 #   random      -> a seeded random subset, deterministic given deck_split_seed.
 # Over the scraped corpus the top 12 archetypes hold 55.2% of all observed play,
 # where a random 12 hold a median of 8.6% -- so 'random' answers "how does

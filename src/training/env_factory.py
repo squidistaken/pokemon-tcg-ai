@@ -197,8 +197,11 @@ def archetype_observations(kept_paths: list[str]) -> dict[str, float]:
     Total manifest observations per archetype.
 
     The manifest counts observations per *list*; an archetype's total is the sum
-    over its lists. This is the only place that summing happens -- the sampling
-    weights in :func:`_deck_weights` stay strictly per-list.
+    over its lists. Used to decide which archetypes ``deck_pool_width`` keeps.
+    The weights :func:`_deck_weights` builds stay per-list; the curriculum sums
+    them separately, in
+    :meth:`~src.env.curriculum_deck_sampler.CurriculumDeckSampler._archetype_totals`,
+    for its matchup discovery draw.
 
     :param kept_paths: Deck CSV paths to aggregate over.
     :return: Summed observation count per archetype label.
