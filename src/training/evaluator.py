@@ -19,10 +19,16 @@ logger = logging.getLogger(__name__)
 
 def _episode_archetype(env: EnvBase) -> str | None:
     """
-    Archetype the agent piloted in the episode the env just finished.
+    Archetype the agent *faced* in the episode the env just finished.
+
+    The breakdown is by opponent, not by the deck the agent piloted. Evaluation
+    holds the agent's deck fixed so the curve measures the submission's deck, so
+    bucketing by the agent's own archetype would put every episode in one bucket
+    and report nothing. Which opponents the agent beats is the useful split, and
+    the only one that says where the policy is weak.
 
     :param env: The evaluation environment, possibly transform-wrapped.
-    :return: The agent's deck archetype, or None when unlabelled.
+    :return: The opponent's deck archetype, or None when unlabelled.
     """
     base: object = env
     while (inner := getattr(base, "base_env", None)) is not None:
@@ -31,7 +37,7 @@ def _episode_archetype(env: EnvBase) -> str | None:
     if labels is None:
         return None
 
-    return labels[getattr(base, "agent_seat", 0)]
+    return labels[1 - getattr(base, "agent_seat", 0)]
 
 
 def _archetype_metrics(per_archetype: dict[str, list[int]]) -> dict[str, float]:

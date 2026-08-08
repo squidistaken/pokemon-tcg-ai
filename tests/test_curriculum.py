@@ -261,6 +261,52 @@ def test_state_dict_round_trips() -> None:
     assert restored.entries[0].wins == pytest.approx(1.0)
 
 
+def test_state_dict_round_trips_probation() -> None:
+    """
+    Probation survives a dump, so a resume keeps what it has already measured.
+
+    Under lazy discovery probation holds most of a run's measurement, and the
+    supervisor reloads state after every crash.
+    """
+    buffer = make_buffer(min_visits=5)
+    buffer.prefill([0])
+    buffer.commit(7, 0.4, outcome=1.0)
+    buffer.commit(7, 0.2)
+    assert buffer.stats()["curriculum/probation_size"] == 1
+
+    restored = make_buffer(min_visits=5)
+    restored.load_state_dict(buffer.state_dict())
+
+    assert restored.state_dict() == buffer.state_dict()
+    assert restored.stats()["curriculum/probation_size"] == 1
+    # The restored entry keeps its visits, so it matures on schedule rather
+    # than restarting the five episodes it already paid for.
+    for _ in range(3):
+        restored.commit(7, 0.3)
+    assert restored.stats()["curriculum/probation_size"] == 0
+    assert 7 in {entry.pair_id for entry in restored.entries}
+
+
+def test_load_state_dict_accepts_a_dump_without_probation() -> None:
+    """
+    Dumps written before probation was persisted must still load.
+    """
+    buffer = make_buffer(min_visits=1)
+    buffer.prefill([0, 1])
+    buffer.commit(0, 0.3, outcome=1.0)
+    legacy = {
+        key: value
+        for key, value in buffer.state_dict().items()
+        if not key.startswith("probation_")
+    }
+
+    restored = make_buffer(min_visits=1)
+    restored.load_state_dict(legacy)
+
+    assert restored.size == 2
+    assert restored.stats()["curriculum/probation_size"] == 0
+
+
 def test_observe_commits_only_finished_episodes() -> None:
     """
     A batch ending mid-episode must leave the visit uncounted until it ends.
@@ -483,6 +529,33 @@ def test_curriculum_never_trains_on_held_out_decks(tmp_path: Path) -> None:
         for position in curriculum.archetypes.decks_for(archetype)
     }
     assert covered == set(range(len(train_decks)))
+
+
+def test_deck_pool_width_narrows_the_curriculum_level_space(tmp_path: Path) -> None:
+    """
+    ``deck_pool_width`` must shrink the curriculum's matchup space too.
+
+    The cap used to be applied only where the plain sampler spec is built, so a
+    curriculum run kept the full-width pool and squared it into a level space
+    far too large for any level to reach ``min_visits``.
+    """
+    corpus = build_corpus(tmp_path, archetypes=6, per_archetype=2)
+    cfg = structured_env_cfg(num_workers=WORKERS)
+    cfg.env.mp_start_method = "fork"
+    cfg.env.deck_pool = str(corpus)
+    cfg.env.curriculum = OmegaConf.create(
+        {"enabled": True, "capacity": 64, "min_visits": 2}
+    )
+    cfg.env.deck_pool_width = 3
+
+    curriculum = build_curriculum(cfg)
+    _decks, paths = load_deck_pool(cfg, deck_split="train")
+
+    assert curriculum is not None
+    assert curriculum.archetypes.count == 3, "the width cap must reach the index"
+    assert curriculum.buffer.size == 9, "and the level space must be its square"
+    # The sampler is handed exactly the decks the index was built from.
+    assert ArchetypeIndex.from_paths(paths).count == 3
 
 
 def test_build_curriculum_disabled_by_default(tmp_path: Path) -> None:

@@ -71,12 +71,21 @@ def test_archetype_metrics_empty_is_absent() -> None:
     assert _archetype_metrics({}) == {}
 
 
-def test_episode_archetype_credits_agent_seat() -> None:
+def test_episode_archetype_credits_the_opponent_seat() -> None:
     """
-    An episode is attributed to the deck the agent (not the opponent) piloted.
+    An episode is attributed to the deck the agent *faced*, not the one it piloted.
+
+    Evaluation holds the agent's deck fixed, so crediting its own archetype would
+    put every episode in one bucket; which opponents it beats is the useful split.
     """
-    # Seat 1 holds "opp-b"; the agent sits there, so that is the credited deck.
-    assert _episode_archetype(_stub_env(("mirror-a", "opp-b"), agent_seat=1)) == "opp-b"
+    # Agent sits in seat 1, so seat 0's "mirror-a" is the opponent it faced.
+    assert (
+        _episode_archetype(_stub_env(("mirror-a", "opp-b"), agent_seat=1)) == "mirror-a"
+    )
+    # And from the other seat, the opponent is seat 1's deck.
+    assert (
+        _episode_archetype(_stub_env(("mirror-a", "opp-b"), agent_seat=0)) == "opp-b"
+    )
 
 
 def test_episode_archetype_none_without_labels() -> None:

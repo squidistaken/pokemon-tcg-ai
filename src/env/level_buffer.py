@@ -466,9 +466,16 @@ class LevelBuffer:
         cannot provide. Dumping this periodically lets two dumps be differenced
         into any window afterwards.
 
+        Probation is dumped alongside the scored entries. Under lazy discovery
+        it holds most of what the run has measured -- the 15M-frame run reached
+        97 scored levels against 11,692 in probation -- and the supervisor
+        resumes from state after every crash, so omitting it threw away
+        essentially all accumulated measurement on each restart and sent the
+        buffer back to surveying a corpus it had already partly swept.
+
         :return: Column-oriented entry data plus the episode counter.
         """
-        return {
+        state: dict[str, list] = {
             "episodes": [self._episodes],
             "pair_id": [entry.pair_id for entry in self._entries],
             "mean_residual": [entry.mean_residual for entry in self._entries],
@@ -477,10 +484,25 @@ class LevelBuffer:
             "wins": [entry.wins for entry in self._entries],
             "games": [entry.games for entry in self._entries],
         }
+        probation = list(self._probation.values())
+        state.update(
+            {
+                "probation_pair_id": [entry.pair_id for entry in probation],
+                "probation_mean_residual": [entry.mean_residual for entry in probation],
+                "probation_visits": [entry.visits for entry in probation],
+                "probation_wins": [entry.wins for entry in probation],
+                "probation_games": [entry.games for entry in probation],
+            }
+        )
+        return state
 
     def load_state_dict(self, state: dict[str, Sequence]) -> None:
         """
         Restore entries from a :meth:`state_dict` snapshot.
+
+        Probation keys are optional, so a dump written before they were
+        persisted still loads -- it simply restores an empty probation table,
+        which is what that dump described.
 
         :param state: Snapshot produced by :meth:`state_dict`.
         """
@@ -505,6 +527,23 @@ class LevelBuffer:
         ]
         self._slots = {entry.pair_id: slot for slot, entry in enumerate(self._entries)}
         self._episodes = int(state["episodes"][0])
+        self._probation = {
+            int(pair_id): LevelEntry(
+                pair_id=int(pair_id),
+                mean_residual=float(mean_residual),
+                visits=int(visits),
+                wins=float(wins),
+                games=float(games),
+            )
+            for pair_id, mean_residual, visits, wins, games in zip(
+                state.get("probation_pair_id", []),
+                state.get("probation_mean_residual", []),
+                state.get("probation_visits", []),
+                state.get("probation_wins", []),
+                state.get("probation_games", []),
+                strict=True,
+            )
+        }
 
     def _eviction_candidate(self) -> int | None:
         """
