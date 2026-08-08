@@ -148,6 +148,7 @@ scripts/                     Standalone dev scripts (not part of the training en
   make_submission.py           Build a Kaggle .tar.gz and optionally submit it through the Kaggle CLI
   run_selfplay_compile.sh      1M-frame self-play run with torch.compile (caps Inductor's compile workers)
   train_supervised.sh          Runs a training job and restarts it from its own train_state.pt on any crash
+  train_tf_weighted_field.sh   15M-frame self-play run: transformer trunk, observation-weighted field, fixed eval panel
 submission_analysis/          Kaggle submission tooling: `python -m submission_analysis <status|episodes|deck-report|scout>` (see its own README)
 submission/
   main.py                      Kaggle entryfile template; `agent` is deliberately its final callable
