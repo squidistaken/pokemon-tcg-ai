@@ -52,7 +52,28 @@
 # minibatching just bought"). A lower constant LR keeps mean approx-KL under the
 # 0.045 threshold so the epochs actually run. Constant, not annealed.
 #
-# 5. EVALUATION THAT READS LIKE A SUBMISSION
+# 5. NO DECK HOLDOUT
+#
+# multideck sets deck_holdout_frac 0.2, which withheld 5,734 lists carrying
+# 10,124 observations -- 20.1% of the corpus's mass, including several of its
+# most-played lists (dragapult-dudunsparce-73 at 149 observations,
+# dragapult-147 at 127). That is a fifth of the training signal spent to buy a
+# memorization check that cannot fail here: 28,670 lists over ~205k episodes is
+# ~9 episodes per list, and a 60-step hidden-information game with shuffle
+# randomness is not memorizable at that rate with parameters shared across 134
+# archetypes.
+#
+# It also made the eval panel worse. Drawn from a random 20% slice the panel
+# covered 8 distinct archetypes; drawn from the whole corpus it is the true
+# top-10 most-played lists and covers 10.
+#
+# The cost is that eval decks are also trained on, so the win-rate is nominally
+# optimistic. It matters little: the most-played opponent list appears in ~1,900
+# of 205k episodes, and two of the three eval opponents (random, the deployed
+# checkpoint) are policy references rather than deck references, so deck
+# familiarity shifts every arm equally and the comparisons between them hold.
+#
+# 6. EVALUATION THAT READS LIKE A SUBMISSION
 #
 # Eval previously dealt a different held-out list every episode, so a round was
 # N matchups played once each and the deck draw swamped the policy signal. Now:
@@ -198,6 +219,7 @@ echo "Run dir: $RUN_DIR"
   env.deck_weighting=observation \
   env.eval_agent_deck="$EVAL_AGENT_DECK" \
   env.eval_panel_size=$EVAL_PANEL_SIZE \
+  env.deck_holdout_frac=0.0 \
   env.eval_deck_sampling=round_robin \
   env.eval_deck_matchup=mirror \
   env.curriculum.enabled=false \
