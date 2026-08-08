@@ -398,3 +398,22 @@ def test_workers_track_a_republished_distribution_through_the_trainer_path() -> 
         "workers kept serving the pre-fork distribution; the channel was copied, "
         "not shared, so the curriculum would be frozen for the whole run"
     )
+
+
+@pytest.mark.parametrize("agent_seat", [0, 1])
+def test_curriculum_deals_the_agent_archetype_to_the_agents_seat(agent_seat: int) -> None:
+    """
+    ``pair_id`` is asymmetric, so ``(a, b)`` and ``(b, a)`` are different
+    levels. Dealing the drawn agent archetype positionally to seat 0 hands it
+    to the opponent whenever the environment seats the agent second, and
+    credits that episode's result to the transposed level.
+    """
+    index = make_index({"a": 1, "b": 1, "c": 1})
+    decks = [[10] * 60, [20] * 60, [30] * 60]
+    handles = CurriculumHandles.allocate(CAPACITY)
+    sampler = CurriculumDeckSampler(decks, index, handles, seed=0, explore_prob=1.0)
+
+    for _ in range(60):
+        seat_decks = sampler.sample_for_seat(agent_seat)
+        agent_archetype, _ = index.unpair(sampler.level_id)
+        assert seat_decks[agent_seat] == decks[agent_archetype]

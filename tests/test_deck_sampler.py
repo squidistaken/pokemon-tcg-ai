@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from omegaconf import DictConfig, OmegaConf
 
+from src.env.agent_deck_sampler import AgentDeckSampler
 from src.env.deck import load_deck, load_decks, resolve_deck_paths
 from src.env.deck_sampler import (
     FixedDeckSampler,
@@ -16,6 +17,7 @@ from src.training.env_factory import (
     _deck_weights,
     _limit_pool_width,
     _record_winrate,
+    make_env_factories,
 )
 
 REPO_ROOT = Path(__file__).parents[1]
@@ -625,3 +627,108 @@ def test_env_samples_different_decks_across_resets() -> None:
         assert len(seen) > 1  # the curriculum rotates decks across episodes
     finally:
         env.close()
+
+
+def _pinning_sampler(field_probability: float) -> AgentDeckSampler:
+    """
+    Build an :class:`AgentDeckSampler` over a small labelled field.
+
+    :param field_probability: Share of episodes that ignore the pin.
+    :return: A seeded sampler pinning ``[1] * 60`` as the agent's deck.
+    """
+    field = PoolDeckSampler(
+        [[2] * 60, [3] * 60],
+        matchup="independent",
+        seed=1,
+        labels=["Two", "Three"],
+    )
+    return AgentDeckSampler(
+        agent_deck=[1] * 60,
+        field_sampler=field,
+        agent_label="One",
+        field_probability=field_probability,
+        seed=5,
+    )
+
+
+@pytest.mark.parametrize("agent_seat", [0, 1])
+def test_agent_deck_lands_on_the_agents_seat(agent_seat: int) -> None:
+    """
+    The environment draws the agent's seat before asking for decks, so a
+    positional sampler hands the pinned list to the opponent half the time.
+    """
+    sampler = _pinning_sampler(field_probability=0.0)
+    for _ in range(50):
+        decks = sampler.sample_for_seat(agent_seat)
+        assert decks[agent_seat] == [1] * 60
+        assert decks[1 - agent_seat] != [1] * 60
+
+
+@pytest.mark.parametrize("agent_seat", [0, 1])
+def test_agent_deck_labels_are_seat_ordered(agent_seat: int) -> None:
+    """
+    ``last_labels`` is indexed by seat downstream (``_episode_archetype``), so
+    the pinned deck's label has to sit at the agent's index, not at 0.
+    """
+    sampler = _pinning_sampler(field_probability=0.0)
+    for _ in range(50):
+        sampler.sample_for_seat(agent_seat)
+        labels = sampler.last_labels
+        assert labels is not None
+        assert labels[agent_seat] == "One"
+        assert labels[1 - agent_seat] in ("Two", "Three")
+
+
+def test_field_probability_governs_how_often_the_pin_applies() -> None:
+    """
+    Some episodes must keep drawing the agent's deck from the pool, or the
+    cards outside the pinned list stop receiving gradient entirely.
+    """
+    always = _pinning_sampler(field_probability=0.0)
+    never = _pinning_sampler(field_probability=1.0)
+    pinned_always = sum(always.sample_for_seat(0)[0] == [1] * 60 for _ in range(400))
+    pinned_never = sum(never.sample_for_seat(0)[0] == [1] * 60 for _ in range(400))
+    assert pinned_always == 400
+    assert pinned_never == 0
+
+
+def test_build_deck_sampler_wraps_a_field_spec() -> None:
+    """The picklable spec round-trips through the worker-side builder."""
+    sampler = build_deck_sampler(
+        {
+            "kind": "agent_fixed",
+            "agent_deck": [1] * 60,
+            "agent_label": "One",
+            "field_probability": 0.0,
+            "field": {
+                "kind": "pool",
+                "decks": [[2] * 60],
+                "matchup": "independent",
+                "labels": ["Two"],
+            },
+        },
+        seed=3,
+    )
+    assert isinstance(sampler, AgentDeckSampler)
+    assert sampler.sample_for_seat(1) == ([2] * 60, [1] * 60)
+
+
+def test_agent_deck_pin_and_curriculum_are_rejected_together() -> None:
+    """
+    A curriculum level is an ordered (agent, opponent) pair; pinning the agent
+    discards the half of every level the curriculum drew, so its scores would
+    describe matchups nobody played. Fail loudly instead.
+    """
+    cfg = OmegaConf.create(
+        {
+            "seed": 0,
+            "env": {
+                "deck_pool": str(CORPUS_DIR),
+                "agent_deck": EXAMPLE_DECK,
+                "num_workers": 1,
+                "max_options": 8,
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="cannot both be set"):
+        make_env_factories(cfg, curriculum=object())

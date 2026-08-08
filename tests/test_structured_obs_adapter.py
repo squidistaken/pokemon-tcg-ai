@@ -250,3 +250,116 @@ def test_group_segment_ids_seat_zone_and_stop_slot(adapter, structured_obs_spec)
     # unlike group_slot_counts, which records 1 for them.
     assert "globals" not in segment_ids
     assert "select_cats" not in segment_ids
+
+
+def _seat_swapped(observation: TensorDict) -> TensorDict:
+    """
+    Swap the two seats' halves of the ``pokemon`` table.
+
+    The row layout is agent active + bench then opponent active + bench, so
+    exchanging the halves is exactly "the same board, other way round".
+
+    :param observation: Observation tensordict to copy and swap.
+    :return: A copy whose two seats' board rows are exchanged.
+    """
+    swapped = observation.clone()
+    pokemon = swapped.get(("observation", "pokemon"))
+    half = pokemon["card_id"].shape[-1] // 2
+    for leaf in ("card_id", "tool_id", "energy_card_ids", "pre_evolution_ids", "features", "mask"):
+        rows = pokemon[leaf]
+        pokemon[leaf] = torch.cat([rows[:, half:], rows[:, :half]], dim=1)
+    return swapped
+
+
+def _board_observation(structured_obs_spec) -> TensorDict:
+    """
+    An observation with a different Pokemon on each seat's active slot.
+
+    :param structured_obs_spec: Env spec fixture (observation + action mask).
+    :return: Zeroed observation with both actives occupied by distinct cards.
+    """
+    obs = _zero_obs(structured_obs_spec, batch=1)
+    pokemon = obs.get(("observation", "pokemon"))
+    half = pokemon["card_id"].shape[-1] // 2
+    pokemon["card_id"][0, 0] = 5
+    pokemon["mask"][0, 0] = True
+    pokemon["card_id"][0, half] = 9
+    pokemon["mask"][0, half] = True
+    return obs
+
+
+def test_pooled_pokemon_is_seat_blind_without_the_split(structured_obs_spec) -> None:
+    """
+    The bug the seat split exists for: with one pool over all board rows,
+    swapping the two seats leaves the encoding bit-identical, so no backbone
+    reading the pooled path can tell its own board from the opponent's.
+    """
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=DEFAULT_IN_KEYS, pokemon_seat_split=False
+    )
+    obs = _board_observation(structured_obs_spec)
+    encoded = adapter(*_adapter_inputs(obs))
+    swapped = adapter(*_adapter_inputs(_seat_swapped(obs)))
+    assert torch.equal(encoded, swapped)
+
+
+def test_seat_split_distinguishes_the_two_boards(structured_obs_spec) -> None:
+    """
+    With the split on, the same swap moves the encoding — and the two halves
+    of the ``pokemon`` block are exchanged rather than arbitrarily different,
+    which is what "pooled per seat" means.
+    """
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=DEFAULT_IN_KEYS, pokemon_seat_split=True
+    )
+    obs = _board_observation(structured_obs_spec)
+    encoded = adapter.encode_groups(*_adapter_inputs(obs))
+    swapped = adapter.encode_groups(*_adapter_inputs(_seat_swapped(obs)))
+    index = adapter.group_names.index("pokemon")
+    board, swapped_board = encoded[index], swapped[index]
+    assert not torch.allclose(board, swapped_board)
+    half = board.shape[-1] // 2
+    assert torch.allclose(board[..., :half], swapped_board[..., half:])
+    assert torch.allclose(board[..., half:], swapped_board[..., :half])
+
+
+def test_seat_split_widens_only_the_pokemon_group(structured_obs_spec) -> None:
+    """
+    The split doubles the ``pokemon`` group's width and leaves every other
+    group — and so every other backbone projection — untouched.
+    """
+    pooled = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=DEFAULT_IN_KEYS, pokemon_seat_split=False
+    )
+    split = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=DEFAULT_IN_KEYS, pokemon_seat_split=True
+    )
+    index = pooled.group_names.index("pokemon")
+    for position, (narrow, wide) in enumerate(
+        zip(pooled.group_feature_widths, split.group_feature_widths, strict=True)
+    ):
+        assert wide == (2 * narrow if position == index else narrow)
+    assert split.out_features == pooled.out_features + pooled.group_feature_widths[index]
+    # The per-entity token path is unaffected: same slots, same segment ids.
+    assert split.group_slot_counts == pooled.group_slot_counts
+    assert torch.equal(split.group_segment_ids["pokemon"], pooled.group_segment_ids["pokemon"])
+
+
+def test_seat_split_preserves_bench_permutation_invariance(structured_obs_spec) -> None:
+    """
+    Pooling still happens *within* a seat, so bench order stays irrelevant —
+    the property the single pool had and the split must not cost.
+    """
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=DEFAULT_IN_KEYS, pokemon_seat_split=True
+    )
+    obs = _zero_obs(structured_obs_spec, batch=1)
+    pokemon = obs.get(("observation", "pokemon"))
+    pokemon["card_id"][0, 1:4] = torch.tensor([3, 7, 11])
+    pokemon["mask"][0, 1:4] = True
+    reordered = obs.clone()
+    reordered_pokemon = reordered.get(("observation", "pokemon"))
+    reordered_pokemon["card_id"][0, 1:4] = torch.tensor([11, 3, 7])
+    assert torch.allclose(
+        adapter(*_adapter_inputs(obs)), adapter(*_adapter_inputs(reordered))
+    )

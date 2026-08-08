@@ -344,7 +344,7 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
         # Carry archetype labels so the evaluator can break the held-out win-rate
         # down per archetype and report generalization variance across them.
         spec["labels"] = _deck_labels([kept_paths[i] for i in idx])
-        return spec
+        return _pin_agent_deck(cfg, spec, deck_split)
 
     mirror_prob = cfg.env.get("deck_mirror_prob")
     if mirror_prob is not None:
@@ -352,7 +352,49 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
     weighting = cfg.env.get("deck_weighting")
     if weighting:
         spec["weights"] = _deck_weights([kept_paths[i] for i in idx], str(weighting))
-    return spec
+    return _pin_agent_deck(cfg, spec, deck_split)
+
+
+def _pin_agent_deck(
+    cfg: DictConfig, field_spec: dict[str, Any], deck_split: str
+) -> dict[str, Any]:
+    """
+    Wrap a field spec so the agent always pilots ``env.agent_deck``.
+
+    The submitted agent plays one deck, so training both seats from the corpus
+    spends all but a fraction of its episodes on lists it will never pilot and
+    spreads the rest over the square of the archetype count. Pinning one seat
+    leaves the opposing field at full width -- which is the ladder the agent is
+    scored against -- while collapsing the matchup space to one entry per
+    opponent archetype.
+
+    Evaluation is pinned unconditionally, with no field share: the eval curve
+    should measure the deck that will actually be submitted, not an average
+    over decks that will not.
+
+    :param cfg: Hydra configuration with an ``env`` section.
+    :param field_spec: The opposing-field sampler spec to wrap.
+    :param deck_split: ``"train"`` or ``"eval"``.
+    :return: The wrapped spec, or ``field_spec`` unchanged when no deck is set.
+    """
+    configured = cfg.env.get("agent_deck")
+    if not configured:
+        return field_spec
+    path = Path(to_absolute_path(str(configured)))
+    if not path.is_file():
+        raise ValueError(f"env.agent_deck {path} does not exist.")
+    field_probability = (
+        0.0
+        if deck_split == "eval"
+        else float(cfg.env.get("agent_deck_field_prob", 0.0) or 0.0)
+    )
+    return {
+        "kind": "agent_fixed",
+        "agent_deck": load_deck(str(path)),
+        "agent_label": _deck_labels([str(path)])[0],
+        "field_probability": field_probability,
+        "field": field_spec,
+    }
 
 
 def make_env_factories(
@@ -386,6 +428,14 @@ def make_env_factories(
         seat assignments and opponent draws each worker already played.
     :return: List of ``cfg.env.num_workers`` picklable environment factories.
     """
+    if curriculum is not None and cfg.env.get("agent_deck"):
+        raise ValueError(
+            "env.agent_deck and env.curriculum.enabled cannot both be set: a "
+            "curriculum level is an ordered (agent, opponent) archetype pair, and "
+            "pinning the agent's deck discards the agent half of every level it "
+            "draws, so its scores would describe matchups that were never played. "
+            "Pin the deck and leave the curriculum off, or drop the pin."
+        )
     if curriculum is not None and deck_split != "eval":
         # The train split specifically, and via the same call the curriculum
         # used to build its archetype index: it addresses decks by position, so
