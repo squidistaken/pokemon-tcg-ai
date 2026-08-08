@@ -74,7 +74,8 @@ class WandbForkGuard:
         except Exception:
             logger.warning(
                 "Could not detach inherited W&B finalizers; this worker may hang "
-                "at exit.", exc_info=True
+                "at exit.",
+                exc_info=True,
             )
             return
         if detached:
@@ -98,7 +99,9 @@ class WandbForkGuard:
 
         :return: Number of finalizers detached.
         """
-        registry: dict[weakref.finalize, Any] = getattr(weakref.finalize, "_registry", {})
+        registry: dict[weakref.finalize, Any] = getattr(
+            weakref.finalize, "_registry", {}
+        )
         detached = 0
         for finalizer in list(registry):
             func = getattr(registry.get(finalizer), "func", None)
@@ -116,4 +119,6 @@ class WandbForkGuard:
         module = getattr(func, "__module__", None)
         if not isinstance(module, str):
             return False
-        return module == self._module_prefix or module.startswith(f"{self._module_prefix}.")
+        return module == self._module_prefix or module.startswith(
+            f"{self._module_prefix}."
+        )

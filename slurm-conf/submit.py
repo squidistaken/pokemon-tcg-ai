@@ -95,9 +95,7 @@ def _config_name(value: str) -> str:
     if not path.is_relative_to(CONF_DIR) or not path.is_file():
         raise FileNotFoundError(f"Hydra config not found: {path}")
     if path.parent != CONF_DIR:
-        raise ValueError(
-            f"Hydra launch configs must be direct children of {CONF_DIR}"
-        )
+        raise ValueError(f"Hydra launch configs must be direct children of {CONF_DIR}")
     return path.relative_to(CONF_DIR).with_suffix("").as_posix()
 
 
@@ -156,7 +154,9 @@ def _require_single_resource(slurm: dict[str, Any], key: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"slurm.{key} must be an integer")
     if value != 1:
-        raise ValueError(f"slurm.{key} must be 1; distributed training is not supported")
+        raise ValueError(
+            f"slurm.{key} must be 1; distributed training is not supported"
+        )
 
 
 def _build_command(
@@ -261,7 +261,10 @@ def main() -> None:
     if args.dry_run:
         return
     if shutil.which("sbatch") is None:
-        print("ERROR: sbatch is not available; run this on a Slurm login node", file=sys.stderr)
+        print(
+            "ERROR: sbatch is not available; run this on a Slurm login node",
+            file=sys.stderr,
+        )
         raise SystemExit(2)
     try:
         subprocess.run(command, cwd=PROJECT_ROOT, check=True)

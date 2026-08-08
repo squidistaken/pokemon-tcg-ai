@@ -35,12 +35,20 @@ class CardDatabase:
         cards = all_card_data()
         attacks = all_attack()
         self._card_names: dict[int, str] = {card.cardId: card.name for card in cards}
-        self._attack_names: dict[int, str] = {attack.attackId: attack.name for attack in attacks}
+        self._attack_names: dict[int, str] = {
+            attack.attackId: attack.name for attack in attacks
+        }
 
         n_card_rows = max(card.cardId for card in cards) + 1
-        self._card_features = torch.zeros(n_card_rows, self.CARD_FEATURE_COUNT, dtype=torch.float32)
-        self._card_cats = torch.zeros(n_card_rows, self.CARD_CATEGORICAL_COUNT, dtype=torch.int64)
-        self._card_attack_ids = torch.zeros(n_card_rows, self.MAX_ATTACKS_PER_CARD, dtype=torch.int64)
+        self._card_features = torch.zeros(
+            n_card_rows, self.CARD_FEATURE_COUNT, dtype=torch.float32
+        )
+        self._card_cats = torch.zeros(
+            n_card_rows, self.CARD_CATEGORICAL_COUNT, dtype=torch.int64
+        )
+        self._card_attack_ids = torch.zeros(
+            n_card_rows, self.MAX_ATTACKS_PER_CARD, dtype=torch.int64
+        )
         for card in cards:
             row = card.cardId
             self._card_features[row] = torch.tensor(
@@ -69,11 +77,15 @@ class CardDatabase:
                 ],
                 dtype=torch.int64,
             )
-            for column, attack_id in enumerate(card.attacks[: self.MAX_ATTACKS_PER_CARD]):
+            for column, attack_id in enumerate(
+                card.attacks[: self.MAX_ATTACKS_PER_CARD]
+            ):
                 self._card_attack_ids[row, column] = attack_id
 
         n_attack_rows = max(attack.attackId for attack in attacks) + 1
-        self._attack_features = torch.zeros(n_attack_rows, self.ATTACK_FEATURE_COUNT, dtype=torch.float32)
+        self._attack_features = torch.zeros(
+            n_attack_rows, self.ATTACK_FEATURE_COUNT, dtype=torch.float32
+        )
         for attack in attacks:
             row = attack.attackId
             cost_counts = [0.0] * self.ENERGY_TYPE_COUNT

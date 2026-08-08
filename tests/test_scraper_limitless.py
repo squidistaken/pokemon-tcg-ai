@@ -76,7 +76,9 @@ def standing(placing: int, player: str) -> dict:
         "player": player,
         "record": {"wins": 5, "losses": 1, "ties": 0},
         "deck": {"id": "some-deck", "name": "Some Deck"},
-        "decklist": {"pokemon": [{"count": 4, "set": "MEG", "number": "1", "name": "Pikachu"}]},
+        "decklist": {
+            "pokemon": [{"count": 4, "set": "MEG", "number": "1", "name": "Pikachu"}]
+        },
     }
 
 
@@ -87,7 +89,7 @@ def source_over(pages, standings) -> tuple[LimitlessSource, FakeClient]:
     :return: A source wired to a :class:`FakeClient`, and that client.
     """
     client = FakeClient(pages, standings)
-    return LimitlessSource(client), client  # type: ignore[arg-type]
+    return LimitlessSource(client), client
 
 
 def test_walks_multiple_pages():
@@ -241,7 +243,7 @@ def test_an_unreachable_tournament_does_not_end_the_run():
 
     pages = {1: [tournament("boom", "2026-07-03"), tournament("fine", "2026-07-02")]}
     client = Flaky(pages, {"fine": [standing(1, "a")]})
-    src = LimitlessSource(client)  # type: ignore[arg-type]
+    src = LimitlessSource(client)
 
     decks = iter(src.iter_decks(limit=2, max_pages=1))
 

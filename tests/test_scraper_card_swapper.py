@@ -142,7 +142,7 @@ def test_profile_loader_fetches_each_printing_once(tmp_path):
             return CHARMELEON_HTML
 
     client = FakeClient()
-    loader = LimitlessProfileLoader(client=client, cache_dir=tmp_path)  # type: ignore[arg-type]
+    loader = LimitlessProfileLoader(client=client, cache_dir=tmp_path)
     card = RawCard(2, "Charmeleon", "OBF", "027", "pokemon")
 
     assert loader(card) == loader(card)
@@ -162,7 +162,7 @@ def test_profile_loader_resolves_a_full_expansion_name(tmp_path):
             return CHARMELEON_HTML
 
     client = FakeClient()
-    loader = LimitlessProfileLoader(client=client, cache_dir=tmp_path)  # type: ignore[arg-type]
+    loader = LimitlessProfileLoader(client=client, cache_dir=tmp_path)
 
     profile = loader(RawCard(2, "Charmeleon", "Obsidian Flames", "27", "pokemon"))
 

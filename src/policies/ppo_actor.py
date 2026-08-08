@@ -42,7 +42,9 @@ def _normalize_keys(raw_keys) -> list:
     :param raw_keys: Keys as read from config (strings or lists for nesting).
     :return: List of ``str`` or ``tuple[str, ...]`` tensordict keys.
     """
-    return [tuple(key) if isinstance(key, (list, ListConfig)) else key for key in raw_keys]
+    return [
+        tuple(key) if isinstance(key, (list, ListConfig)) else key for key in raw_keys
+    ]
 
 
 def _feature_width(spec: TensorSpec | Composite) -> int:
@@ -76,9 +78,9 @@ def _input_dim(obs_spec: Composite, in_keys: list[str]) -> int:
 
 
 def build_actor_critic(
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
 ) -> ActorCritic:
     """
     Build the standalone :class:`~src.models.actor_critic.ActorCritic`.
@@ -122,8 +124,12 @@ def build_actor_critic(
     adapter: StructuredObsAdapter | None = None
     if any(isinstance(obs_spec[key], Composite) for key in in_keys):
         adapter_kwargs = dict(cfg.model.get("adapter", None) or {})
-        adapter_kwargs["emit_option_tokens"] = needs_option_repr and not backbone_builds_tokens
-        adapter = StructuredObsAdapter(obs_spec=obs_spec, in_keys=in_keys, **adapter_kwargs)
+        adapter_kwargs["emit_option_tokens"] = (
+            needs_option_repr and not backbone_builds_tokens
+        )
+        adapter = StructuredObsAdapter(
+            obs_spec=obs_spec, in_keys=in_keys, **adapter_kwargs
+        )
         backbone_kwargs["adapter"] = adapter
         backbone_kwargs["input_dim"] = adapter.out_features
     else:
@@ -157,12 +163,14 @@ def build_actor_critic(
         activation=cfg.model.value_head.get("activation", "tanh"),
     )
 
-    return ActorCritic(backbone=backbone, policy_head=policy_head, value_head=value_head)
+    return ActorCritic(
+        backbone=backbone, policy_head=policy_head, value_head=value_head
+    )
 
 
 def build_ppo_operator(
-        actor_critic: ActorCritic,
-        action_spec: Categorical,
+    actor_critic: ActorCritic,
+    action_spec: Categorical,
 ) -> ActorValueOperator:
     """
     Wrap an :class:`ActorCritic` in a shared-trunk torchrl operator.
@@ -178,7 +186,9 @@ def build_ppo_operator(
     :return: Operator exposing ``get_policy_operator`` / ``get_value_operator``.
     """
     backbone = actor_critic.backbone
-    common_out = [HIDDEN_KEY, OPTION_REPR_KEY] if backbone.produces_option_repr else [HIDDEN_KEY]
+    common_out = (
+        [HIDDEN_KEY, OPTION_REPR_KEY] if backbone.produces_option_repr else [HIDDEN_KEY]
+    )
     head_in = (
         [HIDDEN_KEY, OPTION_REPR_KEY]
         if getattr(actor_critic.policy_head, "requires_option_repr", False)
@@ -187,21 +197,25 @@ def build_ppo_operator(
 
     common = TensorDictModule(backbone, in_keys=backbone.in_keys, out_keys=common_out)
     policy = ProbabilisticActor(
-        TensorDictModule(actor_critic.policy_head, in_keys=head_in, out_keys=[LOGITS_KEY]),
+        TensorDictModule(
+            actor_critic.policy_head, in_keys=head_in, out_keys=[LOGITS_KEY]
+        ),
         in_keys={"logits": LOGITS_KEY, "mask": ACTION_MASK_KEY},
         out_keys=[ACTION_KEY],
         distribution_class=MaskedCategorical,
         return_log_prob=True,
         spec=action_spec,
     )
-    value = ValueOperator(actor_critic.value_head, in_keys=[HIDDEN_KEY], out_keys=[VALUE_KEY])
+    value = ValueOperator(
+        actor_critic.value_head, in_keys=[HIDDEN_KEY], out_keys=[VALUE_KEY]
+    )
     return ActorValueOperator(common, policy, value)
 
 
 def build_ppo_actor_critic(
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
 ) -> ActorValueOperator:
     """
     Build the PPO shared-trunk actor-critic operator from config and specs.
@@ -216,4 +230,6 @@ def build_ppo_actor_critic(
     :param action_spec: Environment action spec.
     :return: The assembled :class:`~torchrl.modules.ActorValueOperator`.
     """
-    return build_ppo_operator(build_actor_critic(cfg, obs_spec, action_spec), action_spec)
+    return build_ppo_operator(
+        build_actor_critic(cfg, obs_spec, action_spec), action_spec
+    )

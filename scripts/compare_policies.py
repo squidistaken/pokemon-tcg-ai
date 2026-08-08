@@ -3,11 +3,20 @@ Compare two policies against a shared frozen opponent with held-out decks.
 
 Evaluates both against the same (opponent checkpoint + held-out opponent deck)
 pairs and reports mean and worst-decile win rate.
+
+Run from the repository root::
+
+    uv run python scripts/compare_policies.py --help
 """
+
 import argparse
 import json
 import statistics
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
 import torch
 from omegaconf import OmegaConf
@@ -22,25 +31,45 @@ from tests.conftest import MAX_OPTIONS
 
 
 def _load_policy(checkpoint_path, device="cpu"):
-    cfg = OmegaConf.create({
-        "seed": 0,
-        "model": {
-            "embed_dim": 128,
-            "backbone": {"_target_": "src.models.mlp.MLPBackbone", "num_cells": [256,256],
-                         "activation": "tanh", "in_keys": [
-                             ["observation","globals"],["observation","select_cats"],
-                             ["observation","context_card_ids"],["observation","stadium_id"],
-                             ["observation","options"],["observation","pokemon"],
-                             ["observation","my"],["observation","opp"],
-                             ["observation","select_deck"],["observation","looking"]]},
-            "head": {"_target_": "src.models.heads.LinearPolicyHead"},
-            "value_head": {"num_cells": [256]}},
-        "env": {"max_options": MAX_OPTIONS}})
+    cfg = OmegaConf.create(
+        {
+            "seed": 0,
+            "model": {
+                "embed_dim": 128,
+                "backbone": {
+                    "_target_": "src.models.mlp.MLPBackbone",
+                    "num_cells": [256, 256],
+                    "activation": "tanh",
+                    "in_keys": [
+                        ["observation", "globals"],
+                        ["observation", "select_cats"],
+                        ["observation", "context_card_ids"],
+                        ["observation", "stadium_id"],
+                        ["observation", "options"],
+                        ["observation", "pokemon"],
+                        ["observation", "my"],
+                        ["observation", "opp"],
+                        ["observation", "select_deck"],
+                        ["observation", "looking"],
+                    ],
+                },
+                "head": {"_target_": "src.models.heads.LinearPolicyHead"},
+                "value_head": {"num_cells": [256]},
+            },
+            "env": {"max_options": MAX_OPTIONS},
+        }
+    )
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     from src.policies.ppo_actor import build_actor_critic, build_ppo_operator
+
     ac = build_actor_critic(cfg, checkpoint["obs_spec"], checkpoint["action_spec"])
     ac.load_state_dict(checkpoint["model"])
-    return build_ppo_operator(ac, checkpoint["action_spec"]).get_policy_operator().to(device)
+    return (
+        build_ppo_operator(ac, checkpoint["action_spec"])
+        .get_policy_operator()
+        .to(device)
+    )
+
 
 def _play_episode(env, policy, max_steps=2000, deterministic=True):
     expl = ExplorationType.DETERMINISTIC if deterministic else ExplorationType.RANDOM
@@ -50,31 +79,47 @@ def _play_episode(env, policy, max_steps=2000, deterministic=True):
             td = policy(td.to(policy.device)).to("cpu")
             td = env.step(td)
             if td["next", "done"].item():
-                return float(td["next", "reward"].item()), bool(td["next", "terminated"].item())
+                return float(td["next", "reward"].item()), bool(
+                    td["next", "terminated"].item()
+                )
             td = step_mdp(td)
     return 0.0, False
+
 
 def evaluate(policy, agent_deck, opponent, opponent_decks, episodes_per_pair, seed):
     results = []
     for opp_deck in opponent_decks:
         wins = 0
+        decided = 0
         for ep in range(episodes_per_pair):
             env = TransformedEnv(
-                TCGEnv(list(agent_deck), list(opp_deck), max_options=MAX_OPTIONS, opponent=opponent, seed=seed+ep),
-                ActionMask())
+                TCGEnv(
+                    list(agent_deck),
+                    list(opp_deck),
+                    max_options=MAX_OPTIONS,
+                    opponent=opponent,
+                    seed=seed + ep,
+                ),
+                ActionMask(),
+            )
             try:
                 env.set_spec_lock_(True)
                 reward, terminated = _play_episode(env, policy)
-                if terminated and reward > 0:
-                    wins += 1
+                if terminated:
+                    decided += 1
+                    if reward > 0:
+                        wins += 1
             finally:
                 env.close()
-        results.append(wins / max(episodes_per_pair, 1))
+        results.append(wins / decided if decided else 0.0)
     results.sort()
     n = len(results)
-    return {"mean": statistics.fmean(results),
-            "worst_decile": statistics.fmean(results[:max(1, n//10)]),
-            "per_pair": results}
+    return {
+        "mean": statistics.fmean(results),
+        "worst_decile": statistics.fmean(results[: max(1, n // 10)]),
+        "per_pair": results,
+    }
+
 
 def main():
     p = argparse.ArgumentParser()
@@ -93,42 +138,78 @@ def main():
     curriculum_pol = _load_policy(args.curriculum, device)
 
     print(f"Loading opponent from {args.opponent}...")
-    cfg = OmegaConf.create({
-        "seed":0, "model":{"embed_dim":128,
-            "backbone":{"_target_":"src.models.mlp.MLPBackbone","num_cells":[256,256],
-                         "activation":"tanh","in_keys":[
-                             ["observation","globals"],["observation","select_cats"],
-                             ["observation","context_card_ids"],["observation","stadium_id"],
-                             ["observation","options"],["observation","pokemon"],
-                             ["observation","my"],["observation","opp"],
-                             ["observation","select_deck"],["observation","looking"]]},
-            "head":{"_target_":"src.models.heads.LinearPolicyHead"},
-            "value_head":{"num_cells":[256]}},
-        "env":{"max_options":MAX_OPTIONS}})
+    cfg = OmegaConf.create(
+        {
+            "seed": 0,
+            "model": {
+                "embed_dim": 128,
+                "backbone": {
+                    "_target_": "src.models.mlp.MLPBackbone",
+                    "num_cells": [256, 256],
+                    "activation": "tanh",
+                    "in_keys": [
+                        ["observation", "globals"],
+                        ["observation", "select_cats"],
+                        ["observation", "context_card_ids"],
+                        ["observation", "stadium_id"],
+                        ["observation", "options"],
+                        ["observation", "pokemon"],
+                        ["observation", "my"],
+                        ["observation", "opp"],
+                        ["observation", "select_deck"],
+                        ["observation", "looking"],
+                    ],
+                },
+                "head": {"_target_": "src.models.heads.LinearPolicyHead"},
+                "value_head": {"num_cells": [256]},
+            },
+            "env": {"max_options": MAX_OPTIONS},
+        }
+    )
     from src.training.env_factory import make_encoder
-    opponent = load_greedy_opponent(args.opponent, cfg, None, None, make_encoder("structured", MAX_OPTIONS), device="cpu")
+
+    opponent = load_greedy_opponent(
+        args.opponent,
+        cfg,
+        None,
+        None,
+        make_encoder("structured", MAX_OPTIONS),
+        device="cpu",
+    )
 
     all_paths = resolve_deck_paths(str(args.decks))
     arch_name = args.agent_deck.parent.name
     agent_deck = load_deck(str(args.agent_deck))
-    held_out = [load_deck(p) for p in all_paths if Path(p).parent.name != arch_name and p != str(args.agent_deck)]
-    print(f"Agent: {arch_name}  |  Held-out opponent decks: {len(held_out)}/{len(all_paths)}  |  Games per pair: {args.episodes}")
+    held_out = [
+        load_deck(p)
+        for p in all_paths
+        if Path(p).parent.name != arch_name and p != str(args.agent_deck)
+    ]
+    print(
+        f"Agent: {arch_name}  |  Held-out opponent decks: {len(held_out)}/{len(all_paths)}  |  Games per pair: {args.episodes}"
+    )
 
     print("\n--- Uniform ---")
     ur = evaluate(uniform_pol, agent_deck, opponent, held_out, args.episodes, args.seed)
     print(f"mean={ur['mean']:.3f}  worst_decile={ur['worst_decile']:.3f}")
 
     print("\n--- Curriculum ---")
-    cr = evaluate(curriculum_pol, agent_deck, opponent, held_out, args.episodes, args.seed + 10000)
+    cr = evaluate(
+        curriculum_pol, agent_deck, opponent, held_out, args.episodes, args.seed + 10000
+    )
     print(f"mean={cr['mean']:.3f}  worst_decile={cr['worst_decile']:.3f}")
 
     summary = {
         "uniform": {"mean": ur["mean"], "worst_decile": ur["worst_decile"]},
         "curriculum": {"mean": cr["mean"], "worst_decile": cr["worst_decile"]},
         "mean_diff": cr["mean"] - ur["mean"],
-        "worst_decile_diff": cr["worst_decile"] - ur["worst_decile"]}
+        "worst_decile_diff": cr["worst_decile"] - ur["worst_decile"],
+    }
     print(f"\n{json.dumps(summary, indent=2)}")
-    (args.uniform.parent.parent / "comparison.json").write_text(json.dumps(summary, indent=2))
+    (args.uniform.parent.parent / "comparison.json").write_text(
+        json.dumps(summary, indent=2)
+    )
+
 
 if __name__ == "__main__":
     main()

@@ -20,8 +20,7 @@ class GameEndReason(IntEnum):
 
 @dataclass
 class AttackUsage:
-    """One use of one attack, with the damage it's credited for.
-    """
+    """One use of one attack, with the damage it's credited for."""
 
     attack_id: int
     card_id: int
@@ -88,7 +87,9 @@ class ParsedEpisode:
     game_end_reason: int | None = None
 
 
-def _record_hand_snapshot(episode: ParsedEpisode, hand: list[dict[str, Any]] | None) -> None:
+def _record_hand_snapshot(
+    episode: ParsedEpisode, hand: list[dict[str, Any]] | None
+) -> None:
     """
     Add every card ID in ``hand`` to ``episode.cards_seen``.
 
@@ -139,7 +140,9 @@ def parse_replay(
     :param opponent_team: Opponent team name, carried through unchanged.
     :return: The parsed episode.
     """
-    episode = ParsedEpisode(episode_id=episode_id, result=result, opponent_team=opponent_team)
+    episode = ParsedEpisode(
+        episode_id=episode_id, result=result, opponent_team=opponent_team
+    )
     steps = raw.get("steps", [])
     previous_logs: list[dict[str, Any]] | None = None
 
@@ -168,7 +171,10 @@ def parse_replay(
         for log in logs:
             log_type = log.get("type")
 
-            if log_type == LogType.HAS_BASIC_POKEMON and log.get("playerIndex") == our_index:
+            if (
+                log_type == LogType.HAS_BASIC_POKEMON
+                and log.get("playerIndex") == our_index
+            ):
                 episode.had_basic_pokemon = bool(log.get("hasBasicPokemon"))
 
             elif (
@@ -196,9 +202,14 @@ def parse_replay(
                 attacker_index = log.get("playerIndex")
                 if attack_id is not None and card_id is not None:
                     if attacker_index == our_index:
-                        pending_attack = AttackUsage(attack_id=attack_id, card_id=card_id)
+                        pending_attack = AttackUsage(
+                            attack_id=attack_id, card_id=card_id
+                        )
                         episode.attacks.append(pending_attack)
-                        if episode.first_attack_turn is None and current_turn is not None:
+                        if (
+                            episode.first_attack_turn is None
+                            and current_turn is not None
+                        ):
                             episode.first_attack_turn = current_turn
                     else:
                         pending_opponent_attack = AttackUsage(
@@ -211,7 +222,11 @@ def parse_replay(
                 target_index = log.get("playerIndex")
                 if value and pending_attack is not None and target_index != our_index:
                     pending_attack.damage += max(0, -value)
-                elif value and pending_opponent_attack is not None and target_index == our_index:
+                elif (
+                    value
+                    and pending_opponent_attack is not None
+                    and target_index == our_index
+                ):
                     pending_opponent_attack.damage += max(0, -value)
 
             elif log_type == LogType.MOVE_CARD:

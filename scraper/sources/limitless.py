@@ -143,7 +143,9 @@ class LimitlessSource(DeckSource):
             if not cards:
                 continue
             deck_meta = player.get("deck") or {}
-            archetype = deck_meta.get("name") or player.get("player") or "limitless-deck"
+            archetype = (
+                deck_meta.get("name") or player.get("player") or "limitless-deck"
+            )
             yield RawDeck(
                 source=self.name,
                 archetype=archetype,

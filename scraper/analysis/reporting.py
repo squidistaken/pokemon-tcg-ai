@@ -324,15 +324,36 @@ def corpus_structure_summary(
     )
     atable.add_column("archetype", style="cyan")
     atable.add_column("n", justify="right", style="dim")
-    for label in ("poke", "trainer", "energy", "E-ratio", "basic", "st1", "st2", "ex", "HP"):
+    for label in (
+        "poke",
+        "trainer",
+        "energy",
+        "E-ratio",
+        "basic",
+        "st1",
+        "st2",
+        "ex",
+        "HP",
+    ):
         atable.add_column(label, justify="right")
-    show = [(name, col_idx[key]) for name, key in (
-        ("poke", "pokemon_count"), ("trainer", "trainer_count"), ("energy", "energy_count"),
-        ("E-ratio", "energy_ratio"), ("basic", "basic_pokemon"), ("st1", "stage1_pokemon"),
-        ("st2", "stage2_pokemon"), ("ex", "ex_count"), ("HP", "mean_pokemon_hp"),
-    )]
+    show = [
+        (name, col_idx[key])
+        for name, key in (
+            ("poke", "pokemon_count"),
+            ("trainer", "trainer_count"),
+            ("energy", "energy_count"),
+            ("E-ratio", "energy_ratio"),
+            ("basic", "basic_pokemon"),
+            ("st1", "stage1_pokemon"),
+            ("st2", "stage2_pokemon"),
+            ("ex", "ex_count"),
+            ("HP", "mean_pokemon_hp"),
+        )
+    ]
     counts_by_arch = Counter(archetypes)
-    for a in [a for a, _ in counts_by_arch.most_common() if counts_by_arch[a] >= 2][:15]:
+    for a in [a for a, _ in counts_by_arch.most_common() if counts_by_arch[a] >= 2][
+        :15
+    ]:
         mask = arch == a
         row = [a, str(int(mask.sum()))]
         for label, idx in show:
@@ -514,11 +535,19 @@ def report_diversity(
     n = count_sim.shape[0]
     iu = np.triu_indices(n, k=1)
     pair_similarities = count_sim[iu]
-    mean_dist = float(1.0 - pair_similarities.mean()) if pair_similarities.size else None
+    mean_dist = (
+        float(1.0 - pair_similarities.mean()) if pair_similarities.size else None
+    )
     incl = presence.astype(np.float64).mean(axis=0)
     active = incl > 0
-    incl_var = float((incl[active] * (1.0 - incl[active])).mean()) if active.any() else 0.0
-    count_var = float(counts.astype(np.float64)[:, active].var(axis=0).mean()) if active.any() else 0.0
+    incl_var = (
+        float((incl[active] * (1.0 - incl[active])).mean()) if active.any() else 0.0
+    )
+    count_var = (
+        float(counts.astype(np.float64)[:, active].var(axis=0).mean())
+        if active.any()
+        else 0.0
+    )
 
     console.print()
     console.rule("[bold magenta]Corpus diversity[/]", style="magenta")
@@ -564,8 +593,13 @@ def report_diversity(
     ct.add_column("metric", style="dim")
     ct.add_column("value", justify="right", style="bold")
     ct.add_row("cards used by the corpus", str(n_used))
-    ct.add_row("used in exactly 1 deck (singletons)", f"{int((decks_per_card == 1).sum())}")
-    ct.add_row("used in <= 2 decks", f"{int(((decks_per_card >= 1) & (decks_per_card <= 2)).sum())}")
+    ct.add_row(
+        "used in exactly 1 deck (singletons)", f"{int((decks_per_card == 1).sum())}"
+    )
+    ct.add_row(
+        "used in <= 2 decks",
+        f"{int(((decks_per_card >= 1) & (decks_per_card <= 2)).sum())}",
+    )
     ct.add_row("top-10 cards' share of all copies", f"{top_share:.1%}")
     console.print(ct)
 
@@ -623,7 +657,9 @@ def report_near_duplicates(
 
     console.print()
     console.rule("[bold red]Near-duplicates[/]", style="red")
-    console.print(f"[bold]{idxs.size}[/] deck pair(s) with weighted-Jaccard >= {threshold:.2f}")
+    console.print(
+        f"[bold]{idxs.size}[/] deck pair(s) with weighted-Jaccard >= {threshold:.2f}"
+    )
 
     clusters = near_duplicate_clusters(count_sim, threshold)
     effective = len(clusters)
@@ -634,7 +670,9 @@ def report_near_duplicates(
     if idxs.size == 0:
         return
     involved = {int(iu[0][k]) for k in idxs} | {int(iu[1][k]) for k in idxs}
-    console.print(f"[dim]{len(involved)} of {n} decks are in at least one near-duplicate pair[/]")
+    console.print(
+        f"[dim]{len(involved)} of {n} decks are in at least one near-duplicate pair[/]"
+    )
 
     table = Table(
         box=ROUNDED,
@@ -653,7 +691,9 @@ def report_near_duplicates(
         row = [f"{off[k]:.3f}", names[i], names[j]]
         if archetypes is not None:
             row.append(
-                "[green]same[/]" if archetypes[i] == archetypes[j] else "[yellow]diff[/]"
+                "[green]same[/]"
+                if archetypes[i] == archetypes[j]
+                else "[yellow]diff[/]"
             )
         table.add_row(*row)
     console.print(table)
@@ -672,7 +712,9 @@ def save_report(path: Path) -> None:
     if suffix == ".html":
         path.write_text(console.export_html(), encoding="utf-8")
     elif suffix == ".svg":
-        path.write_text(console.export_svg(title="Deck corpus analysis"), encoding="utf-8")
+        path.write_text(
+            console.export_svg(title="Deck corpus analysis"), encoding="utf-8"
+        )
     else:
         path.write_text(console.export_text(), encoding="utf-8")
     console.print(f"[green]✓[/] Report written to [bold]{path}[/]")

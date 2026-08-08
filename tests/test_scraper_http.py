@@ -51,7 +51,7 @@ class TrackingSession:
 def test_one_client_serializes_requests_from_source_and_profile_workers():
     client = HttpClient(min_interval=0)
     session = TrackingSession()
-    client.session = session  # type: ignore[assignment]
+    client.session = session  # pyright: ignore[reportAttributeAccessIssue]
     barrier = threading.Barrier(3)
 
     def request() -> None:
@@ -91,7 +91,7 @@ def test_one_client_spaces_request_starts_by_its_configured_interval(monkeypatch
     monkeypatch.setattr("scraper.http.time.monotonic", Clock.monotonic)
     monkeypatch.setattr("scraper.http.time.sleep", Clock.sleep)
     client = HttpClient(min_interval=0.5)
-    client.session = TimedSession()  # type: ignore[assignment]
+    client.session = TimedSession()  # pyright: ignore[reportAttributeAccessIssue]
 
     client.get_text("https://example.invalid/one")
     client.get_text("https://example.invalid/two")
@@ -124,7 +124,7 @@ def test_retry_attempts_also_obey_configured_interval(monkeypatch):
     monkeypatch.setattr("scraper.http.time.sleep", Clock.sleep)
     client = HttpClient(min_interval=0.5, backoff_factor=0)
     first_response = responses[0]
-    client.session = RetryingSession()  # type: ignore[assignment]
+    client.session = RetryingSession()  # pyright: ignore[reportAttributeAccessIssue]
 
     assert client.get_text("https://example.invalid") == "ok"
     assert starts == [10.0, 10.5]
@@ -145,7 +145,7 @@ def test_retry_after_takes_precedence_over_backoff(monkeypatch):
 
     monkeypatch.setattr("scraper.http.time.sleep", sleeps.append)
     client = HttpClient(min_interval=0, backoff_factor=10)
-    client.session = RetryingSession()  # type: ignore[assignment]
+    client.session = RetryingSession()  # pyright: ignore[reportAttributeAccessIssue]
 
     assert client.get_text("https://example.invalid") == "ok"
     assert sleeps == [2.0]
@@ -163,7 +163,7 @@ def test_transient_request_errors_retry_only_up_to_limit(monkeypatch):
     monkeypatch.setattr("scraper.http.time.sleep", lambda _seconds: None)
     client = HttpClient(min_interval=0, max_retries=2, backoff_factor=0)
     session = FailingSession()
-    client.session = session  # type: ignore[assignment]
+    client.session = session  # pyright: ignore[reportAttributeAccessIssue]
 
     with pytest.raises(requests.ConnectionError, match="offline"):
         client.get_text("https://example.invalid")
@@ -183,7 +183,7 @@ def test_separate_clients_can_make_requests_concurrently():
 
     clients = [HttpClient(min_interval=0), HttpClient(min_interval=0)]
     for client in clients:
-        client.session = BarrierSession()  # type: ignore[assignment]
+        client.session = BarrierSession()  # pyright: ignore[reportAttributeAccessIssue]
 
     def request(client: HttpClient) -> None:
         try:

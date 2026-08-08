@@ -46,12 +46,12 @@ class CurriculumDeckSampler:
     """
 
     def __init__(
-            self,
-            decks: Sequence[Sequence[int]],
-            archetypes: ArchetypeIndex,
-            handles: CurriculumHandles,
-            seed: int | None = None,
-            explore_prob: float = 0.0,
+        self,
+        decks: Sequence[Sequence[int]],
+        archetypes: ArchetypeIndex,
+        handles: CurriculumHandles,
+        seed: int | None = None,
+        explore_prob: float = 0.0,
     ) -> None:
         """
         :param decks: The deck pool, indexed by the positions ``archetypes``
@@ -82,6 +82,9 @@ class CurriculumDeckSampler:
         self._archetypes = archetypes
         self._handles = handles
         self._rng = random.Random(seed)
+        self._torch_rng = torch.Generator()
+        if seed is not None:
+            self._torch_rng.manual_seed(seed)
         self._explore_prob = explore_prob
         self._level_id = NO_LEVEL
 
@@ -138,13 +141,14 @@ class CurriculumDeckSampler:
 
     def seed(self, seed: int | None) -> None:
         """
-        Reseed the within-archetype draw.
+        Reseed the matchup draw and the within-archetype deal.
 
         :param seed: Seed value; None leaves the sampler untouched.
         """
         if seed is None:
             return
         self._rng.seed(seed)
+        self._torch_rng.manual_seed(seed)
 
     def _draw_pair(self) -> tuple[int, int]:
         """
@@ -168,7 +172,11 @@ class CurriculumDeckSampler:
         if not total > 0.0:
             slot = self._rng.randrange(size)
         else:
-            slot = int(torch.multinomial(probabilities, num_samples=1).item())
+            slot = int(
+                torch.multinomial(
+                    probabilities, num_samples=1, generator=self._torch_rng
+                ).item()
+            )
         return self._archetypes.unpair(int(self._handles.pair_ids[slot].item()))
 
     def _deal(self, archetype: int) -> Deck:

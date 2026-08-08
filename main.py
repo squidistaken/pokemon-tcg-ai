@@ -1,6 +1,7 @@
 import os
 
 from cg.api import Observation, to_observation_class
+from src.env.deck import load_deck
 from src.policies.inference import InferenceAgent, load_inference_agent
 
 # Overridable via env var rather than hardcoded: main.py has no CLI args or
@@ -9,7 +10,9 @@ from src.policies.inference import InferenceAgent, load_inference_agent
 # the actual submission bundling (a separate issue) settles on its own layout.
 KAGGLE_AGENT_DIR = os.environ.get("PTCG_KAGGLE_AGENT_DIR", "/kaggle_simulations/agent/")
 CHECKPOINT_PATH = os.environ.get("PTCG_CHECKPOINT_PATH", "checkpoint/model.pt")
-MODEL_CONFIG_PATH = os.environ.get("PTCG_MODEL_CONFIG_PATH", "checkpoint/model_config.yaml")
+MODEL_CONFIG_PATH = os.environ.get(
+    "PTCG_MODEL_CONFIG_PATH", "checkpoint/model_config.yaml"
+)
 
 _agent: InferenceAgent | None = None
 
@@ -34,13 +37,7 @@ def read_deck_csv() -> list[int]:
     Returns:
         list[int]: A list of card IDs in the deck.
     """
-    file_path = _resolve_path("deck.csv")
-    with open(file_path, "r") as file:
-        csv = file.read().split("\n")
-    deck = []
-    for i in range(60):
-        deck.append(int(csv[i]))
-    return deck
+    return load_deck(_resolve_path("deck.csv"))
 
 
 def _load_agent() -> InferenceAgent:

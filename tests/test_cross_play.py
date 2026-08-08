@@ -68,7 +68,9 @@ def test_play_match_resolves_a_battle() -> None:
     """
     A random-vs-random battle on the example deck resolves within the cap.
     """
-    result = play_match(BattleHandle(), DECK, DECK, RandomOpponent(1), RandomOpponent(2))
+    result = play_match(
+        BattleHandle(), DECK, DECK, RandomOpponent(1), RandomOpponent(2)
+    )
     assert result is not None  # a seat won or the game drew, but it ended
 
 
@@ -92,8 +94,14 @@ def test_crossplay_matrix_is_complementary_with_even_diagonal() -> None:
     """
     Every off-diagonal cell and its mirror sum to 1, and self-play cells are 0.5.
     """
-    policies = {"p1": RandomOpponent(1), "p2": RandomOpponent(2), "p3": RandomOpponent(3)}
-    names, scores, games = crossplay_matrix(policies, _mirror_sampler, n_games=3, seed=0)
+    policies = {
+        "p1": RandomOpponent(1),
+        "p2": RandomOpponent(2),
+        "p3": RandomOpponent(3),
+    }
+    names, scores, games = crossplay_matrix(
+        policies, _mirror_sampler, n_games=3, seed=0
+    )
     assert names == ["p1", "p2", "p3"]
     for a in names:
         assert scores[a][a] == 0.5

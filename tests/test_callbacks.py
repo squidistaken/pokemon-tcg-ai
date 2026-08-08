@@ -292,7 +292,9 @@ def test_callback_list_fans_out_to_every_member_in_order() -> None:
     Each hook reaches all members, in the order they were registered.
     """
     events: list[tuple] = []
-    callbacks = CallbackList([RecordingCallback("first", events), RecordingCallback("second", events)])
+    callbacks = CallbackList(
+        [RecordingCallback("first", events), RecordingCallback("second", events)]
+    )
 
     callbacks.on_train_start({"seed": 1})
     callbacks.on_rollout_start(0)
@@ -334,7 +336,9 @@ def test_trainer_notifies_callbacks_across_the_run() -> None:
     Start, one batch per collector iteration, then end, x-axed by frames.
     """
     recorder = RecordingCallback()
-    trainer = make_trainer([recorder], run_config={"seed": 0, "agent": {"name": "dummy"}})
+    trainer = make_trainer(
+        [recorder], run_config={"seed": 0, "agent": {"name": "dummy"}}
+    )
 
     stats = trainer.train()
 
@@ -539,7 +543,9 @@ def test_wandb_logging_failure_propagates(
         callback.on_rollout_end(64, {"win_rate": 0.5})
 
 
-def test_wandb_start_failure_creates_no_collector(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wandb_start_failure_creates_no_collector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
     A backend that fails at startup costs no environment workers at all.
 
@@ -570,7 +576,9 @@ def test_wandb_start_failure_creates_no_collector(monkeypatch: pytest.MonkeyPatc
     assert created == []
 
 
-def test_wandb_marks_a_failed_run_crashed(fake_wandb, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wandb_marks_a_failed_run_crashed(
+    fake_wandb, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """
     A run that dies mid-collection is finished with a non-zero exit code.
 
@@ -579,7 +587,9 @@ def test_wandb_marks_a_failed_run_crashed(fake_wandb, monkeypatch: pytest.Monkey
     """
     _, run = fake_wandb
     exit_codes: list[int | None] = []
-    monkeypatch.setattr(run, "finish", lambda exit_code=None: exit_codes.append(exit_code))
+    monkeypatch.setattr(
+        run, "finish", lambda exit_code=None: exit_codes.append(exit_code)
+    )
 
     callback = WeightsAndBiases(project="pokemon-tcg-ai", mode="offline")
     callback.on_train_start({})
@@ -611,7 +621,12 @@ def test_wandb_training_failure_publishes_traceback(
             done[-1] = True
             reward = torch.zeros(64, 1)
             yield TensorDict(
-                {"next": TensorDict({"done": done, "reward": reward}, batch_size=[64])},
+                {
+                    "next": TensorDict(
+                        {"done": done, "terminated": done.clone(), "reward": reward},
+                        batch_size=[64],
+                    )
+                },
                 batch_size=[64],
             )
 
@@ -629,7 +644,9 @@ def test_wandb_training_failure_publishes_traceback(
 
     _, run = fake_wandb
     exit_codes: list[int | None] = []
-    monkeypatch.setattr(run, "finish", lambda exit_code=None: exit_codes.append(exit_code))
+    monkeypatch.setattr(
+        run, "finish", lambda exit_code=None: exit_codes.append(exit_code)
+    )
     trainer = OutOfMemoryTrainer(
         env_factories=[],
         policy=RandomMaskedPolicy(),
@@ -639,7 +656,9 @@ def test_wandb_training_failure_publishes_traceback(
         callbacks=[WeightsAndBiases(project="pokemon-tcg-ai", mode="offline")],
     )
 
-    with pytest.raises(torch.OutOfMemoryError, match="CUDA out of memory \\(simulated\\)"):
+    with pytest.raises(
+        torch.OutOfMemoryError, match="CUDA out of memory \\(simulated\\)"
+    ):
         trainer.train()
 
     assert exit_codes == [1]
@@ -650,13 +669,17 @@ def test_wandb_training_failure_publishes_traceback(
     assert "OutOfMemoryError: CUDA out of memory (simulated)" in outgoing_message
 
 
-def test_wandb_marks_a_clean_run_finished(fake_wandb, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wandb_marks_a_clean_run_finished(
+    fake_wandb, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """
     A run that completes normally is still finished with no exit code.
     """
     _, run = fake_wandb
     exit_codes: list[int | None] = []
-    monkeypatch.setattr(run, "finish", lambda exit_code=None: exit_codes.append(exit_code))
+    monkeypatch.setattr(
+        run, "finish", lambda exit_code=None: exit_codes.append(exit_code)
+    )
 
     callback = WeightsAndBiases(project="pokemon-tcg-ai", mode="offline")
     callback.on_train_start({})

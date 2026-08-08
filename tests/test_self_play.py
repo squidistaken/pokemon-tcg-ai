@@ -167,12 +167,16 @@ def test_pool_skips_unreadable_snapshot_and_retries_later(tmp_path) -> None:
     assert pool.snapshot_count == 1
 
 
-def test_snapshot_callback_writes_on_interval(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_snapshot_callback_writes_on_interval(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     Snapshots are written once per interval, leaving no partial ``.tmp`` files
     behind for a scanning worker to trip over.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     callback = SnapshotCallback(actor_critic, tmp_path, interval=100)
     callback.on_train_start({})
     for frames in (50, 100, 150, 200):
@@ -185,19 +189,25 @@ def test_snapshot_callback_writes_on_interval(tmp_path, structured_model_cfg, st
     assert list(tmp_path.glob("*.tmp")) == []
 
 
-def test_snapshot_callback_does_not_rewrite_final_snapshot(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_snapshot_callback_does_not_rewrite_final_snapshot(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     A run ending exactly on a snapshot boundary does not write that snapshot
     twice; a run ending between boundaries still persists its final policy.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     registry = tmp_path / "logs" / "checkpoint_keys.csv"
     logged: list[tuple[Path, str, int]] = []
     callback = SnapshotCallback(
         actor_critic,
         tmp_path / "checkpoints",
         interval=100,
-        checkpoint_loggers=[lambda path, digest, frames: logged.append((path, digest, frames))],
+        checkpoint_loggers=[
+            lambda path, digest, frames: logged.append((path, digest, frames))
+        ],
         registry_path=registry,
         repo_root=tmp_path,
     )
@@ -266,13 +276,17 @@ def test_final_checkpoint_embeds_config_and_emits_hash_key(
     capsys,
 ) -> None:
     """Even interval=0 writes a self-describing final checkpoint and short key."""
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     logged: list[tuple[Path, str, int]] = []
     callback = SnapshotCallback(
         actor_critic,
         tmp_path / "checkpoints",
         interval=0,
-        checkpoint_loggers=[lambda path, digest, frames: logged.append((path, digest, frames))],
+        checkpoint_loggers=[
+            lambda path, digest, frames: logged.append((path, digest, frames))
+        ],
         registry_path=tmp_path / "logs" / "checkpoint_keys.csv",
         repo_root=tmp_path,
     )
@@ -306,7 +320,9 @@ def test_final_checkpoint_embeds_config_and_emits_hash_key(
     assert f"checkpoint-key: {metadata['key']}" in output
 
 
-def test_disabled_snapshotting_yields_no_opponent_factory(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_disabled_snapshotting_yields_no_opponent_factory(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     ``snapshot_interval: 0`` leaves the environments on their built-in random
     opponent, keeping the baseline path free of self-play machinery.
@@ -316,7 +332,9 @@ def test_disabled_snapshotting_yields_no_opponent_factory(tmp_path, structured_m
     assert factory is None
 
 
-def test_opponent_factory_survives_pickling(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_opponent_factory_survives_pickling(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     The factory is pickled into every ParallelEnv worker, so it must round-trip
     and still build a working league on the other side.
@@ -331,13 +349,17 @@ def test_opponent_factory_survives_pickling(tmp_path, structured_model_cfg, stru
     assert pool.snapshot_count == 0
 
 
-def test_real_snapshot_loads_back_into_the_league(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_real_snapshot_loads_back_into_the_league(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     The full write/discover cycle works on a real checkpoint: what the callback
     saves is what a worker's league can rebuild and play.
     """
     cfg = selfplay_cfg(tmp_path, structured_model_cfg)
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     SnapshotCallback(actor_critic, tmp_path, interval=100).on_rollout_end(100, {})
 
     factory = build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
@@ -347,14 +369,18 @@ def test_real_snapshot_loads_back_into_the_league(tmp_path, structured_model_cfg
     assert pool.snapshot_count == 1
 
 
-def test_league_members_share_one_encoder(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_league_members_share_one_encoder(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     Every snapshot a worker loads reuses that worker's single encoder, rather
     than allocating a fresh set of scratch buffers (and a fresh one-shot
     truncation warning) per league member.
     """
     cfg = selfplay_cfg(tmp_path, structured_model_cfg)
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     callback = SnapshotCallback(actor_critic, tmp_path, interval=100)
     for frames in (100, 200, 300):
         callback.on_rollout_end(frames, {})
@@ -368,11 +394,17 @@ def test_league_members_share_one_encoder(tmp_path, structured_model_cfg, struct
     # Sharing is an internal arrangement with no public surface, so the
     # assertion has to reach for the private members to observe it.
     members = pool._opponents  # noqa: SLF001
-    encoders = {id(member._encoder) for member in members if hasattr(member, "_encoder")}  # noqa: SLF001
+    encoders = {
+        id(member._encoder)  # noqa: SLF001
+        for member in members
+        if hasattr(member, "_encoder")
+    }
     assert len(encoders) == 1
 
 
-def test_eval_opponent_factory_builds_the_configured_reference(tmp_path, structured_model_cfg) -> None:
+def test_eval_opponent_factory_builds_the_configured_reference(
+    tmp_path, structured_model_cfg
+) -> None:
     """
     The evaluator's opponent comes from ``train.eval_opponent`` explicitly,
     rather than from whatever the environment happens to default to.
@@ -402,7 +434,9 @@ def test_checkpoint_eval_opponent_loads_a_frozen_snapshot(
     ``eval_opponent=checkpoint`` scores the run against a frozen saved model.
     """
     cfg = selfplay_cfg(tmp_path, structured_model_cfg)
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     snapshot = save_actor_critic(actor_critic, tmp_path / "reference.pt")
     cfg.train.eval_opponent = "checkpoint"
     cfg.train.eval_opponent_checkpoint = str(snapshot)
@@ -423,7 +457,9 @@ def test_checkpoint_eval_opponent_requires_a_path(
         build_eval_opponent_factory(cfg, structured_obs_spec, action_spec)
 
 
-def test_checkpoint_eval_opponent_requires_specs(tmp_path, structured_model_cfg) -> None:
+def test_checkpoint_eval_opponent_requires_specs(
+    tmp_path, structured_model_cfg
+) -> None:
     """
     Rebuilding a checkpoint's network needs the env specs, so omitting them raises.
     """
@@ -454,11 +490,15 @@ def test_best_response_opponent_loads_the_frozen_agent(
     The best-response opponent is the frozen agent whose exploitability is probed.
     """
     cfg = selfplay_cfg(tmp_path, structured_model_cfg)
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     probed = save_actor_critic(actor_critic, tmp_path / "probed.pt")
     cfg.train.best_response_checkpoint = str(probed)
 
-    factory = build_best_response_opponent_factory(cfg, structured_obs_spec, action_spec)
+    factory = build_best_response_opponent_factory(
+        cfg, structured_obs_spec, action_spec
+    )
     assert isinstance(factory(), GreedyPolicyOpponent)
 
 
@@ -469,10 +509,16 @@ def test_best_response_opponent_survives_pickling(
     The collection opponent is pickled into each worker, so it must round-trip.
     """
     cfg = selfplay_cfg(tmp_path, structured_model_cfg)
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
-    cfg.train.best_response_checkpoint = str(save_actor_critic(actor_critic, tmp_path / "probed.pt"))
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    cfg.train.best_response_checkpoint = str(
+        save_actor_critic(actor_critic, tmp_path / "probed.pt")
+    )
 
-    factory = build_best_response_opponent_factory(cfg, structured_obs_spec, action_spec)
+    factory = build_best_response_opponent_factory(
+        cfg, structured_obs_spec, action_spec
+    )
     opponent = pickle.loads(pickle.dumps(factory))()
     assert isinstance(opponent, GreedyPolicyOpponent)
 
@@ -492,7 +538,9 @@ def test_best_response_requires_an_existing_checkpoint(
 
 
 @pytest.mark.parametrize("deterministic", [True, False])
-def test_evaluator_scores_policy_against_fixed_opponent(structured_model_cfg, deterministic) -> None:
+def test_evaluator_scores_policy_against_fixed_opponent(
+    structured_model_cfg, deterministic
+) -> None:
     """
     Evaluation plays complete episodes against the fixed random opponent and
     reports outcome rates that partition the episodes, in both action-selection
@@ -516,5 +564,7 @@ def test_evaluator_scores_policy_against_fixed_opponent(structured_model_cfg, de
         evaluator.close()
 
     assert metrics["episodes"] == 2
-    assert metrics["win_rate"] + metrics["draw_rate"] + metrics["loss_rate"] == pytest.approx(1.0)
+    assert metrics["win_rate"] + metrics["draw_rate"] + metrics[
+        "loss_rate"
+    ] == pytest.approx(1.0)
     assert metrics["mean_episode_length"] > 0

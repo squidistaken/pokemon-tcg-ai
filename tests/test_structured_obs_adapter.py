@@ -165,14 +165,16 @@ def test_unknown_group_rejected(structured_obs_spec) -> None:
 
 
 def test_build_actor_critic_attaches_adapter(
-        structured_model_cfg, structured_obs_spec, action_spec
+    structured_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     Building against the structured spec wires an adapter into the backbone
     and sizes the MLP from its output width, and a forward pass produces
     logits and a value of the right shapes.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     backbone = actor_critic.backbone
     assert isinstance(backbone.adapter, StructuredObsAdapter)
     assert backbone.input_dim == backbone.adapter.out_features
@@ -206,7 +208,9 @@ def test_yes_no_option_without_card_id_is_valid(adapter, structured_obs_spec) ->
     assert bool(validity[0, 0])
 
 
-def test_stop_slot_is_always_valid_in_option_tokens(adapter, structured_obs_spec) -> None:
+def test_stop_slot_is_always_valid_in_option_tokens(
+    adapter, structured_obs_spec
+) -> None:
     """
     The synthetic stop slot (the option table's last row) is valid even with
     zero real options, so a pointer head always has at least one legal token
@@ -222,7 +226,9 @@ def test_stop_slot_is_always_valid_in_option_tokens(adapter, structured_obs_spec
 # ── Segment identity (finding 1 / A2) ───────────────────────────────────────
 
 
-def test_group_segment_ids_seat_zone_and_stop_slot(adapter, structured_obs_spec) -> None:
+def test_group_segment_ids_seat_zone_and_stop_slot(
+    adapter, structured_obs_spec
+) -> None:
     """
     Pins the exact segment id layout the class docstring promises: seat for
     ``pokemon``, one id per zone for ``my``, and real-vs-stop for ``options``.
@@ -265,7 +271,14 @@ def _seat_swapped(observation: TensorDict) -> TensorDict:
     swapped = observation.clone()
     pokemon = swapped.get(("observation", "pokemon"))
     half = pokemon["card_id"].shape[-1] // 2
-    for leaf in ("card_id", "tool_id", "energy_card_ids", "pre_evolution_ids", "features", "mask"):
+    for leaf in (
+        "card_id",
+        "tool_id",
+        "energy_card_ids",
+        "pre_evolution_ids",
+        "features",
+        "mask",
+    ):
         rows = pokemon[leaf]
         pokemon[leaf] = torch.cat([rows[:, half:], rows[:, :half]], dim=1)
     return swapped
@@ -339,10 +352,14 @@ def test_seat_split_widens_only_the_pokemon_group(structured_obs_spec) -> None:
         zip(pooled.group_feature_widths, split.group_feature_widths, strict=True)
     ):
         assert wide == (2 * narrow if position == index else narrow)
-    assert split.out_features == pooled.out_features + pooled.group_feature_widths[index]
+    assert (
+        split.out_features == pooled.out_features + pooled.group_feature_widths[index]
+    )
     # The per-entity token path is unaffected: same slots, same segment ids.
     assert split.group_slot_counts == pooled.group_slot_counts
-    assert torch.equal(split.group_segment_ids["pokemon"], pooled.group_segment_ids["pokemon"])
+    assert torch.equal(
+        split.group_segment_ids["pokemon"], pooled.group_segment_ids["pokemon"]
+    )
 
 
 def test_seat_split_preserves_bench_permutation_invariance(structured_obs_spec) -> None:

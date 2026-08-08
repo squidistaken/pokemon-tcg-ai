@@ -95,7 +95,8 @@ def _result_for_reward(reward: float) -> str:
 def to_outcomes(submission_ref: int, episodes: Iterable[Any]) -> list[EpisodeOutcome]:
     """
     Reduce raw episodes to this submission's own outcomes, skipping any
-    episode missing either side (still pending, errored, or malformed).
+    episode missing either side or either side's reward (still pending,
+    errored, or malformed).
 
     :param submission_ref: Kaggle submission ID these episodes belong to.
     :param episodes: Raw episode objects from :func:`fetch_episodes`.
@@ -120,6 +121,8 @@ def to_outcomes(submission_ref: int, episodes: Iterable[Any]) -> list[EpisodeOut
             None,
         )
         if mine is None or theirs is None:
+            continue
+        if mine.reward is None or theirs.reward is None:
             continue
         outcomes.append(
             EpisodeOutcome(

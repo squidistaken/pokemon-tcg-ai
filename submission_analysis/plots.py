@@ -26,7 +26,9 @@ _RED = "#c44e52"
 _ORANGE = "#dd8452"
 
 
-def plot_card_play_rate(card_stats: list[CardStat], out_path: Path, *, top: int = 30) -> None:
+def plot_card_play_rate(
+    card_stats: list[CardStat], out_path: Path, *, top: int = 30
+) -> None:
     """
     Save a horizontal bar chart of play rate, lowest first (most-stuck cards).
 
@@ -36,7 +38,8 @@ def plot_card_play_rate(card_stats: list[CardStat], out_path: Path, *, top: int 
     :return: None.
     """
     seen = sorted(
-        (stat for stat in card_stats if stat.games_seen > 0), key=lambda stat: stat.play_rate
+        (stat for stat in card_stats if stat.games_seen > 0),
+        key=lambda stat: stat.play_rate,
     )[:top]
     if not seen:
         return
@@ -60,7 +63,11 @@ def plot_card_play_rate(card_stats: list[CardStat], out_path: Path, *, top: int 
 
 
 def plot_win_rate_when_played(
-    card_stats: list[CardStat], out_path: Path, *, top: int = 30, win_rate_baseline: float = 0.5
+    card_stats: list[CardStat],
+    out_path: Path,
+    *,
+    top: int = 30,
+    win_rate_baseline: float = 0.5,
 ) -> None:
     """
     Save a horizontal bar chart of win rate when played, lowest first.
@@ -133,7 +140,9 @@ def plot_ko_rate(card_stats: list[CardStat], out_path: Path, *, top: int = 30) -
     console.print(f"[green]✓[/] {out_path}")
 
 
-def plot_attack_utilization(card_stats: list[CardStat], out_path: Path, *, top: int = 20) -> None:
+def plot_attack_utilization(
+    card_stats: list[CardStat], out_path: Path, *, top: int = 20
+) -> None:
     """
     Save a horizontal bar chart of attack utilization, lowest first.
 
@@ -223,7 +232,9 @@ def plot_play_rate_vs_win_rate(
     y = [stat.win_rate_when_played for stat in played]
     sizes = [30 + stat.games_seen * 6 for stat in played]
     plt.figure(figsize=(9, 7))
-    plt.scatter(x, y, s=sizes, color=_BLUE, alpha=0.7, edgecolors="white", linewidths=0.5)
+    plt.scatter(
+        x, y, s=sizes, color=_BLUE, alpha=0.7, edgecolors="white", linewidths=0.5
+    )
     _annotate_outliers(
         [(stat.play_rate, stat.win_rate_when_played, stat.name) for stat in played],
         is_outlier=lambda px, py: px < 0.6 or abs(py - win_rate_baseline) > 0.15,
@@ -270,9 +281,14 @@ def plot_ko_rate_vs_win_rate(
     y = [stat.win_rate_when_played for stat in fragile]
     sizes = [30 + stat.games_played * 6 for stat in fragile]
     plt.figure(figsize=(9, 7))
-    plt.scatter(x, y, s=sizes, color=_RED, alpha=0.7, edgecolors="white", linewidths=0.5)
+    plt.scatter(
+        x, y, s=sizes, color=_RED, alpha=0.7, edgecolors="white", linewidths=0.5
+    )
     _annotate_outliers(
-        [(stat.ko_rate_when_played, stat.win_rate_when_played, stat.name) for stat in fragile],
+        [
+            (stat.ko_rate_when_played, stat.win_rate_when_played, stat.name)
+            for stat in fragile
+        ],
         is_outlier=lambda px, py: px > 0.4 or abs(py - win_rate_baseline) > 0.15,
     )
     plt.axhline(win_rate_baseline, color="black", linewidth=0.6, linestyle="--")
@@ -324,7 +340,9 @@ def plot_evolution_conversion_rate(
     console.print(f"[green]✓[/] {out_path}")
 
 
-def plot_attack_usage(attack_stats: list[AttackStat], out_path: Path, *, top: int = 15) -> None:
+def plot_attack_usage(
+    attack_stats: list[AttackStat], out_path: Path, *, top: int = 15
+) -> None:
     """
     Save a bar chart of attack use counts, annotated with average damage.
 
@@ -358,7 +376,9 @@ def plot_attack_usage(attack_stats: list[AttackStat], out_path: Path, *, top: in
     console.print(f"[green]✓[/] {out_path}")
 
 
-def plot_damage_by_card(attack_stats: list[AttackStat], out_path: Path, *, top: int = 15) -> None:
+def plot_damage_by_card(
+    attack_stats: list[AttackStat], out_path: Path, *, top: int = 15
+) -> None:
     """
     Save a bar chart of total damage dealt, summed across each card's attacks.
 
@@ -376,9 +396,13 @@ def plot_damage_by_card(attack_stats: list[AttackStat], out_path: Path, *, top: 
     damage_by_card: dict[int, int] = {}
     name_by_card: dict[int, str] = {}
     for stat in attack_stats:
-        damage_by_card[stat.card_id] = damage_by_card.get(stat.card_id, 0) + stat.total_damage
+        damage_by_card[stat.card_id] = (
+            damage_by_card.get(stat.card_id, 0) + stat.total_damage
+        )
         name_by_card[stat.card_id] = stat.card_name
-    ordered = sorted(damage_by_card.items(), key=lambda item: item[1], reverse=True)[:top]
+    ordered = sorted(damage_by_card.items(), key=lambda item: item[1], reverse=True)[
+        :top
+    ]
     labels = [name_by_card[card_id] for card_id, _ in ordered]
     values = [damage for _, damage in ordered]
     plt.figure(figsize=(max(8.0, len(labels) * 0.5), 6))
@@ -504,8 +528,12 @@ def plot_first_attack_turn_distribution(
     def _bucket(turn: int) -> int:
         return min(turn, cap)
 
-    wins = Counter(_bucket(turn) for result, turn in first_attack_turns if result == "win")
-    losses = Counter(_bucket(turn) for result, turn in first_attack_turns if result == "loss")
+    wins = Counter(
+        _bucket(turn) for result, turn in first_attack_turns if result == "win"
+    )
+    losses = Counter(
+        _bucket(turn) for result, turn in first_attack_turns if result == "loss"
+    )
     turns = sorted(set(wins) | set(losses))
     labels = [str(turn) if turn < cap else f"{cap}+" for turn in turns]
     positions = range(len(turns))
@@ -599,7 +627,9 @@ def plot_game_length_distribution(
     console.print(f"[green]✓[/] {out_path}")
 
 
-def plot_ko_margin_distribution(ko_margins: list[tuple[str, int]], out_path: Path) -> None:
+def plot_ko_margin_distribution(
+    ko_margins: list[tuple[str, int]], out_path: Path
+) -> None:
     """
     Save a stacked histogram of KO margin (opponent KOs - our KOs) by result.
 
@@ -673,7 +703,9 @@ def plot_rating_history(history: list[RatingHistoryRow], out_path: Path) -> None
     console.print(f"[green]✓[/] {out_path}")
 
 
-def plot_leaderboard_rank_over_time(history: list[RatingHistoryRow], out_path: Path) -> None:
+def plot_leaderboard_rank_over_time(
+    history: list[RatingHistoryRow], out_path: Path
+) -> None:
     """
     Save a line plot of our team's leaderboard rank over time.
 
@@ -709,7 +741,9 @@ def plot_leaderboard_rank_over_time(history: list[RatingHistoryRow], out_path: P
     console.print(f"[green]✓[/] {out_path}")
 
 
-def plot_win_rate_by_submission(summaries: list[SubmissionSummary], out_path: Path) -> None:
+def plot_win_rate_by_submission(
+    summaries: list[SubmissionSummary], out_path: Path
+) -> None:
     """
     Save a bar chart comparing win rate across analyzed submissions.
 

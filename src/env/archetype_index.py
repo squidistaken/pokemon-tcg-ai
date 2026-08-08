@@ -28,7 +28,9 @@ class ArchetypeIndex:
     #: Archetype name used for decks that are not inside a per-archetype folder.
     UNGROUPED = "ungrouped"
 
-    def __init__(self, names: Sequence[str], deck_indices: Sequence[Sequence[int]]) -> None:
+    def __init__(
+        self, names: Sequence[str], deck_indices: Sequence[Sequence[int]]
+    ) -> None:
         """
         :param names: Archetype name per archetype, in archetype-index order.
         :param deck_indices: Positions in the deck pool belonging to each

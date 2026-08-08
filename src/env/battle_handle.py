@@ -4,6 +4,13 @@ import json
 from cg.api import Observation, to_observation_class
 from cg.sim import lib
 
+_DECK_ERRORS = {
+    1: "a card ID that is not in the engine's card database",
+    2: "more than 4 copies of the same card name (Basic Energy is exempt)",
+    3: "no Basic Pokemon",
+    4: "more than 1 ACE SPEC card",
+}
+
 
 class BattleHandle:
     """
@@ -48,6 +55,8 @@ class BattleHandle:
         :param deck0: 60 card IDs for player 0.
         :param deck1: 60 card IDs for player 1.
         :return: First observation of the battle.
+        :raises ValueError: If either deck is not 60 cards, or the engine
+            rejects one as illegal under the deck-construction rules.
         """
         if self._battle_ptr is not None:
             raise RuntimeError("A battle is already running on this handle.")
@@ -56,6 +65,12 @@ class BattleHandle:
         cards = deck0 + deck1
         start_data = lib.BattleStart((ctypes.c_int * len(cards))(*cards))
         if not start_data.battlePtr:
+            reason = _DECK_ERRORS.get(start_data.errorType)
+            if reason is not None:
+                raise ValueError(
+                    f"Engine rejected player {start_data.errorPlayer}'s deck: "
+                    f"it has {reason}."
+                )
             raise RuntimeError(
                 f"BattleStart failed (errorPlayer={start_data.errorPlayer}, "
                 f"errorType={start_data.errorType})."

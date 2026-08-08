@@ -44,17 +44,17 @@ class CrossPlayCallback(TrainingCallback):
     """
 
     def __init__(
-            self,
-            actor_critic: ActorCritic,
-            cfg: DictConfig,
-            obs_spec: Composite,
-            action_spec: Categorical,
-            checkpoint_dir: str | Path,
-            output_dir: str | Path,
-            n_games: int = 20,
-            max_checkpoints: int = 8,
-            seed: int = 0,
-            sampler_spec: dict[str, Any] | None = None,
+        self,
+        actor_critic: ActorCritic,
+        cfg: DictConfig,
+        obs_spec: Composite,
+        action_spec: Categorical,
+        checkpoint_dir: str | Path,
+        output_dir: str | Path,
+        n_games: int = 20,
+        max_checkpoints: int = 8,
+        seed: int = 0,
+        sampler_spec: dict[str, Any] | None = None,
     ) -> None:
         """
         :param actor_critic: The live learner, shared with the trainer; snapshot
@@ -87,7 +87,9 @@ class CrossPlayCallback(TrainingCallback):
             cfg.env.get("encoder", "structured"), int(cfg.env.max_options)
         )
         self._sampler_spec = (
-            sampler_spec if sampler_spec is not None else _build_sampler_spec(cfg, deck_split="eval")
+            sampler_spec
+            if sampler_spec is not None
+            else _build_sampler_spec(cfg, deck_split="eval")
         )
         # Persistent across on_eval_end calls so its round-robin/uniform cursor
         # actually advances through the held-out pool over the run.
@@ -127,7 +129,9 @@ class CrossPlayCallback(TrainingCallback):
         )
         logger.info(
             "Cross-play vs latest snapshot %s over %d game(s): score=%.3f",
-            latest.name, result.scored, result.score,
+            latest.name,
+            result.scored,
+            result.score,
         )
         self._wandb_log(step, {"crossplay/vs_latest_snapshot": result.score})
 
@@ -141,7 +145,9 @@ class CrossPlayCallback(TrainingCallback):
         if not checkpoints:
             logger.info("Cross-play skipped: no snapshots on disk to rank.")
             return
-        policies: dict[str, Policy] = {path.stem: self._load(path) for path in checkpoints}
+        policies: dict[str, Policy] = {
+            path.stem: self._load(path) for path in checkpoints
+        }
         policies["current"] = self._current_opponent()
         names, scores, games = crossplay_matrix(
             policies, self._sampler_factory, n_games=self._n_games, seed=self._seed
@@ -151,7 +157,9 @@ class CrossPlayCallback(TrainingCallback):
         leader = max(names, key=lambda name: elo[name])
         logger.info(
             "Cross-play Elo leader over %d checkpoint(s): %s (%.0f)",
-            len(names), leader, elo[leader],
+            len(names),
+            leader,
+            elo[leader],
         )
         step = int(summary.get("frames", 0))
         self._wandb_log(step, {f"crossplay/elo/{name}": elo[name] for name in names})
@@ -215,10 +223,10 @@ class CrossPlayCallback(TrainingCallback):
         return build_deck_sampler(self._sampler_spec, seed=self._seed)
 
     def _write_csvs(
-            self,
-            names: list[str],
-            scores: Mapping[str, Mapping[str, float]],
-            elo: Mapping[str, float],
+        self,
+        names: list[str],
+        scores: Mapping[str, Mapping[str, float]],
+        elo: Mapping[str, float],
     ) -> None:
         """
         Write the win-rate matrix and the Elo ranking as CSVs beside the run.

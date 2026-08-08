@@ -278,12 +278,21 @@ def load_deck_pool(
     decks, kept_paths = _load_pool_with_paths(paths)
     if deck_split is None:
         return decks, kept_paths
+    split_seed = int(cfg.env.get("deck_split_seed", 0))
     train_idx, holdout_idx = _split_indices(
         len(decks),
         holdout_frac=float(cfg.env.get("deck_holdout_frac", 0.0)),
-        seed=int(cfg.env.get("deck_split_seed", 0)),
+        seed=split_seed,
     )
-    chosen = holdout_idx if deck_split == "eval" else train_idx
+    if deck_split == "eval":
+        chosen = holdout_idx
+    else:
+        chosen = train_idx
+        width = cfg.env.get("deck_pool_width")
+        if width is not None:
+            # The held-out eval set stays fixed so a width sweep varies training
+            # diversity against a constant yardstick.
+            chosen = _limit_pool_width(chosen, kept_paths, int(width), split_seed)
     return [decks[i] for i in chosen], [kept_paths[i] for i in chosen]
 
 
@@ -299,33 +308,30 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
     :param deck_split: ``"train"`` or ``"eval"`` — which subset the sampler draws
         from when a pool is configured.
     :return: Spec dict consumed by :func:`~src.env.deck_sampler.build_deck_sampler`.
+    :raises ValueError: If ``env.agent_deck`` is set without ``env.deck_pool``,
+        which would otherwise drop the pin silently.
     """
     pool_spec = cfg.env.get("deck_pool")
     if not pool_spec:
+        if cfg.env.get("agent_deck"):
+            raise ValueError(
+                "env.agent_deck needs env.deck_pool: the pin only chooses which "
+                "deck the agent takes, and the opposing field it leaves at full "
+                "width is drawn from the pool. Without one there is no field to "
+                "draw, and env.deck0/deck1 already fix both seats. Set a deck "
+                "pool, or drop the pin and set env.deck0 instead."
+            )
         return {
             "kind": "fixed",
             "deck0": load_deck(to_absolute_path(cfg.env.deck0)),
             "deck1": load_deck(to_absolute_path(cfg.env.deck1)),
         }
 
-    decks, kept_paths = load_deck_pool(cfg)
-    train_idx, holdout_idx = _split_indices(
-        len(decks),
-        holdout_frac=float(cfg.env.get("deck_holdout_frac", 0.0)),
-        seed=int(cfg.env.get("deck_split_seed", 0)),
-    )
-    width = cfg.env.get("deck_pool_width")
-    if width is not None:
-        # The held-out eval set stays fixed so a width sweep varies training
-        # diversity against a constant yardstick.
-        train_idx = _limit_pool_width(
-            train_idx, kept_paths, int(width), int(cfg.env.get("deck_split_seed", 0))
-        )
-    idx = holdout_idx if deck_split == "eval" else train_idx
+    decks, kept_paths = load_deck_pool(cfg, deck_split)
     matchup = cfg.env.get("deck_matchup", "mirror")
     spec: dict[str, Any] = {
         "kind": "pool",
-        "decks": [decks[i] for i in idx],
+        "decks": decks,
         "matchup": matchup,
         "mode": cfg.env.get("deck_sampling", "uniform"),
     }
@@ -343,7 +349,7 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
         spec["mode"] = cfg.env.get("eval_deck_sampling") or spec["mode"]
         # Carry archetype labels so the evaluator can break the held-out win-rate
         # down per archetype and report generalization variance across them.
-        spec["labels"] = _deck_labels([kept_paths[i] for i in idx])
+        spec["labels"] = _deck_labels(kept_paths)
         return _pin_agent_deck(cfg, spec, deck_split)
 
     mirror_prob = cfg.env.get("deck_mirror_prob")
@@ -351,7 +357,7 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
         spec["mirror_prob"] = float(mirror_prob)
     weighting = cfg.env.get("deck_weighting")
     if weighting:
-        spec["weights"] = _deck_weights([kept_paths[i] for i in idx], str(weighting))
+        spec["weights"] = _deck_weights(kept_paths, str(weighting))
     return _pin_agent_deck(cfg, spec, deck_split)
 
 

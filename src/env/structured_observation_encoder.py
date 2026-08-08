@@ -124,16 +124,16 @@ class StructuredObservationEncoder(ObservationEncoder):
     ALREADY_CHOSEN_OPTION_COUNT_INDEX = 12
 
     def __init__(
-            self,
-            max_options: int = 96,
-            bench_cap: int = 8,
-            hand_cap: int = 60,
-            discard_cap: int = 60,
-            prize_cap: int = 6,
-            deck_cap: int = 60,
-            looking_cap: int = 60,
-            energy_cap: int = 60,
-            evolution_cap: int = 2,
+        self,
+        max_options: int = 96,
+        bench_cap: int = 8,
+        hand_cap: int = 60,
+        discard_cap: int = 60,
+        prize_cap: int = 6,
+        deck_cap: int = 60,
+        looking_cap: int = 60,
+        energy_cap: int = 60,
+        evolution_cap: int = 2,
     ) -> None:
         """
         Most defaults trace to hard constants in the C++ engine
@@ -197,17 +197,27 @@ class StructuredObservationEncoder(ObservationEncoder):
         self._np_option_target_id = np.zeros(n_slots, dtype=np.int64)
         self._np_option_attack_id = np.zeros(n_slots, dtype=np.int64)
         self._np_option_owner = np.zeros(n_slots, dtype=np.int64)
-        self._np_option_cats = np.zeros((n_slots, self.OPTION_CATEGORICAL_COUNT), dtype=np.int64)
-        self._np_option_scalars = np.full((n_slots, self.OPTION_SCALAR_COUNT), -1.0, dtype=np.float32)
+        self._np_option_cats = np.zeros(
+            (n_slots, self.OPTION_CATEGORICAL_COUNT), dtype=np.int64
+        )
+        self._np_option_scalars = np.full(
+            (n_slots, self.OPTION_SCALAR_COUNT), -1.0, dtype=np.float32
+        )
         self._np_option_target = np.zeros(
             (n_slots, self.OPTION_TARGET_FEATURE_COUNT), dtype=np.float32
         )
 
         self._np_pokemon_card_id = np.zeros(self._pokemon_rows, dtype=np.int64)
         self._np_pokemon_tool_id = np.zeros(self._pokemon_rows, dtype=np.int64)
-        self._np_pokemon_energy_ids = np.zeros((self._pokemon_rows, energy_cap), dtype=np.int64)
-        self._np_pokemon_pre_evolution_ids = np.zeros((self._pokemon_rows, evolution_cap), dtype=np.int64)
-        self._np_pokemon_features = np.zeros((self._pokemon_rows, self.POKEMON_FEATURE_COUNT), dtype=np.float32)
+        self._np_pokemon_energy_ids = np.zeros(
+            (self._pokemon_rows, energy_cap), dtype=np.int64
+        )
+        self._np_pokemon_pre_evolution_ids = np.zeros(
+            (self._pokemon_rows, evolution_cap), dtype=np.int64
+        )
+        self._np_pokemon_features = np.zeros(
+            (self._pokemon_rows, self.POKEMON_FEATURE_COUNT), dtype=np.float32
+        )
         self._np_pokemon_mask = np.zeros(self._pokemon_rows, dtype=np.bool_)
 
         self._np_hand_ids = np.zeros(hand_cap, dtype=np.int64)
@@ -251,8 +261,14 @@ class StructuredObservationEncoder(ObservationEncoder):
                 target_id=Unbounded(shape=(n_action_slots,), dtype=torch.int64),
                 attack_id=Unbounded(shape=(n_action_slots,), dtype=torch.int64),
                 owner=Unbounded(shape=(n_action_slots,), dtype=torch.int64),
-                cats=Unbounded(shape=(n_action_slots, self.OPTION_CATEGORICAL_COUNT), dtype=torch.int64),
-                scalars=Unbounded(shape=(n_action_slots, self.OPTION_SCALAR_COUNT), dtype=torch.float32),
+                cats=Unbounded(
+                    shape=(n_action_slots, self.OPTION_CATEGORICAL_COUNT),
+                    dtype=torch.int64,
+                ),
+                scalars=Unbounded(
+                    shape=(n_action_slots, self.OPTION_SCALAR_COUNT),
+                    dtype=torch.float32,
+                ),
                 target_state=Unbounded(
                     shape=(n_action_slots, self.OPTION_TARGET_FEATURE_COUNT),
                     dtype=torch.float32,
@@ -261,9 +277,16 @@ class StructuredObservationEncoder(ObservationEncoder):
             pokemon=Composite(
                 card_id=Unbounded(shape=(self._pokemon_rows,), dtype=torch.int64),
                 tool_id=Unbounded(shape=(self._pokemon_rows,), dtype=torch.int64),
-                energy_card_ids=Unbounded(shape=(self._pokemon_rows, self._energy_cap), dtype=torch.int64),
-                pre_evolution_ids=Unbounded(shape=(self._pokemon_rows, self._evolution_cap), dtype=torch.int64),
-                features=Unbounded(shape=(self._pokemon_rows, self.POKEMON_FEATURE_COUNT), dtype=torch.float32),
+                energy_card_ids=Unbounded(
+                    shape=(self._pokemon_rows, self._energy_cap), dtype=torch.int64
+                ),
+                pre_evolution_ids=Unbounded(
+                    shape=(self._pokemon_rows, self._evolution_cap), dtype=torch.int64
+                ),
+                features=Unbounded(
+                    shape=(self._pokemon_rows, self.POKEMON_FEATURE_COUNT),
+                    dtype=torch.float32,
+                ),
                 mask=Binary(n=self._pokemon_rows, dtype=torch.bool),
             ),
             my=Composite(
@@ -290,7 +313,12 @@ class StructuredObservationEncoder(ObservationEncoder):
             ),
         )
 
-    def encode(self, observation: Observation, agent_seat: int, already_chosen_option_count: int) -> TensorDict:
+    def encode(
+        self,
+        observation: Observation,
+        agent_seat: int,
+        already_chosen_option_count: int,
+    ) -> TensorDict:
         """
         Encode an observation from the agent's perspective.
 
@@ -305,18 +333,23 @@ class StructuredObservationEncoder(ObservationEncoder):
         select = observation.select
         return TensorDict(
             {
-                "globals": self._encode_globals(state, select, agent_seat, already_chosen_option_count),
+                "globals": self._encode_globals(
+                    state, select, agent_seat, already_chosen_option_count
+                ),
                 "select_cats": self._encode_select_cats(select),
                 "context_card_ids": self._encode_context_cards(select),
                 "stadium_id": torch.tensor(
-                    [state.stadium[0].id if len(state.stadium) > 0 else 0], dtype=torch.int64
+                    [state.stadium[0].id if len(state.stadium) > 0 else 0],
+                    dtype=torch.int64,
                 ),
                 "options": self._encode_options(state, select, agent_seat),
                 "pokemon": self._encode_pokemon(state, agent_seat),
                 "my": self._encode_my_zones(state, agent_seat),
                 "opp": self._encode_opp_zones(state, agent_seat),
                 "select_deck": self._encode_id_list(
-                    [card.id for card in select.deck] if select is not None and select.deck is not None else [],
+                    [card.id for card in select.deck]
+                    if select is not None and select.deck is not None
+                    else [],
                     self._np_deck_ids,
                     self._np_deck_mask,
                     "select_deck",
@@ -334,9 +367,9 @@ class StructuredObservationEncoder(ObservationEncoder):
         )
 
     def update_already_chosen_option_count(
-            self,
-            encoded: TensorDict,
-            already_chosen_option_count: int,
+        self,
+        encoded: TensorDict,
+        already_chosen_option_count: int,
     ) -> bool:
         """Update the sole count-dependent field in a cached encoding."""
         encoded["globals"][self.ALREADY_CHOSEN_OPTION_COUNT_INDEX] = float(
@@ -346,10 +379,10 @@ class StructuredObservationEncoder(ObservationEncoder):
 
     @staticmethod
     def _encode_globals(
-            state: State,
-            select: SelectData | None,
-            agent_seat: int,
-            already_chosen_option_count: int,
+        state: State,
+        select: SelectData | None,
+        agent_seat: int,
+        already_chosen_option_count: int,
     ) -> torch.Tensor:
         """
         Encode scalar game and selection context as raw float values.
@@ -431,7 +464,9 @@ class StructuredObservationEncoder(ObservationEncoder):
         """
         if select is None:
             return torch.zeros(2, dtype=torch.int64)
-        return torch.tensor([int(select.type) + 1, int(select.context) + 1], dtype=torch.int64)
+        return torch.tensor(
+            [int(select.type) + 1, int(select.context) + 1], dtype=torch.int64
+        )
 
     @staticmethod
     def _encode_context_cards(select: SelectData | None) -> torch.Tensor:
@@ -467,7 +502,9 @@ class StructuredObservationEncoder(ObservationEncoder):
         """
         return float(value) if value is not None else -1.0
 
-    def _encode_options(self, state: State, select: SelectData | None, agent_seat: int) -> TensorDict:
+    def _encode_options(
+        self, state: State, select: SelectData | None, agent_seat: int
+    ) -> TensorDict:
         """
         Encode the option list into per-slot tensors aligned with the action mask.
 
@@ -518,8 +555,8 @@ class StructuredObservationEncoder(ObservationEncoder):
             scalars[slot, 3] = self._float_or_absent(option.toolIndex)
             scalars[slot, 4] = self._float_or_absent(option.energyIndex)
             scalars[slot, 5] = self._float_or_absent(option.inPlayIndex)
-            card_id[slot], target_id[slot], attack_id[slot] = OptionReferenceResolver.resolve(
-                state, select, option, agent_seat
+            card_id[slot], target_id[slot], attack_id[slot] = (
+                OptionReferenceResolver.resolve(state, select, option, agent_seat)
             )
             # The targeted Pokemon's *live* state, which target_id cannot carry:
             # it is a card ID, identical across every copy of that card.
@@ -530,7 +567,9 @@ class StructuredObservationEncoder(ObservationEncoder):
                 is_active = any(
                     entry is target
                     for entry in state.players[
-                        option.playerIndex if option.playerIndex is not None else agent_seat
+                        option.playerIndex
+                        if option.playerIndex is not None
+                        else agent_seat
                     ].active
                 )
                 target_state[slot, 0] = 1.0
@@ -609,7 +648,9 @@ class StructuredObservationEncoder(ObservationEncoder):
             batch_size=torch.Size(()),
         )
 
-    def _fill_pokemon_row(self, pokemon: Pokemon | None, row: int, is_active: bool) -> None:
+    def _fill_pokemon_row(
+        self, pokemon: Pokemon | None, row: int, is_active: bool
+    ) -> None:
         """
         Write one Pokemon into the given row of the staged board buffers.
 
@@ -639,7 +680,9 @@ class StructuredObservationEncoder(ObservationEncoder):
             energy_card_ids[row, column] = card.id
         pre_evolutions = pokemon.preEvolution
         if len(pre_evolutions) > self._evolution_cap:
-            self._warn_truncation("pre_evolution", len(pre_evolutions), self._evolution_cap)
+            self._warn_truncation(
+                "pre_evolution", len(pre_evolutions), self._evolution_cap
+            )
             pre_evolutions = pre_evolutions[: self._evolution_cap]
         for column, card in enumerate(pre_evolutions):
             pre_evolution_ids[row, column] = card.id
@@ -699,12 +742,12 @@ class StructuredObservationEncoder(ObservationEncoder):
         return TensorDict(entries, batch_size=torch.Size(()))
 
     def _stage_public_zones(
-            self,
-            player: PlayerState,
-            discard_ids_buffer: np.ndarray,
-            discard_mask_buffer: np.ndarray,
-            prize_ids_buffer: np.ndarray,
-            prize_mask_buffer: np.ndarray,
+        self,
+        player: PlayerState,
+        discard_ids_buffer: np.ndarray,
+        discard_mask_buffer: np.ndarray,
+        prize_ids_buffer: np.ndarray,
+        prize_mask_buffer: np.ndarray,
     ) -> dict[str, torch.Tensor]:
         """
         Stage the zones that are visible for both players: the discard pile
@@ -719,7 +762,10 @@ class StructuredObservationEncoder(ObservationEncoder):
             ``prize_ids``/``prize_mask`` tensors.
         """
         discard_ids, discard_mask = self._stage_id_list(
-            [card.id for card in player.discard], discard_ids_buffer, discard_mask_buffer, "discard"
+            [card.id for card in player.discard],
+            discard_ids_buffer,
+            discard_mask_buffer,
+            "discard",
         )
         prize_ids, prize_mask = self._stage_id_list(
             [card.id if card is not None else 0 for card in player.prize],
@@ -735,11 +781,11 @@ class StructuredObservationEncoder(ObservationEncoder):
         }
 
     def _stage_id_list(
-            self,
-            card_ids: list[int],
-            ids_buffer: np.ndarray,
-            mask_buffer: np.ndarray,
-            zone_name: str,
+        self,
+        card_ids: list[int],
+        ids_buffer: np.ndarray,
+        mask_buffer: np.ndarray,
+        zone_name: str,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Pad a list of card IDs into a preallocated buffer pair and copy out.
@@ -762,14 +808,16 @@ class StructuredObservationEncoder(ObservationEncoder):
         if len(card_ids) > 0:
             ids_buffer[: len(card_ids)] = card_ids
             mask_buffer[: len(card_ids)] = True
-        return torch.from_numpy(ids_buffer).clone(), torch.from_numpy(mask_buffer).clone()
+        return torch.from_numpy(ids_buffer).clone(), torch.from_numpy(
+            mask_buffer
+        ).clone()
 
     def _encode_id_list(
-            self,
-            card_ids: list[int],
-            ids_buffer: np.ndarray,
-            mask_buffer: np.ndarray,
-            zone_name: str,
+        self,
+        card_ids: list[int],
+        ids_buffer: np.ndarray,
+        mask_buffer: np.ndarray,
+        zone_name: str,
     ) -> TensorDict:
         """
         Pad a list of card IDs into a fixed-size table with a validity mask.
@@ -783,8 +831,12 @@ class StructuredObservationEncoder(ObservationEncoder):
         :param zone_name: Zone label used in the one-time truncation warning.
         :return: TensorDict with ``ids`` (int64) and ``mask`` (bool) entries.
         """
-        ids_tensor, mask_tensor = self._stage_id_list(card_ids, ids_buffer, mask_buffer, zone_name)
-        return TensorDict({"ids": ids_tensor, "mask": mask_tensor}, batch_size=torch.Size(()))
+        ids_tensor, mask_tensor = self._stage_id_list(
+            card_ids, ids_buffer, mask_buffer, zone_name
+        )
+        return TensorDict(
+            {"ids": ids_tensor, "mask": mask_tensor}, batch_size=torch.Size(())
+        )
 
     def _warn_truncation(self, zone_name: str, length: int, cap: int) -> None:
         """
@@ -795,5 +847,7 @@ class StructuredObservationEncoder(ObservationEncoder):
         :param cap: Padded table size.
         """
         if zone_name not in self._warned_zones:
-            logger.warning("Zone %s has %d entries, truncating to cap %d.", zone_name, length, cap)
+            logger.warning(
+                "Zone %s has %d entries, truncating to cap %d.", zone_name, length, cap
+            )
             self._warned_zones.add(zone_name)

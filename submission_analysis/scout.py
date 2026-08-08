@@ -106,25 +106,43 @@ def scout_team(
     team_dir.mkdir(parents=True, exist_ok=True)
 
     cards: set[int] = set()
+    sampled = 0
     for episode in sample:
+        theirs = next(
+            (
+                agent
+                for agent in (episode.agents or [])
+                if agent.submission_id == submission.id
+            ),
+            None,
+        )
+        if theirs is None:
+            continue
         replay_path = team_dir / f"episode-{episode.id}-replay.json"
         if not replay_path.is_file():
             api.competition_episode_replay(episode.id, path=str(team_dir), quiet=True)
         if not replay_path.is_file():
             continue
         raw = json.loads(replay_path.read_text(encoding="utf-8"))
-        for side in (0, 1):
-            parsed = parse_replay(
-                raw, episode_id=episode.id, our_index=side, result="", opponent_team=""
-            )
-            cards |= parsed.cards_played
+        parsed = parse_replay(
+            raw,
+            episode_id=episode.id,
+            our_index=theirs.index,
+            result="",
+            opponent_team="",
+        )
+        cards |= parsed.cards_played
+        sampled += 1
 
     return ScoutedTeam(
         team_id=row.team_id,
         team_name=row.team_name,
         score=float(row.score) if row.score else 0.0,  # SDK returns this as a string
         submission_id=submission.id,
-        episodes_sampled=len(sample),
+        # Replays actually parsed, not replays attempted: a download that
+        # failed or an episode this team cannot be located in contributes no
+        # cards, so counting it would overstate how complete the deck is.
+        episodes_sampled=sampled,
         cards=frozenset(cards),
     )
 

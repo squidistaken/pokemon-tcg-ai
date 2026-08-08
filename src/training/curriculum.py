@@ -62,13 +62,13 @@ class Curriculum:
     """
 
     def __init__(
-            self,
-            archetypes: ArchetypeIndex,
-            handles: CurriculumHandles,
-            buffer: LevelBuffer,
-            num_workers: int,
-            anchor_only_scoring: bool = False,
-            explore_prob: float = 0.0,
+        self,
+        archetypes: ArchetypeIndex,
+        handles: CurriculumHandles,
+        buffer: LevelBuffer,
+        num_workers: int,
+        anchor_only_scoring: bool = False,
+        explore_prob: float = 0.0,
     ) -> None:
         """
         :param archetypes: Grouping of the deck pool into archetypes.
@@ -344,14 +344,14 @@ class Curriculum:
         )
 
     def _observe_row(
-            self,
-            accumulator: _OpenEpisode,
-            levels: torch.Tensor,
-            residuals: torch.Tensor,
-            done: torch.Tensor,
-            terminated: torch.Tensor,
-            rewards: torch.Tensor,
-            anchors: torch.Tensor,
+        self,
+        accumulator: _OpenEpisode,
+        levels: torch.Tensor,
+        residuals: torch.Tensor,
+        done: torch.Tensor,
+        terminated: torch.Tensor,
+        rewards: torch.Tensor,
+        anchors: torch.Tensor,
     ) -> None:
         """
         Fold one collector row into the buffer, committing at episode ends.
@@ -387,11 +387,11 @@ class Curriculum:
 
     @staticmethod
     def _extend(
-            accumulator: _OpenEpisode,
-            levels: torch.Tensor,
-            residuals: torch.Tensor,
-            start: int,
-            end: int,
+        accumulator: _OpenEpisode,
+        levels: torch.Tensor,
+        residuals: torch.Tensor,
+        start: int,
+        end: int,
     ) -> None:
         """
         Add a run of steps to a row's open episode.
@@ -458,7 +458,9 @@ def build_curriculum(cfg: DictConfig) -> Curriculum | None:
     capacity = int(settings.get("capacity", 2000))
     explore_prob = float(settings.get("explore_prob", 0.0))
     if not 0.0 <= explore_prob <= 1.0:
-        raise ValueError(f"env.curriculum.explore_prob must be in [0, 1], got {explore_prob}")
+        raise ValueError(
+            f"env.curriculum.explore_prob must be in [0, 1], got {explore_prob}"
+        )
     oversized = archetypes.pair_count > capacity
     if oversized and explore_prob <= 0.0:
         raise ValueError(
@@ -495,8 +497,6 @@ def build_curriculum(cfg: DictConfig) -> Curriculum | None:
     if init_state:
         state_path = Path(to_absolute_path(str(init_state)))
         if not state_path.is_file():
-            raise ValueError(
-                f"env.curriculum.init_state {state_path} does not exist."
-            )
+            raise ValueError(f"env.curriculum.init_state {state_path} does not exist.")
         curriculum.load_state(state_path)
     return curriculum
