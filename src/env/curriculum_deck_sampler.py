@@ -22,8 +22,9 @@ class CurriculumDeckSampler:
     where the matchup comes from: instead of drawing two decks uniformly, it
     draws an *archetype pair* from the distribution the learner publishes
     through :class:`~src.env.curriculum_handles.CurriculumHandles`, then deals
-    a concrete list uniformly from within each archetype. List-level diversity
-    is preserved; only the archetype pairing is curated.
+    a concrete list from within each archetype -- uniformly, or by ``weights``
+    when the run configures ``env.deck_weighting``. List-level diversity is
+    preserved; only the archetype pairing is curated.
 
     The identifier of the drawn matchup is exposed as :attr:`level_id` so the
     environment can stamp it into every observation of the episode, which is
@@ -52,6 +53,7 @@ class CurriculumDeckSampler:
         handles: CurriculumHandles,
         seed: int | None = None,
         explore_prob: float = 0.0,
+        weights: Sequence[float] | None = None,
     ) -> None:
         """
         :param decks: The deck pool, indexed by the positions ``archetypes``
@@ -63,9 +65,11 @@ class CurriculumDeckSampler:
             archetype pair instead of one from the published distribution, so
             unseen matchups keep being discovered even after publishing starts.
             0 (default) never explores, matching the pre-existing behaviour.
+        :param weights: Per-deck weights aligned with ``decks``, biasing the
+            list dealt from within the drawn archetype. None deals uniformly.
         :raises ValueError: If the pool is empty, an archetype references a
-            deck position the pool does not contain, or ``explore_prob`` is out
-            of ``[0, 1]``.
+            deck position the pool does not contain, ``explore_prob`` is out of
+            ``[0, 1]``, or the weights are malformed.
         """
         if not decks:
             raise ValueError("CurriculumDeckSampler requires a non-empty deck pool")
@@ -86,7 +90,69 @@ class CurriculumDeckSampler:
         if seed is not None:
             self._torch_rng.manual_seed(seed)
         self._explore_prob = explore_prob
+        self._weights = self._validate_weights(weights, archetypes, len(self._decks))
+        self._archetype_weights = self._archetype_totals(self._weights, archetypes)
         self._level_id = NO_LEVEL
+
+    @staticmethod
+    def _archetype_totals(
+        weights: list[float] | None, archetypes: ArchetypeIndex
+    ) -> list[float] | None:
+        """
+        Sum per-deck weights into one weight per archetype.
+
+        Used for the discovery draw, so an archetype is explored in proportion
+        to the same evidence its lists are dealt by, rather than uniformly.
+
+        :param weights: Validated per-deck weights, or None for uniform.
+        :param archetypes: Grouping to sum within.
+        :return: One weight per archetype, or None when the decks are uniform.
+        """
+        if weights is None:
+            return None
+        return [
+            sum(weights[position] for position in archetypes.decks_for(archetype))
+            for archetype in range(archetypes.count)
+        ]
+
+    @staticmethod
+    def _validate_weights(
+        weights: Sequence[float] | None,
+        archetypes: ArchetypeIndex,
+        pool_size: int,
+    ) -> list[float] | None:
+        """
+        Validate and copy per-deck weights for the within-archetype draw.
+
+        Every archetype is checked separately: the draw happens inside one
+        archetype at a time, so a globally positive sum is not enough -- an
+        archetype whose lists all weigh zero would raise from
+        :meth:`random.Random.choices` mid-episode instead of at construction.
+
+        :param weights: Weights aligned with the pool, or None for uniform.
+        :param archetypes: Grouping the draw happens within.
+        :param pool_size: Number of decks the weights must line up with.
+        :return: A copied weight list, or None.
+        :raises ValueError: If the weights are the wrong length, negative, or
+            leave some archetype with no positive weight.
+        """
+        if weights is None:
+            return None
+        weights = [float(weight) for weight in weights]
+        if len(weights) != pool_size:
+            raise ValueError(
+                f"weights length {len(weights)} does not match pool size {pool_size}"
+            )
+        if any(weight < 0.0 for weight in weights):
+            raise ValueError("weights must be non-negative")
+        for archetype in range(archetypes.count):
+            positions = archetypes.decks_for(archetype)
+            if sum(weights[position] for position in positions) <= 0.0:
+                raise ValueError(
+                    f"archetype {archetypes.names[archetype]!r} has no deck with a "
+                    "positive weight, so no list could ever be dealt for it"
+                )
+        return weights
 
     @property
     def level_id(self) -> int:
@@ -157,16 +223,10 @@ class CurriculumDeckSampler:
         :return: ``(agent archetype, opponent archetype)``.
         """
         if self._explore_prob > 0.0 and self._rng.random() < self._explore_prob:
-            return (
-                self._rng.randrange(self._archetypes.count),
-                self._rng.randrange(self._archetypes.count),
-            )
+            return self._explore_pair()
         size = int(self._handles.size[0].item())
         if size <= 0:
-            return (
-                self._rng.randrange(self._archetypes.count),
-                self._rng.randrange(self._archetypes.count),
-            )
+            return self._explore_pair()
         probabilities = self._handles.probabilities[:size]
         total = float(probabilities.sum().item())
         if not total > 0.0:
@@ -179,6 +239,32 @@ class CurriculumDeckSampler:
             )
         return self._archetypes.unpair(int(self._handles.pair_ids[slot].item()))
 
+    def _explore_pair(self) -> tuple[int, int]:
+        """
+        Draw a fresh archetype pair, outside the published distribution.
+
+        This is the discovery path -- the only way a matchup that is not in the
+        level buffer ever gets played, and so the only thing that decides which
+        matchups the curriculum comes to know about. Drawing it uniformly gave a
+        134-archetype corpus's rarest folder exactly the same chance as its
+        most-played one, so discovery spent most of its budget on matchups the
+        ladder almost never deals. With ``weights`` it follows the same
+        distribution the list draw does: an archetype's chance is the sum of its
+        lists' weights, which under ``deck_weighting=observation`` is its total
+        observation count.
+
+        :return: ``(agent archetype, opponent archetype)``.
+        """
+        if self._archetype_weights is None:
+            return (
+                self._rng.randrange(self._archetypes.count),
+                self._rng.randrange(self._archetypes.count),
+            )
+        drawn = self._rng.choices(
+            range(self._archetypes.count), weights=self._archetype_weights, k=2
+        )
+        return drawn[0], drawn[1]
+
     def _deal(self, archetype: int) -> Deck:
         """
         Pick one concrete list from an archetype.
@@ -187,4 +273,8 @@ class CurriculumDeckSampler:
         :return: A copy of the chosen deck's card IDs.
         """
         positions = self._archetypes.decks_for(archetype)
-        return list(self._decks[self._rng.choice(positions)])
+        if self._weights is None:
+            return list(self._decks[self._rng.choice(positions)])
+        weights = [self._weights[position] for position in positions]
+        chosen = self._rng.choices(positions, weights=weights, k=1)[0]
+        return list(self._decks[chosen])

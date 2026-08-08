@@ -20,6 +20,10 @@ from src.env.tcg_env import TCGEnv
 
 OpponentFactory = Callable[[], Callable[[Observation], list[int]]]
 
+#: Floor added to the score-based ``deck_weighting`` schemes, so a deck the
+#: manifest scores at zero still has a chance of being dealt.
+_SCORE_WEIGHT_FLOOR = 0.1
+
 
 def make_encoder(name: str, max_options: int) -> ObservationEncoder:
     """
@@ -188,8 +192,38 @@ def _deck_labels(kept_paths: list[str]) -> list[str]:
     return labels
 
 
+def archetype_observations(kept_paths: list[str]) -> dict[str, float]:
+    """
+    Total manifest observations per archetype.
+
+    The manifest counts observations per *list*; an archetype's total is the sum
+    over its lists. Used to decide which archetypes ``deck_pool_width`` keeps.
+    The weights :func:`_deck_weights` builds stay per-list; the curriculum sums
+    them separately, in
+    :meth:`~src.env.curriculum_deck_sampler.CurriculumDeckSampler._archetype_totals`,
+    for its matchup discovery draw.
+
+    :param kept_paths: Deck CSV paths to aggregate over.
+    :return: Summed observation count per archetype label.
+    """
+    manifest = _load_manifest_for(kept_paths)
+    totals: dict[str, float] = {}
+    for path in kept_paths:
+        entry = manifest.get(Path(path).stem, {})
+        archetype = entry.get("archetype")
+        label = str(archetype) if archetype else Path(path).parent.name
+        totals[label] = totals.get(label, 0.0) + _observation_weight(
+            entry.get("observation_count")
+        )
+    return totals
+
+
 def _limit_pool_width(
-    idx: list[int], kept_paths: list[str], width: int, seed: int
+    idx: list[int],
+    kept_paths: list[str],
+    width: int,
+    seed: int,
+    selection: str = "observation",
 ) -> list[int]:
     """
     Restrict training-deck indices to a deterministic subset of archetypes.
@@ -197,15 +231,30 @@ def _limit_pool_width(
     :param idx: Candidate deck indices (the training split).
     :param kept_paths: Deck paths aligned with the full pool, indexed by ``idx``.
     :param width: Number of archetypes to keep.
-    :param seed: Seed for the deterministic archetype choice.
+    :param seed: Seed for the deterministic archetype choice, used by the
+        ``"random"`` selection only.
+    :param selection: ``"observation"`` keeps the ``width`` most-observed
+        archetypes; ``"random"`` keeps a seeded random subset.
     :return: The subset of ``idx`` whose decks belong to the chosen archetypes.
-    :raises ValueError: If ``width`` is below 1.
+    :raises ValueError: If ``width`` is below 1 or ``selection`` is unknown.
     """
     if width < 1:
         raise ValueError(f"deck_pool_width must be >= 1, got {width}")
-    labels = _deck_labels([kept_paths[i] for i in idx])
+    if selection not in ("observation", "random"):
+        raise ValueError(
+            f"unknown deck_pool_selection {selection!r}; expected 'observation' "
+            "or 'random'"
+        )
+    kept = [kept_paths[i] for i in idx]
+    labels = _deck_labels(kept)
     archetypes = sorted(set(labels))
-    random.Random(seed).shuffle(archetypes)
+    if selection == "random":
+        random.Random(seed).shuffle(archetypes)
+    else:
+        # Most-observed first, ties broken by name so the choice is reproducible
+        # and the pools stay nested as width grows.
+        observations = archetype_observations(kept)
+        archetypes.sort(key=lambda name: (-observations.get(name, 0.0), name))
     chosen = set(archetypes[:width])
     return [i for i, label in zip(idx, labels, strict=True) if label in chosen]
 
@@ -214,30 +263,53 @@ def _deck_weights(kept_paths: list[str], scheme: str) -> list[float]:
     """
     Compute per-deck sampling weights from manifest metadata.
 
-    A small floor is added so every deck keeps a nonzero chance.
-
     :param kept_paths: Deck CSV paths, aligned with the decks being weighted.
-    :param scheme: ``"winrate"`` (weight by record ``W/(W+L)``) or ``"placing"``
-        (weight by ``1/placing``).
+    :param scheme: ``"observation"`` (weight by the manifest's
+        ``observation_count``, so a list is dealt in proportion to how often it
+        was actually played), ``"winrate"`` (weight by record ``W/(W+L)``) or
+        ``"placing"`` (weight by ``1/placing``).
     :return: One weight per path.
     :raises ValueError: If the scheme is unknown.
     """
-    if scheme not in ("winrate", "placing"):
+    if scheme not in ("observation", "winrate", "placing"):
         raise ValueError(
-            f"unknown deck_weighting {scheme!r}; expected 'winrate' or 'placing'"
+            f"unknown deck_weighting {scheme!r}; expected 'observation', "
+            "'winrate' or 'placing'"
         )
     manifest = _load_manifest_for(kept_paths)
-    floor = 0.1
     weights: list[float] = []
     for path in kept_paths:
         entry = manifest.get(Path(path).stem, {})
+        if scheme == "observation":
+            weights.append(_observation_weight(entry.get("observation_count")))
+            continue
         if scheme == "winrate":
             score = _record_winrate(entry.get("record")) or 0.0
         else:
             placing = entry.get("placing")
             score = 1.0 / placing if isinstance(placing, int) and placing > 0 else 0.0
-        weights.append(floor + score)
+        # A small floor so a deck the manifest scores at zero stays sampleable.
+        weights.append(_SCORE_WEIGHT_FLOOR + score)
     return weights
+
+
+def _observation_weight(observation_count: object) -> float:
+    """
+    Turn a manifest ``observation_count`` into a sampling weight.
+
+    The count is used directly rather than floored onto a score, so the draw is
+    exactly proportional to how many times the list was observed. A deck the
+    manifest does not cover falls back to a single observation, which is the
+    weight the corpus's most common entry carries anyway -- 76.7% of lists in
+    ``heuristic-resolved`` were seen exactly once -- rather than a value that
+    would rank an unknown list above or below the bulk of known ones.
+
+    :param observation_count: The manifest's count, of unknown type.
+    :return: The weight, at least 1.0.
+    """
+    if isinstance(observation_count, int) and observation_count > 0:
+        return float(observation_count)
+    return 1.0
 
 
 def load_deck_pool(
@@ -251,9 +323,17 @@ def load_deck_pool(
     same split and receive it in the same order, since the curriculum indexes
     decks by position.
 
+    ``env.deck_pool_width`` is applied here, to the train split only, for that
+    same reason: it used to be applied by :func:`_build_sampler_spec` alone, so
+    a curriculum run -- which builds its own spec and its archetype index from
+    this function -- silently trained on the full-width pool no matter what the
+    width was set to. That is the one knob that shrinks the matchup space
+    enough for levels to accumulate episodes, so ignoring it left the
+    curriculum surveying a space it could never measure.
+
     :param cfg: Hydra configuration with an ``env.deck_pool`` entry.
     :param deck_split: ``"train"`` or ``"eval"`` to apply the holdout split,
-        or None for the whole pool.
+        or None for the whole pool (which no width cap applies to either).
     :return: ``(decks, paths)``, aligned, with unreadable files dropped.
     :raises ValueError: If no pool is configured, it resolves to under two
         decks, or ``deck_split`` is unknown.
@@ -284,16 +364,59 @@ def load_deck_pool(
         holdout_frac=float(cfg.env.get("deck_holdout_frac", 0.0)),
         seed=split_seed,
     )
-    if deck_split == "eval":
-        chosen = holdout_idx
-    else:
-        chosen = train_idx
-        width = cfg.env.get("deck_pool_width")
-        if width is not None:
-            # The held-out eval set stays fixed so a width sweep varies training
-            # diversity against a constant yardstick.
-            chosen = _limit_pool_width(chosen, kept_paths, int(width), split_seed)
-    return [decks[i] for i in chosen], [kept_paths[i] for i in chosen]
+    width = cfg.env.get("deck_pool_width")
+    if width is not None:
+        # The held-out eval set stays fixed so a width sweep varies training
+        # diversity against a constant yardstick.
+        train_idx = _limit_pool_width(
+            train_idx,
+            kept_paths,
+            int(width),
+            split_seed,
+            str(cfg.env.get("deck_pool_selection", "observation")),
+        )
+    if deck_split == "train":
+        return [decks[i] for i in train_idx], [kept_paths[i] for i in train_idx]
+    panel = cfg.env.get("eval_panel_size")
+    if panel is not None:
+        holdout_idx = _eval_panel(holdout_idx, kept_paths, int(panel))
+    return [decks[i] for i in holdout_idx], [kept_paths[i] for i in holdout_idx]
+
+
+def _eval_panel(
+    holdout_idx: list[int], kept_paths: list[str], panel_size: int
+) -> list[int]:
+    """
+    Cut the held-out pool down to a fixed panel of opponents.
+
+    Evaluation otherwise deals a different held-out list every episode, so a
+    50-episode round is 50 matchups played once each and the deck draw swamps
+    the policy signal it is meant to measure. A fixed panel, drawn round-robin,
+    plays the *same* matchups every round: the curve becomes comparable across
+    rounds, and each opponent accumulates enough episodes to be read on its own.
+
+    The panel is the most-observed held-out lists, so it is the field the agent
+    is most likely to actually meet, and it is deterministic given the corpus.
+
+    :param holdout_idx: Held-out deck indices.
+    :param kept_paths: Deck paths aligned with the full pool.
+    :param panel_size: Number of opponents to keep.
+    :return: The panel's indices, ordered most-observed first.
+    :raises ValueError: If ``panel_size`` is below one.
+    """
+    if panel_size < 1:
+        raise ValueError(f"eval_panel_size must be >= 1, got {panel_size}")
+    manifest = _load_manifest_for([kept_paths[i] for i in holdout_idx])
+    ranked = sorted(
+        holdout_idx,
+        key=lambda index: (
+            -_observation_weight(
+                manifest.get(Path(kept_paths[index]).stem, {}).get("observation_count")
+            ),
+            kept_paths[index],
+        ),
+    )
+    return ranked[:panel_size]
 
 
 def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
@@ -327,7 +450,10 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
             "deck1": load_deck(to_absolute_path(cfg.env.deck1)),
         }
 
-    decks, kept_paths = load_deck_pool(cfg, deck_split)
+    # The split, the width cap and the eval panel all live in load_deck_pool, so
+    # this spec and the curriculum's -- which calls it directly -- describe the
+    # same pool.
+    decks, kept_paths = load_deck_pool(cfg, deck_split=deck_split)
     matchup = cfg.env.get("deck_matchup", "mirror")
     spec: dict[str, Any] = {
         "kind": "pool",
@@ -339,8 +465,10 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
         # Evaluation can/should use a different matchup than training.
         # ex. Training on `independent` (asymmetric) matchups is good for
         # robustness, but it makes the eval win-rate conflate piloting skill with deck luck.
-        # Eval also stays unweighted over the held-out pool (no mix/weighting), so
-        # the generalization curve is an unbiased read across unseen decks.
+        # Eval stays unweighted: with eval_panel_size the panel already fixes
+        # which opponents appear, and weighting them on top would only vary how
+        # often each is drawn -- round_robin gives every panel entry the same
+        # count, which is what makes the rounds comparable.
         spec["matchup"] = cfg.env.get("eval_deck_matchup") or matchup
         # Draw strategy for eval, independent of training's. round_robin gives
         # deterministic even coverage of the held-out pool, so the per-archetype
@@ -365,30 +493,34 @@ def _pin_agent_deck(
     cfg: DictConfig, field_spec: dict[str, Any], deck_split: str
 ) -> dict[str, Any]:
     """
-    Wrap a field spec so the agent always pilots ``env.agent_deck``.
+    Wrap a field spec so the agent always pilots a fixed deck.
 
-    The submitted agent plays one deck, so training both seats from the corpus
-    spends all but a fraction of its episodes on lists it will never pilot and
-    spreads the rest over the square of the archetype count. Pinning one seat
-    leaves the opposing field at full width -- which is the ladder the agent is
-    scored against -- while collapsing the matchup space to one entry per
-    opponent archetype.
+    Evaluation reads ``env.eval_agent_deck`` and training ``env.agent_deck``, so
+    the two can be set independently. That separation is the point: evaluation
+    *should* hold the agent's deck fixed, because the curve is meant to measure
+    one deck against a field the way a submission does, while training generally
+    should not.
 
-    Evaluation is pinned unconditionally, with no field share: the eval curve
-    should measure the deck that will actually be submitted, not an average
-    over decks that will not.
+    Pinning the agent's deck during training makes the self-play opponent worse
+    at the game. The opponent is a snapshot of the same network, and it is dealt
+    field decks -- decks the pinned network barely practises -- so it misplays
+    them, and the learner trains against an opponent it has itself crippled. The
+    effect grows as the pin succeeds. ``agent_deck_field_prob`` softens it but
+    cannot remove it. Leave ``env.agent_deck`` null and specialise, if at all,
+    as a short fine-tune once the league is already strong.
 
     :param cfg: Hydra configuration with an ``env`` section.
     :param field_spec: The opposing-field sampler spec to wrap.
     :param deck_split: ``"train"`` or ``"eval"``.
     :return: The wrapped spec, or ``field_spec`` unchanged when no deck is set.
     """
-    configured = cfg.env.get("agent_deck")
+    key = "eval_agent_deck" if deck_split == "eval" else "agent_deck"
+    configured = cfg.env.get(key)
     if not configured:
         return field_spec
     path = Path(to_absolute_path(str(configured)))
     if not path.is_file():
-        raise ValueError(f"env.agent_deck {path} does not exist.")
+        raise ValueError(f"env.{key} {path} does not exist.")
     field_probability = (
         0.0
         if deck_split == "eval"
@@ -448,7 +580,7 @@ def make_env_factories(
         # a different subset or order here would silently mis-deal every level.
         # Loading the whole pool would also train on the held-out decks the
         # evaluator scores generalization against.
-        decks, _paths = load_deck_pool(cfg, deck_split="train")
+        decks, paths = load_deck_pool(cfg, deck_split="train")
         sampler_spec = {
             "kind": "curriculum",
             "decks": decks,
@@ -456,6 +588,13 @@ def make_env_factories(
             "handles": curriculum.handles,
             "explore_prob": curriculum.explore_prob,
         }
+        # The curriculum curates the archetype *pairing*; the list dealt from
+        # within each archetype is still a pool draw, so it honours
+        # deck_weighting exactly as the uncurated sampler does. Without this the
+        # weighting is silently discarded whenever the curriculum is enabled.
+        weighting = cfg.env.get("deck_weighting")
+        if weighting:
+            sampler_spec["weights"] = _deck_weights(paths, str(weighting))
     elif sampler_spec is None:
         sampler_spec = _build_sampler_spec(cfg, deck_split)
     encoder = cfg.env.get("encoder", "structured")
