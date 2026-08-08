@@ -25,6 +25,20 @@ lmbda: 0.98
 # standard PPO formulation; keeps the surrogate's scale independent of the
 # reward magnitude.
 average_gae: true
+# Advantage estimator: gae or vtrace.
+#  - GAE assumes every action in a batch was drawn from the weights
+#    currently loaded.
+#  - V-trace re-scores the collected  actions under the current policy and
+#    clips the importance ratios, correcting for the drift the asynchronous
+#    collectors introduce.
+value_estimator: gae
+# V-trace clipping.
+#  - rho_thresh bounds the ratio in the TD term and so decides which policy's
+#    value function the critic converges to.
+#  - c_thresh bounds the ratio in the trace and so how far a correction
+#    propagates back in time. Both unused under gae.
+vtrace_rho_thresh: 1.0
+vtrace_c_thresh: 1.0
 # Chunks the GAE critic pass along the worker dimension. Unset, torchrl runs the
 # whole collected batch through the critic in one vmap over a stacked
 # current/next pair, peaking at ~2x the batch; at frames_per_batch 16384 that is
@@ -49,6 +63,11 @@ max_grad_norm: 1.0
 # Device for the model and the PPO update ("cpu" or "cuda"). Environments
 # always step on CPU; the collector moves data to this device for updates.
 device: cpu
+# Device the *collection* policy runs on; null follows agent.device.
+# Set to cpu with agent.device=cuda under collector.type=multi_sync/multi_async:
+# those run a policy copy per worker, and on CUDA that is one context per worker
+# for batch-size-1 forwards, while the update still wants the GPU.
+collector_device: null
 # Share of the GPU this process may reserve (null disables the cap).
 # Uncapped, the allocator grows until the driver refuses -- which on WSL is not
 # a Python error but `dxgkio_make_resident: Ioctl failed: -12` followed by

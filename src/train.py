@@ -36,6 +36,7 @@ from src.training import (
     build_probe_specs,
     make_env_factories,
 )
+from src.training.collectors import AsyncCollectorOptions
 from src.training.env_factory import OpponentFactory, _build_sampler_spec
 
 load_dotenv(Path(__file__).parents[1] / ".env", override=False)
@@ -87,6 +88,8 @@ def main(cfg: DictConfig) -> None:
             max_collector_restarts=_max_collector_restarts(cfg),
             rebuild_env_factories=_rebuild_env_factories(cfg),
             pipe_timeout=_pipe_timeout(cfg),
+            collector_type=cfg.collector.get("type", "sync"),
+            async_options=_async_collector_options(cfg),
         )
 
     stats = trainer.train()
@@ -239,11 +242,15 @@ def _build_ppo_trainer(
         lmbda=cfg.agent.lmbda,
         average_gae=cfg.agent.get("average_gae", True),
         gae_num_chunks=cfg.agent.get("gae_num_chunks", None),
+        value_estimator=cfg.agent.get("value_estimator", "gae"),
+        vtrace_rho_thresh=float(cfg.agent.get("vtrace_rho_thresh", 1.0)),
+        vtrace_c_thresh=float(cfg.agent.get("vtrace_c_thresh", 1.0)),
         lr=cfg.agent.lr,
         num_epochs=cfg.agent.num_epochs,
         sub_batch_size=cfg.agent.sub_batch_size,
         max_grad_norm=cfg.agent.max_grad_norm,
         device=cfg.agent.get("device", "cpu"),
+        collector_device=cfg.agent.get("collector_device"),
         use_parallel_env=cfg.env.parallel,
         mp_start_method=cfg.env.mp_start_method,
         serial_for_single=cfg.env.serial_for_single,
@@ -274,6 +281,8 @@ def _build_ppo_trainer(
         ),
         pipe_timeout=_pipe_timeout(cfg),
         start_frames=start_frames,
+        collector_type=cfg.collector.get("type", "sync"),
+        async_options=_async_collector_options(cfg),
         train_state_path=_resolve_train_state_path(cfg),
         train_state_interval=int(cfg.train.get("train_state_interval", 0) or 0),
         resume_state=resume_state,
@@ -374,6 +383,26 @@ def _max_collector_restarts(cfg: DictConfig) -> int:
     :return: Restarts allowed; ``0`` fails the run on the first worker death.
     """
     return int(cfg.collector.get("max_restarts", 0))
+
+
+def _async_collector_options(cfg: DictConfig) -> AsyncCollectorOptions:
+    """
+    Read the asynchronous collectors' settings from the collector config.
+
+    :param cfg: Hydra configuration with a ``collector`` section.
+    :return: Settings for whichever asynchronous collector ``collector.type``
+        selected; ignored entirely under ``sync``.
+    """
+    workers_per_batch = cfg.collector.get("workers_per_batch")
+    return AsyncCollectorOptions(
+        max_batch_size=int(cfg.collector.get("max_batch_size", 64)),
+        min_batch_size=int(cfg.collector.get("min_batch_size", 1)),
+        server_timeout=float(cfg.collector.get("server_timeout", 0.01)),
+        env_backend=str(cfg.collector.get("env_backend", "multiprocessing")),
+        workers_per_batch=(
+            None if workers_per_batch is None else int(workers_per_batch)
+        ),
+    )
 
 
 def _pipe_timeout(cfg: DictConfig) -> float | None:

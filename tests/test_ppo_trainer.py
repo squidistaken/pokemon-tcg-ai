@@ -428,3 +428,84 @@ def test_restart_abandons_open_curriculum_episodes(
 
     assert curriculum.buffer.entries[0].visits == 0
     assert curriculum.buffer.entries[1].mean_residual == pytest.approx(1.0)
+
+
+def test_vtrace_estimator_produces_finite_advantages(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    ``value_estimator=vtrace`` runs the whole update on a real collected batch.
+
+    V-trace is wired differently from GAE -- it needs the actor as well as the
+    critic, and it reads the behaviour log-probs the collection policy wrote
+    under whatever key ``action_log_prob`` resolves to -- so a silent key
+    mismatch would surface as an exception or as non-finite losses here rather
+    than mid-run.
+    """
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    trainer = _make_trainer(actor_critic, action_spec, value_estimator="vtrace")
+    losses = trainer.update_for_test(_collect_one_batch(trainer))
+
+    assert losses is not None
+    assert all(math.isfinite(value) for value in losses.values())
+    assert all(torch.isfinite(p).all() for p in actor_critic.parameters())
+
+
+def test_unknown_value_estimator_is_rejected(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    A misspelled estimator fails at construction, not by quietly running GAE.
+    """
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    with pytest.raises(ValueError, match="Unknown agent.value_estimator"):
+        _make_trainer(actor_critic, action_spec, value_estimator="v-trace")
+
+
+def test_curriculum_with_multi_async_is_rejected(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    The one collector/curriculum pairing that would corrupt scores is refused.
+
+    ``multi_async`` yields rollouts in completion order, so a row's identity
+    shuffles between batches while the curriculum is still accumulating that
+    row's residuals. The result is one matchup scored with another's evidence --
+    silent, and invisible in the metrics -- so it must fail at construction.
+    """
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    with pytest.raises(ValueError, match="multi_async cannot be combined"):
+        _make_trainer(
+            actor_critic,
+            action_spec,
+            curriculum=make_curriculum(),
+            collector_type="multi_async",
+        )
+
+
+@pytest.mark.parametrize("collector_type", ["sync", "multi_sync", "async_batched"])
+def test_curriculum_allowed_with_row_stable_collectors(
+    structured_model_cfg, structured_obs_spec, action_spec, collector_type: str
+) -> None:
+    """
+    Every collector that does keep row identity stable stays usable with it.
+
+    The guard above must reject exactly one combination, not quietly rule out
+    the collector the throughput work is recommending.
+    """
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    trainer = _make_trainer(
+        actor_critic,
+        action_spec,
+        curriculum=make_curriculum(),
+        collector_type=collector_type,
+    )
+    assert trainer is not None
