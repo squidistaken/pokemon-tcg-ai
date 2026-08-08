@@ -20,6 +20,27 @@ class DeckSampler(Protocol):
         ...
 
 
+def sample_for_seat(sampler: DeckSampler, agent_seat: int) -> tuple[Deck, Deck]:
+    """
+    Draw a matchup, telling the sampler which seat the agent takes.
+
+    The environment picks the agent's seat by coin flip before it asks for
+    decks, so any sampler that distinguishes the two sides -- a pinned agent
+    deck, a curriculum whose level is an ordered ``(agent, opponent)`` pair --
+    needs to know which returned deck the agent will actually receive.
+    Samplers that draw both seats the same way are indifferent and need not
+    implement it.
+
+    :param sampler: The sampler to draw from.
+    :param agent_seat: Seat index (0 or 1) the agent occupies this episode.
+    :return: The ``(deck0, deck1)`` pair in engine seat order.
+    """
+    seat_aware = getattr(sampler, "sample_for_seat", None)
+    if seat_aware is not None:
+        return seat_aware(agent_seat)
+    return sampler.sample()
+
+
 class FixedDeckSampler:
     """
     Always returns the same ``(deck0, deck1)`` pair.
@@ -240,6 +261,18 @@ def build_deck_sampler(spec: dict[str, Any], seed: int | None = None) -> DeckSam
             handles=spec["handles"],
             seed=seed,
             explore_prob=spec.get("explore_prob", 0.0),
+        )
+    if kind == "agent_fixed":
+        # Imported here rather than at module scope: the wrapper imports this
+        # module for the seat helper, so a top-level import would cycle.
+        from .agent_deck_sampler import AgentDeckSampler
+
+        return AgentDeckSampler(
+            agent_deck=spec["agent_deck"],
+            field_sampler=build_deck_sampler(spec["field"], seed),
+            agent_label=spec.get("agent_label"),
+            field_probability=spec.get("field_probability", 0.0),
+            seed=seed,
         )
     if kind == "pool":
         return PoolDeckSampler(

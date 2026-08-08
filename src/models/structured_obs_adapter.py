@@ -114,6 +114,16 @@ class StructuredObsAdapter(nn.Module):
                                  ────                 ───
                       torch.cat → 1848                 824   →  MLP
 
+    **Seat split (pokemon_seat_split=True)**
+
+    ``pokemon`` is the one group holding both players' rows, so the single
+    pool above is seat-blind: swapping the two boards leaves the group
+    vector — and every backbone's ``state_repr`` built from it —
+    bit-identical.  ``pokemon_seat_split`` pools the two halves of the row
+    axis separately and concatenates them (192 → 384 in the table, total
+    1848 → 2040), which is the only way the *pooled* path can tell the seats
+    apart; the token path already can, via :attr:`group_segment_ids`.
+
     **Option tokens (emit_option_tokens=True)**
 
     The pooled ``options`` entry above is permutation-invariant, so on its own
@@ -142,6 +152,13 @@ class StructuredObsAdapter(nn.Module):
     #: Scale for the option scalar columns (zone indices/counts, cap 60).
     OPTION_SCALAR_SCALE = 60.0
 
+    #: Per-column scales for ``options.target_state`` (see
+    #: ``StructuredObservationEncoder.OPTION_TARGET_FEATURE_COUNT``): resolved
+    #: flag, hp, maxHp, hp fraction, energy count, tool count, is-active. Its
+    #: own scales rather than ``OPTION_SCALAR_SCALE``, because HP runs to ~400
+    #: while the flags are already 0/1 and dividing those by 60 would bury them.
+    OPTION_TARGET_SCALES = (1.0, 400.0, 400.0, 1.0, 16.0, 2.0, 1.0)
+
     #: Per-index scales for the encoder's ``globals`` layout (see
     #: ``StructuredObservationEncoder._encode_globals``): 8 game entries,
     #: 9 selection entries, then 12 per player (agent first).
@@ -166,6 +183,7 @@ class StructuredObsAdapter(nn.Module):
     _card_category_offsets: torch.Tensor
     _global_scales: torch.Tensor
     _pokemon_feature_scales: torch.Tensor
+    _option_target_scales: torch.Tensor
 
     def __init__(
             self,
@@ -179,6 +197,8 @@ class StructuredObsAdapter(nn.Module):
             pool: bool = True,
             emit_option_tokens: bool = False,
             zone_pooling: str = "mean",
+            pokemon_seat_split: bool = False,
+            option_target_state: bool = False,
     ) -> None:
         """
         :param obs_spec: Full environment observation spec.
@@ -210,6 +230,34 @@ class StructuredObsAdapter(nn.Module):
             and a capacity-normalized sum, which lets the trunk answer "is
             card X present" and "how many" rather than only "what is the
             average card here".
+        :param pokemon_seat_split: Pool the two seats' board rows separately
+            and concatenate, instead of pooling all
+            ``group_slot_counts["pokemon"]`` rows into one summary. The
+            ``pokemon`` table is the only group holding both players' rows,
+            so a single pool over it is seat-blind: swapping the two boards
+            leaves the group vector — and every backbone's ``state_repr``
+            built from it — bit-identical, measured at ``0.0``. That matters
+            most for the critic, which sees only ``state_repr`` and is asked
+            to predict win probability from a board summary that cannot say
+            whose Pokémon is whose. Doubles this group's feature width
+            (``2 × _pool_width(entity_dim)``) and costs nothing at inference
+            beyond one extra pool. Defaults False so every checkpoint
+            predating this argument keeps loading against the width it was
+            trained with; the seat identity for the *token* path is separate
+            and always on (see :attr:`group_segment_ids`).
+        :param option_target_state: Consume ``options.target_state`` -- the live
+            state (HP, attached energy/tool counts, is-active) of the in-play
+            Pokemon each option acts on. ``target_id`` already resolves *which
+            card* is targeted, but a card ID is shared by every copy, so
+            without this two options over two copies of the same Pokemon differ
+            only in a raw index scalar the network cannot dereference. Widens
+            an option row by ``OPTION_TARGET_FEATURE_COUNT``.
+
+            Defaults False because this width comes from the *observation
+            spec*, not from a checkpoint's config: a snapshot trained before
+            the ``target_state`` block exists must still rebuild at its
+            original width to be usable as an evaluation opponent, and the
+            deployed Kaggle agent must keep running. New runs opt in.
         :raises ValueError: If ``zone_pooling`` is not a supported mode, or
             ``emit_option_tokens`` is set without an ``options`` group.
         """
@@ -220,6 +268,8 @@ class StructuredObsAdapter(nn.Module):
             )
         self._zone_pooling = zone_pooling
         self._emit_option_tokens = bool(emit_option_tokens)
+        self._pokemon_seat_split = bool(pokemon_seat_split)
+        self._option_target_state = bool(option_target_state)
         database = card_database if card_database is not None else CardDatabase()
         card_static = database.card_features
         attack_static = database.attack_features
@@ -273,6 +323,16 @@ class StructuredObsAdapter(nn.Module):
         self.register_buffer(
             "_pokemon_feature_scales",
             torch.tensor(self.POKEMON_FEATURE_SCALES, dtype=torch.float32),
+        )
+        # Non-persistent: a constant, rederived identically on every
+        # construction. A persistent buffer would appear as an unexpected key
+        # when loading a checkpoint that predates it, and as a missing one when
+        # this class loads such a checkpoint -- the same reasoning as
+        # _register_segment_ids.
+        self.register_buffer(
+            "_option_target_scales",
+            torch.tensor(self.OPTION_TARGET_SCALES, dtype=torch.float32),
+            persistent=False,
         )
 
         # Per-entity projection layers.  Built in __init__ or _register_group.
@@ -442,13 +502,14 @@ class StructuredObsAdapter(nn.Module):
         self.register_buffer(f"_segment_ids_{name}", segment_ids, persistent=False)
 
     def _option_row_width(self, spec: Composite) -> int:
-        """Flattened width of one option table row (card+target+attack+cats+scalars)."""
+        """Flattened width of one option row (card+target+attack+cats+scalars+target state)."""
         return (
             2 * self._card_repr_dim
             + self._attack_repr_dim
             + self.OWNER_VALUE_COUNT
             + self.OPTION_CATEGORY_FIELD_COUNT * self._category_embed_dim
             + spec["scalars"].shape[-1]
+            + (spec["target_state"].shape[-1] if self._option_target_state else 0)
         )
 
     def _pokemon_row_width(self, spec: Composite) -> int:
@@ -535,7 +596,8 @@ class StructuredObsAdapter(nn.Module):
             if self._pool:
                 assert self._entity_dim is not None
                 self._pokemon_encoder = nn.Linear(self._pokemon_row_width(spec), self._entity_dim)
-                return self._pool_width(self._entity_dim)
+                seats = 2 if self._pokemon_seat_split else 1
+                return seats * self._pool_width(self._entity_dim)
             return rows * self._pokemon_row_width(spec)
         if name in ("my", "opp", "select_deck", "looking"):
             if not isinstance(spec, Composite):
@@ -755,7 +817,15 @@ class StructuredObsAdapter(nn.Module):
                 nn.functional.one_hot(options.get("owner"), self.OWNER_VALUE_COUNT).to(torch.float32),
                 self._category_embedding(options.get("cats") + self._option_category_offsets).flatten(-2),
                 scaled,
-            ],
+            ]
+            # The targeted Pokemon's live state. Already zero-filled by the
+            # encoder for options that target nothing, with column 0 the
+            # resolved flag, so no absent-value sentinel is needed here.
+            + (
+                [options.get("target_state") / self._option_target_scales]
+                if self._option_target_state
+                else []
+            ),
             dim=-1,
         )
 
@@ -811,13 +881,32 @@ class StructuredObsAdapter(nn.Module):
 
     def _encode_pokemon(self, pokemon: TensorDictBase) -> torch.Tensor:
         """
-        Encode the board table. With pooling: ``(*batch, _pool_width(entity_dim))``.
-        Legacy: flat.
+        Encode the board table. With pooling: ``(*batch, _pool_width(entity_dim))``,
+        or twice that under ``pokemon_seat_split``. Legacy: flat.
+
+        The row layout is agent active + agent bench, then opponent active +
+        opponent bench (see
+        ``StructuredObservationEncoder._encode_pokemon``), so the two seats
+        are the two halves of the row axis and splitting there needs no
+        extra bookkeeping. Pooling stays *within* a seat, which keeps the
+        bench an unordered set — the property the single pool had — while
+        making the seats distinguishable.
         """
         rows = self._pokemon_rows(pokemon)
-        if self._pool:
-            return self._masked_pool(self._pokemon_encoder(rows), pokemon.get("mask"))
-        return self._flatten_rows(rows)
+        if not self._pool:
+            return self._flatten_rows(rows)
+        encoded = self._pokemon_encoder(rows)
+        mask = pokemon.get("mask")
+        if not self._pokemon_seat_split:
+            return self._masked_pool(encoded, mask)
+        half = encoded.shape[-2] // 2
+        return torch.cat(
+            [
+                self._masked_pool(encoded[..., :half, :], mask[..., :half]),
+                self._masked_pool(encoded[..., half:, :], mask[..., half:]),
+            ],
+            dim=-1,
+        )
 
     def _encode_zone_group(self, name: str, zones: TensorDictBase) -> torch.Tensor:
         """

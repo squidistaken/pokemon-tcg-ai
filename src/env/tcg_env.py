@@ -10,7 +10,7 @@ from cg.api import Observation, SelectData, State
 
 from .battle_handle import BattleHandle
 from .curriculum_deck_sampler import NO_LEVEL
-from .deck_sampler import DeckSampler, FixedDeckSampler
+from .deck_sampler import DeckSampler, FixedDeckSampler, sample_for_seat
 from .observation_encoder import ObservationEncoder
 from .random_opponent import RandomOpponent
 from .structured_observation_encoder import StructuredObservationEncoder
@@ -214,7 +214,12 @@ class TCGEnv(EnvBase):
             self._truncate_flag = False
             self._chosen = []
             if self._steps_since_switch >= self._deck_switch_steps:
-                self._deck0, self._deck1 = self._deck_sampler.sample()
+                # Seat-aware: _agent_seat is already drawn above, and a sampler
+                # that pins the agent's deck or scores an ordered matchup needs
+                # to know which of the two decks the agent will receive.
+                self._deck0, self._deck1 = sample_for_seat(
+                    self._deck_sampler, self._agent_seat
+                )
                 self._steps_since_switch = 0
                 # Only meaningful under a curriculum sampler; every other
                 # sampler leaves the level at NO_LEVEL, which the learner skips.

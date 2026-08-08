@@ -80,6 +80,8 @@ src/
     option_reference_resolver.py      OptionReferenceResolver: stateless option -> (card, target, attack) ID lookups
     card_database.py            Static card-ID-indexed lookup tables (for model-side embeddings)
     deck.py                     Deck CSV loading
+    deck_sampler.py             DeckSampler protocol, FixedDeckSampler/PoolDeckSampler, and the seat-aware draw helper
+    agent_deck_sampler.py       AgentDeckSampler: pins the agent to one deck, draws only its opponent from the pool
     opponent_pool.py            Self-play opponent pool (samples/holds frozen policy snapshots)
     snapshot_opponent_pool.py   OpponentPool that discovers new learner snapshots from disk (ParallelEnv-safe)
     pfsp_opponent_pool.py       Prioritized Fictitious Self-Play: weights league members by the learner's win rate against them
@@ -90,8 +92,9 @@ src/
     random_opponent.py          Uniform-random opponent baseline
   models/                     Actor-critic network, independent of the policy/training wiring
     backbone.py                  Backbone ABC + MLPBackbone (SetTransformer/TemporalTransformer/Recurrent planned)
-    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, set-pools zones,
-                                   and emits the per-option token table the pointer head scores
+    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, set-pools zones
+                                   (per seat for the board, see adapter.pokemon_seat_split), and emits the
+                                   per-option token table the pointer head scores
     heads.py                     PointerHead (per-option scoring, the default) + LinearPolicyHead
                                    (flat slot-indexed logits, the baseline) + ValueHead (scalar critic)
     actor_critic.py              ActorCritic: shared trunk feeding both heads, tensordict-in/tensordict-out
@@ -110,6 +113,7 @@ src/
     evaluator.py                 Evaluator: scores the policy against a fixed opponent (readable curve under self-play)
     multi_evaluator.py           MultiEvaluator: runs several Evaluators, namespacing metrics per reference opponent
     curriculum.py                Curriculum: owns the level buffer, scores each collected batch, republishes the distribution
+    cuda_memory_guard.py         CudaMemoryGuard: caps the process's GPU reservation so pressure raises OutOfMemoryError instead of killing the CUDA context
     cross_play.py                Round-robins frozen checkpoints into a win-rate matrix + Bradley-Terry Elo ranking
     pipe_timeout.py              apply_pipe_timeout: how fast an unresponsive ParallelEnv worker is detected (torchrl defaults to 2h47m)
     callbacks/                  Metric sinks; the trainer emits, these decide where it goes
@@ -143,6 +147,7 @@ scripts/                     Standalone dev scripts (not part of the training en
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
   make_submission.py           Build a Kaggle .tar.gz and optionally submit it through the Kaggle CLI
   run_selfplay_compile.sh      1M-frame self-play run with torch.compile (caps Inductor's compile workers)
+  train_supervised.sh          Runs a training job and restarts it from its own train_state.pt on any crash
 submission_analysis/          Kaggle submission tooling: `python -m submission_analysis <status|episodes|deck-report|scout>` (see its own README)
 submission/
   main.py                      Kaggle entryfile template; `agent` is deliberately its final callable

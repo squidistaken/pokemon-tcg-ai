@@ -16,6 +16,12 @@ from tests.conftest import N_ACTIONS, PPOTrainerForTests, structured_env_cfg
 from tests.test_curriculum import STEPS, WORKERS, make_curriculum
 from tests.test_curriculum import batch as curriculum_batch
 
+#: Frame budget for the one test that asserts episodes actually finish. Larger
+#: than the other tests' 128 because episode completion is engine-random and
+#: cannot be seeded from Python; see
+#: :func:`test_ppo_trainer_trains_without_nans`.
+_EPISODE_FRAMES = 384
+
 
 def make_random_pool() -> OpponentPool:
     """
@@ -103,16 +109,22 @@ def test_ppo_trainer_trains_without_nans(structured_model_cfg, structured_obs_sp
     with its adapter) collects the requested frames, finishes episodes and
     leaves every parameter finite (no NaNs from the optimizer).
 
-    Seeds torch explicitly: whether an episode finishes within the small
-    frame budget below depends on the (otherwise unseeded) initial policy's
-    action samples, which would otherwise make ``episodes > 0`` flaky
-    depending on how much of the global RNG stream earlier tests consumed.
+    ``torch.manual_seed`` fixes the network initialization but *not* how long
+    an episode runs: the cabt engine draws its own seed from
+    ``std::random_device`` on every ``BattleStart`` (and shuffles decks with a
+    fresh one), so every battle is an independent random game no Python-side
+    seed can pin down. ``episodes > 0`` is therefore a probabilistic assertion,
+    and the frame budget is what makes it safe. At the 128 frames this used to
+    run, an episode-completion count of ~4 per run meant roughly a 2% chance of
+    seeing none at all -- rare locally, hit on CI. ``_EPISODE_FRAMES`` yields
+    10-23 completions (measured over 30 runs), putting the failure probability
+    around 1e-6.
     """
     torch.manual_seed(0)
     actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
-    trainer = _make_trainer(actor_critic, action_spec)
+    trainer = _make_trainer(actor_critic, action_spec, total_frames=_EPISODE_FRAMES)
     stats = trainer.train()
-    assert stats["frames"] == 128
+    assert stats["frames"] == _EPISODE_FRAMES
     assert stats["episodes"] > 0
     assert all(torch.isfinite(p).all() for p in actor_critic.parameters())
 
@@ -165,6 +177,28 @@ def test_ppo_update_reports_unweighted_policy_entropy(
     assert losses is not None
     assert 0.0 < losses["entropy"] <= math.log(N_ACTIONS)
     assert losses["loss_entropy"] == pytest.approx(-entropy_coeff * losses["entropy"], rel=1e-5)
+
+
+def test_ppo_update_reports_ppo_health_diagnostics(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    ``_update`` reports the non-optimizable PPO diagnostics, not just the
+    losses: none of them can be read off ``loss_*``, and without
+    ``explained_variance`` there is no signal at all for whether the critic
+    predicts returns. Each must be finite and in its defined range.
+    """
+    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    trainer = _make_trainer(actor_critic, action_spec)
+    losses = trainer.update_for_test(_collect_one_batch(trainer))
+    assert losses is not None
+    assert {"clip_fraction", "ESS", "kl_approx", "explained_variance"} <= set(losses)
+    assert all(math.isfinite(value) for value in losses.values())
+    assert 0.0 <= losses["clip_fraction"] <= 1.0
+    assert 0.0 <= losses["ESS"] <= 1.0
+    # An untrained critic can be arbitrarily worse than predicting the mean,
+    # so only the upper bound is a real constraint.
+    assert losses["explained_variance"] <= 1.0
 
 
 def test_collected_batch_excludes_option_repr_and_hidden(

@@ -26,9 +26,22 @@ max_restarts: 20
 # run 5.6 of its 8.9 hours -- 63% of the wall clock spent waiting to find out
 # something was already wrong. `max_restarts` then recovers in seconds.
 #
-# The floor is how long a legitimate step or reset can take: a batch of 16384
-# frames across 32 workers runs in ~33s, and a single step is far below that, so
-# 180 leaves ample headroom. Raise it if a slow reset ever trips it; set `null`
-# to keep torchrl's default. Zero and negatives are rejected rather than read as
-# an opt-out, so a typo cannot silently restore the 2h47m wait.
-pipe_timeout: 180
+# The floor is NOT how long a step or reset takes. Workers sit blocked on their
+# pipe whenever the parent is doing anything else, so the real constraint is the
+# longest the trainer can go without talking to them -- and that is evaluation,
+# which runs synchronously in the trainer process against its own separate
+# environment while all 32 workers idle.
+#
+# Measured at eval_episodes 200 with two evaluators (a checkpoint opponent and
+# random): 9m47s. At the previous 180 every evaluation round killed the whole
+# pool, and each rebuild spent one of collector.max_restarts -- the budget that
+# exists to absorb the engine aborting its own process on rare game states. A
+# 15M-frame run at eval_interval 750000 has 20 evaluations against 20 restarts,
+# so it was running with no margin for the fault the budget is actually for.
+#
+# 900 covers the measured worst case with ~50% headroom. Lowering eval_episodes
+# shortens the eval and widens that margin further. Raise it if a slow reset
+# ever trips it; set `null` to keep torchrl's default. Zero and negatives are
+# rejected rather than read as an opt-out, so a typo cannot silently restore the
+# 2h47m wait.
+pipe_timeout: 900

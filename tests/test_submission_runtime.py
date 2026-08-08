@@ -23,6 +23,7 @@ from tests.conftest import DECK_PATH, MAX_OPTIONS
 
 _LINEAR_HEAD_TARGET = "src.models.heads.LinearPolicyHead"
 _POINTER_HEAD_TARGET = "src.models.heads.PointerPolicyHead"
+_POINTER_MLP_HEAD_TARGET = "src.models.heads.PointerHead"
 _FIXTURES_PATH = Path(__file__).parent / "fixtures" / "observations.pt"
 
 
@@ -201,6 +202,90 @@ def test_torch_only_transformer_matches_training_logits(
     policy = Policy(payload, _portable_config(cfg))
     fixtures = torch.load(_FIXTURES_PATH, weights_only=False)
 
+    for case_name in fixtures.keys():  # noqa: SIM118 - TensorDict iteration differs.
+        case = fixtures[case_name]
+        expected = actor_critic.policy_logits(case)
+        actual = policy.model.policy_logits(case["observation"].to_dict())
+        torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
+
+
+@pytest.mark.parametrize("backbone", ["mlp", "transformer"])
+def test_seat_split_adapter_matches_training_logits(
+    backbone: str,
+    structured_model_cfg: DictConfig,
+    transformer_model_cfg: DictConfig,
+    structured_obs_spec,
+    action_spec,
+) -> None:
+    """
+    ``adapter.pokemon_seat_split`` widens the ``pokemon`` group, which resizes
+    the first projection of *both* trunks, so the portable runtime has to read
+    the flag out of the embedded config to rebuild the same shapes. Covered on
+    each backbone because they consume that width through different modules
+    (``MLPBackbone``'s input layer, the transformer's ``token_projections``).
+    """
+    torch.manual_seed(23)
+    base = structured_model_cfg if backbone == "mlp" else transformer_model_cfg
+    cfg = cast(
+        DictConfig,
+        OmegaConf.merge(base, {"model": {"adapter": {"pokemon_seat_split": True}}}),
+    )
+    actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec).eval()
+    policy = Policy({"state_dict": actor_critic.state_dict()}, _portable_config(cfg))
+    fixtures = torch.load(_FIXTURES_PATH, weights_only=False)
+
+    for case_name in fixtures.keys():  # noqa: SIM118 - TensorDict iteration differs.
+        case = fixtures[case_name]
+        expected = actor_critic.policy_logits(case)
+        actual = policy.model.policy_logits(case["observation"].to_dict())
+        torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
+
+
+@pytest.mark.parametrize(
+    ("head_target", "head_num_cells"),
+    [
+        # num_cells is a PointerHead knob; the dot-product head has no scorer.
+        (_POINTER_MLP_HEAD_TARGET, None),
+        (_POINTER_MLP_HEAD_TARGET, [16]),
+        (_POINTER_HEAD_TARGET, None),
+    ],
+)
+def test_mlp_pointer_head_over_adapter_tokens_matches_training_logits(
+    head_target: str,
+    head_num_cells: list[int] | None,
+    structured_model_cfg: DictConfig,
+    structured_obs_spec,
+    action_spec,
+) -> None:
+    """
+    A pointer head on the MLP trunk gets its per-option tokens from the
+    *adapter* (``emit_option_tokens``), not from a projection on the trunk --
+    ``build_actor_critic`` wires it that way whenever the backbone's own
+    ``option_tokens`` is off, which is the default and what every MLP pointer
+    run has trained with. That path is separate from the transformer's, where
+    the trunk always projects the tokens itself, so it needs its own parity
+    case: without one the portable runtime can drop it entirely and every
+    such checkpoint stops packaging, with the failure landing at submission
+    time rather than here.
+
+    ``num_cells: None`` is covered alongside an explicit width because the
+    training head derives its hidden layer from ``in_features`` in that case,
+    so the checkpoint carries a layer the config never names.
+    """
+    torch.manual_seed(23)
+    head: dict[str, Any] = {"_target_": head_target}
+    if head_num_cells is not None:
+        head["num_cells"] = head_num_cells
+    cfg = cast(
+        DictConfig,
+        OmegaConf.merge(structured_model_cfg, {"model": {"head": head}}),
+    )
+    actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec).eval()
+    assert not cfg.model.backbone.get("option_tokens", False)
+    policy = Policy({"state_dict": actor_critic.state_dict()}, _portable_config(cfg))
+    assert policy.model.backbone.produces_option_repr
+
+    fixtures = torch.load(_FIXTURES_PATH, weights_only=False)
     for case_name in fixtures.keys():  # noqa: SIM118 - TensorDict iteration differs.
         case = fixtures[case_name]
         expected = actor_critic.policy_logits(case)

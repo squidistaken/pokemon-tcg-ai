@@ -54,6 +54,35 @@ class OptionReferenceResolver:
     """Resolve engine option references to concrete card and attack IDs."""
 
     @staticmethod
+    def resolve_target_pokemon(
+        state: State,
+        option: Option,
+        agent_seat: int,
+    ) -> Pokemon | None:
+        """
+        Return the in-play Pokemon an option acts on, mirroring the training
+        resolver. ``target_id`` carries only the target's card ID, which is
+        shared by every copy of that card; this is what lets the option row
+        carry that instance's live state.
+        """
+        owner_index = (
+            option.playerIndex if option.playerIndex is not None else agent_seat
+        )
+        if option.type in (
+            OptionType.TOOL_CARD,
+            OptionType.ENERGY_CARD,
+            OptionType.ENERGY,
+        ):
+            return OptionReferenceResolver._pokemon_at(
+                state, owner_index, option.area, option.index
+            )
+        if option.type in (OptionType.ATTACH, OptionType.EVOLVE):
+            return OptionReferenceResolver._pokemon_at(
+                state, owner_index, option.inPlayArea, option.inPlayIndex
+            )
+        return None
+
+    @staticmethod
     def resolve(
         state: State,
         select: SelectData,
@@ -198,6 +227,7 @@ class StructuredObservationEncoder:
     GLOBAL_FEATURE_COUNT = 41
     OPTION_CATEGORICAL_COUNT = 4
     OPTION_SCALAR_COUNT = 6
+    OPTION_TARGET_FEATURE_COUNT = 7
     POKEMON_FEATURE_COUNT = 20
     ENERGY_TYPE_COUNT = 12
 
@@ -359,6 +389,9 @@ class StructuredObservationEncoder:
             "scalars": torch.full(
                 (n_slots, self.OPTION_SCALAR_COUNT), -1.0, dtype=torch.float32
             ),
+            "target_state": torch.zeros(
+                (n_slots, self.OPTION_TARGET_FEATURE_COUNT), dtype=torch.float32
+            ),
         }
         options = select.option if select is not None else []
         if len(options) > self._max_options:
@@ -392,6 +425,29 @@ class StructuredObservationEncoder:
             entries["card_id"][slot] = card_id
             entries["target_id"][slot] = target_id
             entries["attack_id"][slot] = attack_id
+            target = OptionReferenceResolver.resolve_target_pokemon(
+                state, option, agent_seat
+            )
+            if target is not None:
+                owner = (
+                    option.playerIndex
+                    if option.playerIndex is not None
+                    else agent_seat
+                )
+                is_active = any(
+                    entry is target for entry in state.players[owner].active
+                )
+                entries["target_state"][slot] = torch.tensor(
+                    [
+                        1.0,
+                        float(target.hp),
+                        float(target.maxHp),
+                        target.hp / target.maxHp if target.maxHp > 0 else 0.0,
+                        float(len(target.energyCards)),
+                        float(len(target.tools)),
+                        1.0 if is_active else 0.0,
+                    ]
+                )
         return entries
 
     def _encode_pokemon(self, state: State, agent_seat: int) -> dict[str, torch.Tensor]:
@@ -522,6 +578,7 @@ class StructuredObsAdapter(nn.Module):
     _card_category_offsets: torch.Tensor
     _global_scales: torch.Tensor
     _pokemon_feature_scales: torch.Tensor
+    _option_target_scales: torch.Tensor
 
     CATEGORY_VOCAB_SIZE = 64
     SELECT_CATEGORY_FIELD_COUNT = 2
@@ -529,6 +586,8 @@ class StructuredObsAdapter(nn.Module):
     CARD_CATEGORY_FIELD_COUNT = 4
     OWNER_VALUE_COUNT = 3
     OPTION_SCALAR_SCALE = 60.0
+    #: Mirrors the training adapter's OPTION_TARGET_SCALES.
+    OPTION_TARGET_SCALES = (1.0, 400.0, 400.0, 1.0, 16.0, 2.0, 1.0)
     GAME_SCALES = (50.0, 20.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
     SELECT_SCALES = (1.0, 6.0, 6.0, 96.0, 6.0, 30.0, 5.0, 1.0, 1.0)
     PLAYER_SCALES = (
@@ -577,12 +636,16 @@ class StructuredObsAdapter(nn.Module):
         category_embed_dim: int,
         zone_pooling: str = "mean",
         emit_option_tokens: bool = False,
+        pokemon_seat_split: bool = False,
+        option_target_state: bool = False,
     ) -> None:
         super().__init__()
         if zone_pooling not in ("mean", "mean_max_sum"):
             raise ValueError(f"Unsupported zone_pooling: {zone_pooling}")
         self._zone_pooling = zone_pooling
         self._emit_option_tokens = emit_option_tokens
+        self._pokemon_seat_split = pokemon_seat_split
+        self._option_target_state = option_target_state
         card_static = state_dict["backbone.adapter._card_static"]
         attack_static = state_dict["backbone.adapter._attack_static"]
         card_categories = state_dict["backbone.adapter._card_categories"]
@@ -613,6 +676,11 @@ class StructuredObsAdapter(nn.Module):
         self.register_buffer(
             "_pokemon_feature_scales",
             torch.tensor(self.POKEMON_FEATURE_SCALES, dtype=torch.float32),
+        )
+        self.register_buffer(
+            "_option_target_scales",
+            torch.tensor(self.OPTION_TARGET_SCALES, dtype=torch.float32),
+            persistent=False,
         )
         self._card_embedding = nn.Embedding(
             card_static.shape[0], card_embed_dim, padding_idx=0
@@ -879,7 +947,12 @@ class StructuredObsAdapter(nn.Module):
                 ),
                 self._embed_categories(options["cats"], self._option_category_offsets),
                 scaled,
-            ],
+            ]
+            + (
+                [options["target_state"] / self._option_target_scales]
+                if self._option_target_state
+                else []
+            ),
             dim=-1,
         )
 
@@ -908,10 +981,26 @@ class StructuredObsAdapter(nn.Module):
         return self._flatten_rows(rows)
 
     def _encode_pokemon(self, pokemon: Mapping[str, torch.Tensor]) -> torch.Tensor:
+        """
+        Mirrors the training adapter's ``_encode_pokemon``, including the
+        ``pokemon_seat_split`` layout: the row axis is agent active + bench
+        then opponent active + bench, so the two seats are its two halves.
+        """
         rows = self._pokemon_rows(pokemon)
-        if self._pool:
-            return self._masked_pool(self._pokemon_encoder(rows), pokemon["mask"])
-        return self._flatten_rows(rows)
+        if not self._pool:
+            return self._flatten_rows(rows)
+        encoded = self._pokemon_encoder(rows)
+        mask = pokemon["mask"]
+        if not self._pokemon_seat_split:
+            return self._masked_pool(encoded, mask)
+        half = encoded.shape[-2] // 2
+        return torch.cat(
+            [
+                self._masked_pool(encoded[..., :half, :], mask[..., :half]),
+                self._masked_pool(encoded[..., half:, :], mask[..., half:]),
+            ],
+            dim=-1,
+        )
 
     def _encode_zone_group(
         self, name: str, zones: Mapping[str, torch.Tensor]
@@ -981,6 +1070,22 @@ def _group_names(backbone_config: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _head_needs_option_repr(config: Mapping[str, Any]) -> bool:
+    """
+    Whether the checkpoint's policy head scores per-option tokens.
+
+    Read off the head's own class rather than sniffed from a state-dict key:
+    the two pointer heads name their parameters differently, so any single key
+    to look for silently misses one of them and the runtime then builds a
+    backbone that emits nothing for it to score.
+
+    :param config: The checkpoint's embedded model config.
+    :return: True when the head cannot run on ``state_repr`` alone.
+    """
+    head_class = _POLICY_HEADS.get(str(config["head"]["_target_"]))
+    return head_class is not None and head_class.requires_option_repr
+
+
 def _build_adapter(
     state_dict: Mapping[str, torch.Tensor],
     config: Mapping[str, Any],
@@ -993,6 +1098,8 @@ def _build_adapter(
         attack_embed_dim=int(adapter_config.get("attack_embed_dim", 8)),
         category_embed_dim=int(adapter_config.get("category_embed_dim", 4)),
         zone_pooling=str(adapter_config.get("zone_pooling", "mean")),
+        pokemon_seat_split=bool(adapter_config.get("pokemon_seat_split", False)),
+        option_target_state=bool(adapter_config.get("option_target_state", False)),
     )
 
 
@@ -1015,10 +1122,15 @@ class MLPBackbone(nn.Module):
     ) -> None:
         super().__init__()
         adapter_config = config.get("adapter", {})
-        # Both of these are read off the checkpoint rather than assumed: older
-        # checkpoints predate the pointer head and the richer zone pooling, and
-        # must keep loading exactly as they were trained.
-        emit_option_tokens = "policy_head.scorer.0.weight" in state_dict
+        backbone_config = config["backbone"]
+        # Mirrors build_actor_critic: the head decides whether per-option tokens
+        # are needed at all, and the trunk's own option_tokens decides which of
+        # the two sources supplies them. Derived rather than assumed because
+        # older checkpoints predate the pointer head entirely and must keep
+        # loading exactly as they were trained.
+        emit_option_tokens = _head_needs_option_repr(config) and not bool(
+            backbone_config.get("option_tokens", False)
+        )
         self.adapter = StructuredObsAdapter(
             state_dict,
             card_embed_dim=int(adapter_config.get("card_embed_dim", 8)),
@@ -1026,9 +1138,10 @@ class MLPBackbone(nn.Module):
             category_embed_dim=int(adapter_config.get("category_embed_dim", 4)),
             zone_pooling=str(adapter_config.get("zone_pooling", "mean")),
             emit_option_tokens=emit_option_tokens,
+            pokemon_seat_split=bool(adapter_config.get("pokemon_seat_split", False)),
+            option_target_state=bool(adapter_config.get("option_target_state", False)),
         )
-        self.produces_option_repr = emit_option_tokens
-        backbone_config = config["backbone"]
+        self.adapter_option_tokens = emit_option_tokens
         self.group_names = _group_names(backbone_config)
         input_dim = state_dict["backbone.mlp.0.weight"].shape[1]
         self.mlp = _mlp(
@@ -1038,7 +1151,10 @@ class MLPBackbone(nn.Module):
             str(backbone_config.get("activation", "tanh")),
         )
         self.option_tokens = bool(backbone_config.get("option_tokens", False))
-        self.produces_option_repr = self.option_tokens
+        # Either path supplies the pointer head: the trunk projects the option
+        # rows itself, or the adapter hands them over unprojected. Training
+        # rejects both at once, so at most one is ever set.
+        self.produces_option_repr = self.option_tokens or self.adapter_option_tokens
         if self.option_tokens:
             option_weight = state_dict["backbone.option_projection.weight"]
             self.option_projection: nn.Module = nn.Linear(
@@ -1061,6 +1177,11 @@ class MLPBackbone(nn.Module):
         self, observation: Mapping[str, Any]
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         state_repr = self.mlp(self.adapter(observation, self.group_names))
+        if self.adapter_option_tokens:
+            option_rows, _ = self.adapter.encode_entity_tokens(
+                observation, ["options"]
+            )["options"]
+            return state_repr, option_rows
         if not self.option_tokens:
             return state_repr
         option_rows, _ = self.adapter.encode_entity_tokens(observation, ["options"])[
@@ -1317,7 +1438,21 @@ class TransformerBackbone(nn.Module):
         return state_repr, option_repr
 
 
-class LinearPolicyHead(nn.Module):
+class PolicyHead(nn.Module):
+    """
+    Common base for the runtime's policy heads.
+
+    Declares :attr:`requires_option_repr` so the head registry can be keyed by a
+    type that actually carries the flag: it is read off the class, before any
+    head is instantiated, to decide whether the backbone must emit per-option
+    tokens.
+    """
+
+    #: Whether the head needs per-option tokens alongside ``state_repr``.
+    requires_option_repr: ClassVar[bool] = False
+
+
+class LinearPolicyHead(PolicyHead):
     """Linear action-logit head with checkpoint-compatible names."""
 
     #: This head reads only ``state_repr``.
@@ -1343,7 +1478,7 @@ class LinearPolicyHead(nn.Module):
         return self.linear(state_repr)
 
 
-class PointerPolicyHead(nn.Module):
+class PointerPolicyHead(PolicyHead):
     """
     Pointer head: score each per-option token against a state-derived query.
 
@@ -1363,11 +1498,16 @@ class PointerPolicyHead(nn.Module):
         head_config: Mapping[str, Any],
         state_dict: Mapping[str, torch.Tensor],
     ) -> None:
-        del head_config, state_dict
+        del head_config
         super().__init__()
         self.n_actions = n_actions
-        self.query = nn.Linear(in_features, in_features)
-        self._scale = float(in_features) ** 0.5
+        # The query is projected to the option width, which equals in_features
+        # only when the tokens come from a trunk emitting them at its own
+        # width. Off the adapter they are entity_dim wide instead, so the
+        # width is measured rather than assumed.
+        self.option_dim = int(state_dict["policy_head.query.weight"].shape[0])
+        self.query = nn.Linear(in_features, self.option_dim)
+        self._scale = float(self.option_dim) ** 0.5
 
     def forward(
         self,
@@ -1385,7 +1525,7 @@ class PointerPolicyHead(nn.Module):
         return (option_repr * query).sum(dim=-1) / self._scale
 
 
-class PointerHead(nn.Module):
+class PointerHead(PolicyHead):
     """
     Pointer head scoring ``[state_repr, option_repr_i]`` with a shared MLP.
 
@@ -1425,10 +1565,15 @@ class PointerHead(nn.Module):
                 f"PointerHead scorer takes {scorer_input} inputs, which leaves no "
                 f"option width alongside a {in_features}-wide state."
             )
-        hidden = [
-            int(state_dict[f"policy_head.scorer.{index}.weight"].shape[0])
-            for index in range(0, 2 * len(head_config.get("num_cells", [])), 2)
-        ]
+        # Depth measured from the weights, not from head_config["num_cells"]:
+        # training defaults that key to None and derives a single hidden layer
+        # from in_features, so a checkpoint that took the default records
+        # layers the config does not mention.
+        hidden = []
+        index = 0
+        while f"policy_head.scorer.{index + 2}.weight" in state_dict:
+            hidden.append(int(state_dict[f"policy_head.scorer.{index}.weight"].shape[0]))
+            index += 2
         activation = str(head_config.get("activation", "tanh"))
         self.scorer = _mlp(in_features + self.option_dim, hidden, 1, activation)
         self.stop_scorer = _mlp(in_features, hidden, 1, activation)
@@ -1469,7 +1614,7 @@ _BACKBONES: dict[str, type[nn.Module]] = {
     "src.models.transformer.TransformerBackbone": TransformerBackbone,
 }
 #: Training policy heads this runtime can rebuild, by their config ``_target_``.
-_POLICY_HEADS: dict[str, type[nn.Module]] = {
+_POLICY_HEADS: dict[str, type[PolicyHead]] = {
     "src.models.heads.LinearPolicyHead": LinearPolicyHead,
     "src.models.heads.PointerPolicyHead": PointerPolicyHead,
     "src.models.heads.PointerHead": PointerHead,
@@ -1500,19 +1645,21 @@ class ActorCritic(nn.Module):
             )
         embed_dim = int(config["embed_dim"])
         self.backbone = _BACKBONES[backbone_target](state_dict, config)
-        self.policy_head = _POLICY_HEADS[head_target](
+        # Checked before the head is built, not after: a pointer head sizes its
+        # projections against option tokens, so on a trunk that emits none it
+        # would fail first on its own missing weights and bury the real reason.
+        head_class = _POLICY_HEADS[head_target]
+        if head_class.requires_option_repr and not self.backbone.produces_option_repr:
+            raise ValueError(
+                f"Head {head_class.__name__} needs per-option tokens, but "
+                f"backbone {type(self.backbone).__name__} does not emit them."
+            )
+        self.policy_head = head_class(
             embed_dim, max_options + 1, config["head"], state_dict
         )
         self.value_head = ValueHead(
             embed_dim, [int(value) for value in config["value_head"]["num_cells"]]
         )
-        if self.policy_head.requires_option_repr and not (
-            self.backbone.produces_option_repr
-        ):
-            raise ValueError(
-                f"Head {type(self.policy_head).__name__} needs per-option tokens, but "
-                f"backbone {type(self.backbone).__name__} does not emit them."
-            )
 
     def policy_logits(self, observation: Mapping[str, Any]) -> torch.Tensor:
         """Action logits for one observation, skipping the critic."""

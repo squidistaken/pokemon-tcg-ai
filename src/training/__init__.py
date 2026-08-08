@@ -8,6 +8,7 @@ from .callbacks import (
     TrainStateCallback,
     WeightsAndBiases,
 )
+from .cuda_memory_guard import CudaMemoryGuard
 from .curriculum import Curriculum, build_curriculum
 from .env_factory import build_probe_specs, make_env, make_env_factories
 from .evaluator import Evaluator, build_evaluator
@@ -24,6 +25,7 @@ __all__ = [
     "BaseTrainer",
     "CallbackList",
     "CrossPlayCallback",
+    "CudaMemoryGuard",
     "Curriculum",
     "CurriculumStateCallback",
     "Evaluator",

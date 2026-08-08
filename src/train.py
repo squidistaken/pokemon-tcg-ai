@@ -20,6 +20,7 @@ from src.policies.ppo_actor import build_actor_critic
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training import (
     CrossPlayCallback,
+    CudaMemoryGuard,
     CurriculumStateCallback,
     Evaluator,
     MultiEvaluator,
@@ -61,6 +62,11 @@ def main(cfg: DictConfig) -> None:
     if cfg.set_seed:
         random.seed(cfg.seed)
         torch.manual_seed(cfg.seed)
+
+    # Before anything touches the GPU, and before the worker pool forks.
+    CudaMemoryGuard(
+        cfg.agent.get("device", "cpu"), cfg.agent.get("cuda_memory_fraction")
+    ).apply()
 
     callbacks = _build_callbacks(cfg)
     run_config = _run_config(cfg)

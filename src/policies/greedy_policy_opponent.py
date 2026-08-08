@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from tensordict import TensorDict
 from torchrl.data import Composite, TensorSpec
 
@@ -67,6 +67,22 @@ def checkpoint_state_dict(payload: object) -> Mapping[str, torch.Tensor]:
     if not isinstance(payload, Mapping):
         raise TypeError("Checkpoint must contain a state-dict mapping.")
     return cast(Mapping[str, torch.Tensor], payload)
+
+
+def checkpoint_model_config(payload: object) -> DictConfig | None:
+    """
+    Return the ``model`` config a versioned checkpoint was trained with.
+
+    :param payload: Object returned by :func:`torch.load`.
+    :return: The embedded ``model`` section, or None for a legacy checkpoint
+        that carries a bare state dict and so has no config to rebuild from.
+    """
+    if not isinstance(payload, Mapping):
+        return None
+    config = payload.get("config")
+    if not isinstance(config, Mapping) or "model" not in config:
+        return None
+    return cast(DictConfig, OmegaConf.create({"model": dict(config["model"])}))
 
 
 class GreedyPolicyOpponent:
@@ -182,17 +198,27 @@ def load_actor_critic(
         device: torch.device | str = "cpu",
 ) -> ActorCritic:
     """
-    Rebuild an actor-critic from config and load a snapshot's weights.
+    Rebuild an actor-critic from a snapshot and load its weights.
+
+    The architecture comes from the config the checkpoint itself embeds, so a
+    frozen reference keeps loading after the *current* run's architecture has
+    moved on — which is what makes "am I better than the agent we already
+    submitted" answerable at all. ``cfg`` is the fallback for a legacy
+    checkpoint saved as a bare state dict, which carries no config of its own.
+    Without this, evaluating against any earlier-architecture checkpoint fails
+    on a size mismatch at the first evaluation round, minutes into a run.
 
     :param checkpoint_path: Path to a :func:`save_actor_critic` snapshot.
-    :param cfg: Hydra config used to build the matching architecture.
+    :param cfg: Hydra config used to build the architecture when the
+        checkpoint embeds none.
     :param obs_spec: Environment observation composite spec.
     :param action_spec: Environment action spec.
     :param device: Device to load the weights onto.
     :return: The reconstructed actor-critic with the checkpoint's weights.
     """
-    actor_critic = build_actor_critic(cfg, obs_spec, action_spec)
     payload = torch.load(Path(checkpoint_path), map_location=device, weights_only=True)
+    embedded = checkpoint_model_config(payload)
+    actor_critic = build_actor_critic(embedded or cfg, obs_spec, action_spec)
     actor_critic.load_state_dict(checkpoint_state_dict(payload))
     return actor_critic
 
