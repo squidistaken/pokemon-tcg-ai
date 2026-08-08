@@ -47,6 +47,26 @@ deck_holdout_frac: 0.0
 # generalization scales with training deck diversity. The chosen archetypes are
 # deterministic given deck_split_seed.
 deck_pool_width: null
+# Pin the agent to one deck and draw only its opponent from the pool. null
+# trains both seats from the corpus.
+#
+# The submitted agent plays exactly one list, so a symmetric pool spends all
+# but 1/archetypes of its episodes on decks the agent will never pilot, and
+# spreads the rest over archetypes^2 matchups -- measured on run 049zz7kg,
+# 134 archetypes gave 17,956 matchups 2.8 episodes each over 50,317 episodes,
+# which is why train/curriculum/size reached only 97 with 11,692 still in
+# probation. Pinning one seat leaves the opposing field at full width (that is
+# the ladder the agent is scored against) and collapses the space to one
+# matchup per opponent archetype, a few hundred episodes each.
+#
+# Incompatible with env.curriculum.enabled; see make_env_factories.
+agent_deck: null
+# Share of training episodes that ignore the pin and take both seats from the
+# pool. Without some the card embeddings and per-card statics outside the
+# pinned list stop receiving gradient, degrading the encoder on exactly the
+# cards the opponent plays. Evaluation always uses 0.0 so the eval curve
+# measures the deck that will be submitted.
+agent_deck_field_prob: 0.2
 # Seed for the deterministic train/holdout split.
 deck_split_seed: 0
 # Prioritized Level Replay over deck-archetype matchups. When enabled, each

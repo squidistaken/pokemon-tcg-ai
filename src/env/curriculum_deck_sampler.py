@@ -105,16 +105,36 @@ class CurriculumDeckSampler:
 
     def sample(self) -> tuple[Deck, Deck]:
         """
-        Draw the next episode's matchup and deal a concrete list to each seat.
+        Draw the next episode's matchup, assuming the agent takes seat 0.
 
-        :return: The ``(deck0, deck1)`` card-ID lists, ordered as the engine's
-            two seats. Note the environment randomizes which seat the agent
-            occupies, so the curriculum's "agent archetype" is the first entry
-            of the pair and lands on whichever seat the agent takes.
+        Prefer :meth:`sample_for_seat`: the environment flips a coin for the
+        agent's seat, and a level is the *ordered* pair
+        ``(agent archetype, opponent archetype)``.
+
+        :return: The ``(deck0, deck1)`` card-ID lists.
+        """
+        return self.sample_for_seat(0)
+
+    def sample_for_seat(self, agent_seat: int) -> tuple[Deck, Deck]:
+        """
+        Draw the next matchup and deal the agent's archetype to its own seat.
+
+        A level identifies an ordered pair, ``pair_id(agent, opponent)`` and
+        ``pair_id(opponent, agent)`` being different levels over an asymmetric
+        matchup table. Dealing the drawn agent archetype positionally to seat 0
+        therefore hands it to the *opponent* on the half of episodes where the
+        environment seats the agent second, and credits that episode's outcome
+        to the transposed level.
+
+        :param agent_seat: Seat index (0 or 1) the agent occupies this episode.
+        :return: The ``(deck0, deck1)`` card-ID lists in engine seat order.
         """
         agent, opponent = self._draw_pair()
         self._level_id = self._archetypes.pair_id(agent, opponent)
-        return self._deal(agent), self._deal(opponent)
+        agent_deck, opponent_deck = self._deal(agent), self._deal(opponent)
+        if agent_seat == 0:
+            return agent_deck, opponent_deck
+        return opponent_deck, agent_deck
 
     def seed(self, seed: int | None) -> None:
         """

@@ -1083,7 +1083,7 @@ def _head_needs_option_repr(config: Mapping[str, Any]) -> bool:
     :return: True when the head cannot run on ``state_repr`` alone.
     """
     head_class = _POLICY_HEADS.get(str(config["head"]["_target_"]))
-    return bool(head_class is not None and head_class.requires_option_repr)
+    return head_class is not None and head_class.requires_option_repr
 
 
 def _build_adapter(
@@ -1438,7 +1438,21 @@ class TransformerBackbone(nn.Module):
         return state_repr, option_repr
 
 
-class LinearPolicyHead(nn.Module):
+class PolicyHead(nn.Module):
+    """
+    Common base for the runtime's policy heads.
+
+    Declares :attr:`requires_option_repr` so the head registry can be keyed by a
+    type that actually carries the flag: it is read off the class, before any
+    head is instantiated, to decide whether the backbone must emit per-option
+    tokens.
+    """
+
+    #: Whether the head needs per-option tokens alongside ``state_repr``.
+    requires_option_repr: ClassVar[bool] = False
+
+
+class LinearPolicyHead(PolicyHead):
     """Linear action-logit head with checkpoint-compatible names."""
 
     #: This head reads only ``state_repr``.
@@ -1464,7 +1478,7 @@ class LinearPolicyHead(nn.Module):
         return self.linear(state_repr)
 
 
-class PointerPolicyHead(nn.Module):
+class PointerPolicyHead(PolicyHead):
     """
     Pointer head: score each per-option token against a state-derived query.
 
@@ -1511,7 +1525,7 @@ class PointerPolicyHead(nn.Module):
         return (option_repr * query).sum(dim=-1) / self._scale
 
 
-class PointerHead(nn.Module):
+class PointerHead(PolicyHead):
     """
     Pointer head scoring ``[state_repr, option_repr_i]`` with a shared MLP.
 
@@ -1600,7 +1614,7 @@ _BACKBONES: dict[str, type[nn.Module]] = {
     "src.models.transformer.TransformerBackbone": TransformerBackbone,
 }
 #: Training policy heads this runtime can rebuild, by their config ``_target_``.
-_POLICY_HEADS: dict[str, type[nn.Module]] = {
+_POLICY_HEADS: dict[str, type[PolicyHead]] = {
     "src.models.heads.LinearPolicyHead": LinearPolicyHead,
     "src.models.heads.PointerPolicyHead": PointerPolicyHead,
     "src.models.heads.PointerHead": PointerHead,
