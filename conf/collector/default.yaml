@@ -2,7 +2,7 @@ frames_per_batch: 2048
 total_frames: 16384
 
 # Which TorchRL collector runs data collection. Measured numbers per kind are in
-# docs/training-performance.md; `scripts/bench_throughput.py --profile` is what
+# docs/training-performance.md; `scripts/bench_throughput.py --mode profile` is what
 # regenerates them.
 #
 #   sync          -> one Collector over a ParallelEnv. The policy lives in this

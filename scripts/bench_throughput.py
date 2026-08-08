@@ -23,15 +23,27 @@ Two jobs, selected by ``--mode``:
     workers (or behind an inference server), so the split is reported as not
     applicable and the CPU figures are what carry the result.
 
-Builds the config directly with OmegaConf and drives :class:`Trainer` rather
-than going through the Hydra ``src/train.py`` entry point, so the benchmark
-stays runnable regardless of the CLI wiring.
+Either mode can run against one of two scenarios. By default the config is
+built directly with OmegaConf: a mirror match with no deck pool and no
+self-play league, cheap and reproducible, but a clean pipeline rather than
+what a training run sees. Passing ``--config-name`` instead composes the real
+Hydra config and reuses the same factories ``src/train.py`` does, which brings
+in the deck pool and the league whose opponent forward runs inside every
+worker. Which scenario is measured changes the answer, so prefer the second
+when the question is about a run you actually intend to launch.
 
 Run from the repository root::
 
     uv run python scripts/bench_throughput.py
     uv run python scripts/bench_throughput.py --mode profile --policy ppo \\
         --collector sync --num-workers 16
+
+    # Against a real run's configuration, league included.
+    uv run python scripts/bench_throughput.py --mode profile --policy ppo \\
+        --collector multi_sync --device cpu --num-workers 16 \\
+        --config-name ppo_selfplay_multideck \\
+        --override model/backbone=transformer --override model/head=pointer \\
+        --checkpoint-dir outputs/<group>/<run>/checkpoints
 
 Note the engine RNG is not seedable (see the docs), so exact fps varies a few
 percent run to run and is hardware dependent; the ratios are stable.
@@ -42,6 +54,7 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
@@ -52,6 +65,7 @@ sys.path.insert(0, str(REPO_ROOT))
 import torch.multiprocessing as torch_mp
 from omegaconf import DictConfig, OmegaConf
 from torch import nn
+from torchrl.envs import EnvBase
 
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training.collectors import CollectorKind, TrainingCollector
@@ -389,6 +403,109 @@ def build_policy(
     return operator.get_policy_operator().select_out_keys("action", "action_log_prob")
 
 
+@dataclass(frozen=True)
+class RunScenario:
+    """
+    The environment factories and policy one profiled configuration runs.
+
+    :param env_factories: One factory per worker, already carrying whatever
+        opponent the configuration puts inside the environment.
+    :param policy: Collection policy.
+    :param collector_device: Device the collection policy runs on, which under
+        the multiprocess collectors is deliberately not the update's device.
+    """
+
+    env_factories: list[Callable[[], EnvBase]]
+    policy: nn.Module
+    collector_device: str
+
+
+def build_synthetic_scenario(
+    case: BenchCase,
+    deck: str,
+    policy_kind: str,
+    device: str,
+    model_overrides: list[str] | None,
+) -> RunScenario:
+    """
+    Build the self-contained scenario: a mirror match, no deck pool, no league.
+
+    Cheap and reproducible, and what the throughput sweep uses. It measures a
+    clean collection pipeline rather than what a training run sees, because the
+    self-play opponent forward that runs inside every worker is absent. Use
+    :func:`build_run_scenario` to profile a real run.
+
+    :param case: Configuration being benchmarked.
+    :param deck: Deck CSV path passed to both seats.
+    :param policy_kind: Which policy to collect with (see :func:`build_policy`).
+    :param device: Device the policy runs on.
+    :param model_overrides: Hydra overrides selecting the architecture.
+    :return: The scenario to time.
+    """
+    config = build_config(deck, case.num_workers, case.parallel)
+    policy = build_policy(policy_kind, config, device, model_overrides)
+    return RunScenario(make_env_factories(config), policy, device)
+
+
+def build_run_scenario(
+    case: BenchCase,
+    config_name: str,
+    overrides: list[str],
+    device: str,
+    checkpoint_dir: str | None,
+) -> RunScenario:
+    """
+    Build the scenario an actual training run collects with.
+
+    Composes the same Hydra config ``src/train.py`` would and reuses the same
+    factory helpers, so the profile includes what the synthetic scenario leaves
+    out: the deck pool and its sampling, and above all the self-play league,
+    whose opponent forward runs *inside every worker* and which
+    ``docs/training-performance.md`` section 3 measured at 46% of throughput.
+    That matters for the collector choice specifically, because the
+    multiprocess kinds add a second per-worker forward on top of it.
+
+    The league is pointed at an existing snapshot directory rather than the run
+    directory ``src/train.py`` would create, since a fresh run starts with an
+    empty pool and a random warmup opponent, i.e. without the very cost this is
+    here to measure.
+
+    :param case: Configuration being benchmarked; supplies the worker count.
+    :param config_name: Hydra config name, e.g. ``ppo_selfplay_multideck``.
+    :param overrides: Hydra overrides, as passed on a training command line.
+    :param device: Device the collection policy runs on.
+    :param checkpoint_dir: Directory of existing snapshots the workers' leagues
+        draw from. None leaves the pool empty, which profiles the warmup phase.
+    :return: The scenario to time.
+    """
+    from hydra import compose, initialize_config_dir
+    from torchrl.modules import ActorValueOperator
+
+    from src.policies.ppo_actor import build_actor_critic, build_ppo_operator
+    from src.training.env_factory import build_probe_specs
+    from src.training.self_play import build_opponent_factory
+
+    with initialize_config_dir(config_dir=str(REPO_ROOT / "conf"), version_base=None):
+        config = compose(
+            config_name=config_name,
+            overrides=[*overrides, f"env.num_workers={case.num_workers}"],
+        )
+
+    obs_spec, action_spec = build_probe_specs(config)
+    operator: ActorValueOperator = build_ppo_operator(  # pyright: ignore[reportAssignmentType]
+        build_actor_critic(config, obs_spec, action_spec), action_spec
+    ).to(device)
+    policy = operator.get_policy_operator().select_out_keys("action", "action_log_prob")
+
+    opponent_factory = (
+        build_opponent_factory(config, obs_spec, action_spec, checkpoint_dir)
+        if checkpoint_dir is not None
+        else None
+    )
+    factories = make_env_factories(config, opponent_factory=opponent_factory)
+    return RunScenario(factories, policy, device)
+
+
 def run_case(
     case: BenchCase,
     deck: str,
@@ -397,6 +514,7 @@ def run_case(
     policy_kind: str = "random",
     device: str = "cpu",
     model_overrides: list[str] | None = None,
+    scenario: RunScenario | None = None,
 ) -> ProfileResult:
     """
     Time a single configuration.
@@ -408,16 +526,20 @@ def run_case(
     :param policy_kind: Which policy to collect with (see :func:`build_policy`).
     :param device: Device the policy runs on.
     :param model_overrides: Hydra overrides selecting the architecture.
+    :param scenario: Prebuilt environments and policy. None builds the
+        synthetic mirror-match scenario from the arguments above.
     :return: Throughput, attribution and CPU usage for the run.
     """
-    config = build_config(deck, case.num_workers, case.parallel)
-    policy = build_policy(policy_kind, config, device, model_overrides)
+    if scenario is None:
+        scenario = build_synthetic_scenario(
+            case, deck, policy_kind, device, model_overrides
+        )
     timings = StepTimings()
     trainer = _ProfilingTrainer(
         timings,
-        device=device,
-        env_factories=make_env_factories(config),
-        policy=policy,
+        device=scenario.collector_device,
+        env_factories=scenario.env_factories,
+        policy=scenario.policy,
         frames_per_batch=frames_per_batch,
         total_frames=total_frames,
         use_parallel_env=case.parallel,
@@ -541,6 +663,30 @@ def parse_args() -> argparse.Namespace:
         help="Extra Hydra override selecting the architecture, repeatable, e.g. "
         "--model-override model/backbone=transformer. Ignored under --policy random.",
     )
+    parser.add_argument(
+        "--config-name",
+        default=None,
+        help="Profile a real training config by name, e.g. ppo_selfplay_multideck. "
+        "Composes it exactly as src/train.py would, so the deck pool and the "
+        "self-play league are included. Without this the benchmark runs a "
+        "synthetic mirror match with no league, which understates worker cost.",
+    )
+    parser.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Hydra override applied to --config-name, repeatable. Pass the same "
+        "ones the training script does.",
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        default=None,
+        help="Existing snapshot directory the workers' self-play leagues draw "
+        "from (--config-name only). Without it the pool is empty and every "
+        "worker faces the random warmup opponent, which is not what a run in "
+        "progress costs.",
+    )
     return parser.parse_args()
 
 
@@ -557,6 +703,17 @@ def main() -> None:
             parallel=True,
             collector=CollectorKind(args.collector),
         )
+        scenario = (
+            build_run_scenario(
+                case,
+                args.config_name,
+                args.override,
+                args.device,
+                args.checkpoint_dir,
+            )
+            if args.config_name
+            else None
+        )
         result = run_case(
             case,
             args.deck,
@@ -565,6 +722,7 @@ def main() -> None:
             args.policy,
             args.device,
             args.model_override,
+            scenario,
         )
         print_profile(case, result)
         return

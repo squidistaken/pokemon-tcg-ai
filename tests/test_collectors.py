@@ -12,6 +12,7 @@ from src.training.collectors import (
     AsyncCollectorOptions,
     CollectorKind,
     _EnvStreamAssembler,
+    _explain_mapping_exhaustion,
     _WorkerRolloutAssembler,
     build_collector,
     is_off_policy,
@@ -429,3 +430,48 @@ def test_weight_sync_crosses_the_device_boundary() -> None:
         assert (next(iterator)["action"] == 0).all()
     finally:
         collector.shutdown()
+
+
+@pytest.mark.parametrize("kind", [CollectorKind.MULTI_SYNC, CollectorKind.MULTI_ASYNC])
+def test_cuda_collection_policy_is_rejected_under_fork(kind: CollectorKind) -> None:
+    """
+    A CUDA collection policy under the forking collectors fails at construction.
+
+    Reached by the natural configuration ``agent.device=cuda`` with
+    ``collector.type=multi_sync`` and no ``agent.collector_device``: CUDA cannot
+    initialize in a forked child, so this used to die several frames inside
+    torch's IPC machinery with a message that named neither the collector nor
+    the setting to change. Needs no GPU, since the rejection reads the
+    configured device rather than the hardware.
+    """
+    with pytest.raises(ValueError, match="agent.collector_device=cpu"):
+        build_collector(
+            kind,
+            env_factories=[make_counting_env, make_counting_env],
+            make_vec_env=make_counting_env,
+            policy=ThresholdPolicy(),
+            frames_per_batch=8,
+            total_frames=16,
+            collector_kwargs={"policy_device": "cuda"},
+            options=AsyncCollectorOptions(),
+            mp_start_method="fork",
+        )
+
+
+def test_mapping_exhaustion_is_recognized_through_the_cause_chain() -> None:
+    """
+    The mmap-limit failure is named, and unrelated RuntimeErrors are left alone.
+
+    torchrl reports it as a generic "worker thread raised an exception" with the
+    real cause chained underneath, so matching only the outermost message would
+    miss it and matching too loosely would relabel every collector failure.
+    """
+    root = RuntimeError("unable to mmap 124 bytes from file <>: Cannot allocate memory")
+    wrapped = RuntimeError("A collector worker thread raised an exception.")
+    wrapped.__cause__ = root
+    explanation = _explain_mapping_exhaustion(wrapped)
+    assert explanation is not None
+    assert "vm.max_map_count" in explanation
+    assert "multi_sync" in explanation
+
+    assert _explain_mapping_exhaustion(RuntimeError("worker 6 died")) is None

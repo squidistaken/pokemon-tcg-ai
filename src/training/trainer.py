@@ -47,10 +47,16 @@ _CORE_METRICS = (
 #: tables, so it reaches std::terminate), so the parent only ever learns about
 #: it as a dead pipe. That surfaces as a bare RuntimeError, hence the string
 #: match: torchrl raises no dedicated exception type for it.
+#:
+#: ``async_batched``'s own "a collector worker thread raised an exception" is
+#: deliberately absent. Its characteristic failure is the shared-memory mapping
+#: limit (see :func:`~src.training.collectors._explain_mapping_exhaustion`),
+#: which a fresh pool reproduces immediately, so treating it as worker death
+#: spends the whole restart budget re-running a deterministic failure and buries
+#: the diagnosis under ten identical tracebacks.
 _WORKER_DEATH_MARKERS = (
     "at least one process failed",
     "cannot proceed, worker",
-    "a collector worker thread raised an exception",
 )
 
 #: Consecutive restarts that collect nothing before dying again, after which

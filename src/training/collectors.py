@@ -170,6 +170,49 @@ def is_off_policy(kind: CollectorKind) -> bool:
     return kind in (CollectorKind.MULTI_ASYNC, CollectorKind.ASYNC_BATCHED)
 
 
+#: Substring of the mmap failure ``async_batched`` dies with on this
+#: environment. See :func:`_explain_mapping_exhaustion`.
+_MAPPING_EXHAUSTION_MARKER = "unable to mmap"
+
+
+def _explain_mapping_exhaustion(error: BaseException) -> str | None:
+    """
+    Recognize the transport failure ``async_batched`` hits on this observation.
+
+    :class:`~torchrl.envs.AsyncEnvPool` ships every transition through a
+    ``multiprocessing.Queue``, and torch moves each leaf tensor by allocating a
+    fresh shared-memory segment that the receiver maps. This environment's
+    observation is ~288 leaf tensors, so one transition costs several hundred
+    mappings and the receiving process exhausts Linux's ``vm.max_map_count``
+    (65530 by default) within a few hundred steps. It surfaces as ``Cannot
+    allocate memory`` on an mmap of a few dozen bytes, with memory, shared
+    memory and file descriptors all far from exhausted, which reads as anything
+    but what it is.
+
+    The batched environments the other kinds use allocate one shared tensordict
+    at startup and write into it in place, so they never do per-step mapping and
+    never hit this.
+
+    :param error: Exception raised out of collection.
+    :return: An explanation to attach, or None if this is a different failure.
+    """
+    causes: list[BaseException] = []
+    seen = error
+    while seen is not None and seen not in causes:
+        causes.append(seen)
+        seen = seen.__cause__ or seen.__context__  # pyright: ignore[reportAssignmentType]
+    if not any(_MAPPING_EXHAUSTION_MARKER in str(cause) for cause in causes):
+        return None
+    return (
+        "collector.type=async_batched sends every transition through a queue as "
+        "individually shared tensors, and this environment's observation is ~288 "
+        "of them per step, which exhausts Linux's vm.max_map_count (65530) in the "
+        "receiving process. Use collector.type=multi_sync, which shares one "
+        "preallocated tensordict per worker and does no per-step mapping. See "
+        "docs/training-performance.md section 6."
+    )
+
+
 class _AssemblingCollector:
     """
     A collector whose batches are reshaped into ``(rows, time)`` on the way out.
@@ -195,11 +238,19 @@ class _AssemblingCollector:
     def __iter__(self) -> Iterator[TensorDictBase]:
         """
         :return: Iterator over assembled ``(rows, time)`` batches.
+        :raises RuntimeError: Re-raised from the wrapped collector, with the
+            shared-memory mapping limit named when that is what went wrong.
         """
-        for data in self._collector:
-            batch = self._assemble(data)
-            if batch is not None:
-                yield batch
+        try:
+            for data in self._collector:
+                batch = self._assemble(data)
+                if batch is not None:
+                    yield batch
+        except RuntimeError as error:
+            explanation = _explain_mapping_exhaustion(error)
+            if explanation is None:
+                raise
+            raise RuntimeError(explanation) from error
 
     def shutdown(self) -> None:
         """Tear down the wrapped collector; any buffered remainder is dropped."""
@@ -408,7 +459,9 @@ def build_collector(
         )
 
     if kind is CollectorKind.MULTI_SYNC:
-        _warn_on_per_worker_cuda(kind, collector_kwargs, len(env_factories))
+        _check_per_worker_cuda(
+            kind, collector_kwargs, len(env_factories), mp_start_method
+        )
         return MultiSyncCollector(
             create_env_fn=env_factories,
             policy=policy,
@@ -419,7 +472,9 @@ def build_collector(
         )
 
     if kind is CollectorKind.MULTI_ASYNC:
-        _warn_on_per_worker_cuda(kind, collector_kwargs, len(env_factories))
+        _check_per_worker_cuda(
+            kind, collector_kwargs, len(env_factories), mp_start_method
+        )
         rows = options.workers_per_batch or len(env_factories)
         per_worker = max(1, frames_per_batch // rows)
         if per_worker * rows != frames_per_batch:
@@ -488,26 +543,49 @@ def _force_start_method(mp_start_method: str) -> None:
     torch_mp.set_start_method(mp_start_method, force=True)
 
 
-def _warn_on_per_worker_cuda(
-    kind: CollectorKind, collector_kwargs: Mapping[str, Any], num_workers: int
+def _check_per_worker_cuda(
+    kind: CollectorKind,
+    collector_kwargs: Mapping[str, Any],
+    num_workers: int,
+    mp_start_method: str,
 ) -> None:
     """
-    Flag the one configuration that quietly multiplies GPU memory by the worker count.
+    Reject a CUDA collection policy under the multiprocess collectors.
 
-    The multiprocess kinds put a copy of the policy in every worker. On CUDA
-    that is one CUDA context per worker, each costing hundreds of megabytes
-    before a single parameter is stored, for forward passes of batch size one --
-    which is precisely the case a GPU is worst at. The policy device is left as
-    configured rather than overridden, because the trainer's optimizer is on
-    that device too and silently splitting them here would be worse.
+    These kinds put a copy of the policy in every worker. Under ``fork`` that is
+    not merely expensive, it cannot work at all: CUDA refuses to initialize in a
+    forked child, so the run dies with ``Cannot re-initialize CUDA in forked
+    subprocess`` from inside torch's own IPC machinery, several frames below
+    anything that names the collector. Raising here turns that into a message
+    that says which setting to change.
+
+    Under a start method that can carry CUDA the configuration is legal but
+    still unwise -- one context per worker, hundreds of megabytes each, to run
+    forward passes of batch size one, which is the case a GPU is worst at -- so
+    it warns instead.
+
+    The device is neither overridden nor silently split: the trainer's optimizer
+    lives on ``agent.device``, and quietly moving collection off it here would
+    trade a clear failure for a confusing one.
 
     :param kind: Collector kind being built.
     :param collector_kwargs: Trainer-supplied collector arguments.
     :param num_workers: Worker processes about to be started.
+    :param mp_start_method: Start method the workers will be created with.
+    :raises ValueError: If a CUDA collection policy is combined with ``fork``.
     """
     device = collector_kwargs.get("policy_device")
     if device is None or torch.device(device).type != "cuda":
         return
+    if mp_start_method == "fork":
+        raise ValueError(
+            f"collector.type={kind.value} runs one policy copy per worker process, "
+            f"and those are forked, so a CUDA collection policy cannot work: CUDA "
+            f"refuses to initialize in a forked child. Set agent.collector_device=cpu "
+            f"to run collection on the CPU while the PPO update keeps the GPU. "
+            f"Setting agent.device=cpu instead would drag the update onto the CPU "
+            f"too, which costs far more than collection gains."
+        )
     logger.warning(
         "collector.type=%s runs one policy copy per worker, so this will open %d "
         "CUDA contexts for batch-size-1 forwards. Set agent.collector_device=cpu "

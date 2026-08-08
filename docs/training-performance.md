@@ -13,16 +13,20 @@ made the environment workers actually fork.
 - The level curriculum costs **nothing measurable**.
 - Forking rather than spawning workers cut startup from **52s to 4s**.
 
-Added 2026-08-08 for issue #86 (§6). Absolute figures there are left out on
-purpose — they vary widely across the machines this is run on, and §6.5 is how
-each one regenerates its own:
+Added 2026-08-09 for issue #86 (§6), measured on a 7800X3D (8 cores, 16
+threads) with a 24 GiB CUDA device, against the `tf-ptr-weighted-15m-s42`
+configuration with its self-play league populated:
 
 - The pegged main process is running the **policy forward**, not stacking
   tensordicts or waiting on IPC. The suspected cause was wrong.
-- **`collector.type: multi_sync` is the win.** It unpegs the main process and
-  costs no on-policy guarantees.
-- The genuinely asynchronous collectors are *not*: `multi_async` gains less and
-  costs on-policy batches, and `async_batched` is an order of magnitude slower.
+- **`collector.type: multi_sync` with `agent.collector_device: cpu` is worth
+  1.6x end to end**, 251 to ~400 fps, with the PPO update included and the
+  learning diagnostics unchanged.
+- The genuinely asynchronous collectors buy nothing. `multi_async` ties
+  `multi_sync` and costs on-policy batches; `async_batched` cannot collect a
+  batch on this observation at all (§6.6).
+- After the change the **PPO update is the bottleneck**, 56% of the loop.
+  Further collector work has little left to win.
 
 ---
 
@@ -196,7 +200,7 @@ painful.
 
 ---
 
-## 6. Where collection time actually goes (issue #86)
+## 6. Which collector to use (issue #86)
 
 Everything above this section was measured with fps alone, which cannot say
 *why* a configuration is slow. `scripts/bench_throughput.py --mode profile` can:
@@ -207,133 +211,236 @@ separately.
 
 The starting point was `tf-ptr-weighted-15m-s42`: 480 fps at the collector,
 **main process pegged at 99.5% of one core**, workers 13-15% each, **300% total
-CPU out of 1600%**, GPU bursty at 40% mean. Collection, not the update, is the
-constraint, and one process is doing all of it.
+CPU out of 1600%**, GPU bursty at 40% mean. Collection, not the update, was the
+constraint, and one process was doing all of it.
 
-Absolute numbers below are deliberately omitted: they differ by an order of
-magnitude across the machines this is run on, and the point of the profiler is
-that each one regenerates its own. What follows is what the *shape* of the
-result was on every machine tried.
+### 6.1 How these numbers were produced
 
-### 6.1 The suspected cause was wrong
+All of §6 is one machine: a 7800X3D (8 physical cores, 16 threads) with a
+24 GiB CUDA device, under WSL2. Numbers on another box will differ; §6.7 is how
+to regenerate them.
+
+Two scenarios appear below and they do not agree, which is the main lesson of
+this section:
+
+- **collection only**, driving the base `Trainer` whose `_update` is a no-op.
+  Isolates the collector but excludes the PPO update.
+- **end to end**, through `src/train.py` with the update, the deck pool and a
+  populated self-play league. This is what a run actually costs.
+
+Both use the `tf-ptr-weighted-15m-s42` architecture: transformer trunk with
+`token_groups=[pokemon]`, `pointer` head, `embed_dim=256`, `entity_dim=128`,
+`option_target_state`, `pokemon_seat_split`, over the observation-weighted
+136-archetype pool.
+
+An earlier revision of this section reported collection-only numbers taken
+without the league. Three of its conclusions were wrong, and each is corrected
+below. **Do not draw a collector conclusion from a league-free, update-free
+measurement.**
+
+### 6.2 The suspected cause was wrong
 
 The hypothesis in the issue was tensordict stacking and IPC of the large nested
-observation. It is neither. Under `collector.type=sync` with the transformer +
-pointer architecture:
+observation. It is neither. Under `collector.type=sync` with the league, 16
+workers:
 
-- **policy forward: the majority of the loop**, whether the policy is on CPU or
-  on CUDA;
-- environment step, i.e. the IPC round trip the barrier costs: roughly a
-  quarter;
-- the collector's tensordict bookkeeping, the suspected culprit: the smallest of
-  the three.
+| bucket | share of collection wall clock |
+|---|---|
+| policy forward | 25% (cuda) / 38% (cpu) |
+| env step, i.e. the IPC round trip the barrier costs | 66% / 57% |
+| collector tensordict bookkeeping, the suspected culprit | 9% / 5% |
 
-**The main process is pegged running the policy, not marshalling data.** Moving
-the policy to CUDA helps but does not change the shape of the problem: at a
-batch size equal to the worker count the forward is dominated by per-step Python
-and host/device transfers rather than by GPU arithmetic.
+**The main process is pegged running the policy and waiting on workers, not
+marshalling data.** The bookkeeping the issue suspected is the smallest bucket
+in every configuration measured.
 
-This is why the barrier was never the real issue. Removing it leaves the same
+This is also why removing the barrier was never the answer. It leaves the same
 serialized forward pass in the same single process.
 
-### 6.2 What each collector kind does about it
+### 6.3 What each collector kind is worth
+
+End to end, 49152 frames, `agent.device=cuda`, league populated, eval off:
+
+| collector | collection device | workers | fps | vs baseline |
+|---|---|---|---|---|
+| `sync` | cuda | 16 | 251 | 1.00x |
+| `multi_sync` | cpu | 16 | 382 | 1.52x |
+| `multi_sync` | cpu | 12 | 402 | 1.60x |
+| `multi_async` (GAE) | cpu | 16 | 404 | 1.61x |
+| `multi_async` (V-trace) | cpu | 16 | 402 | 1.60x |
+| `async_batched` | cpu | 16 | does not collect a batch (§6.6) | |
 
 **`multi_sync` is the answer.** Giving every worker its own copy of the policy
-parallelises the one thing that was serialized: the main process drops from
-~100% of a core to under 15%, and total CPU rises from a small fraction of the
-machine to near saturation. It was the fastest of the four on every machine
-tried. It is also the *only* asynchronous-collection option that keeps batches
-on-policy: its workers sit idle between handing a batch over and being told to
-continue, so a weight push in that gap reaches all of them before the next batch
-starts. No V-trace required.
+parallelises the one thing that was serialized. The main process drops from 99%
+of a core to 6%, and total CPU rises from 307% to ~1250% of 1600%. It is also
+the only option here that keeps batches on-policy: its workers sit idle between
+handing a batch over and being told to continue, so a weight push in that gap
+reaches all of them before the next batch starts. No V-trace required.
 
-**`multi_async` costs learning guarantees for less speed.** It gains over
-`sync`, but by less than `multi_sync` does, and its batches straddle optimizer
-steps. It is wired up, and V-trace with it, but no measurement has yet given a
-reason to prefer it.
+**`multi_async` buys nothing.** It ties `multi_sync` within noise while costing
+the on-policy guarantee, requiring V-trace, and being incompatible with the
+level curriculum (§6.5). Its one structural advantage, that workers keep
+collecting through the update, does not show up in the measurement even though
+the update is 56% of the loop.
 
-**`async_batched` is an order of magnitude slower, not faster.** It removes the
-barrier and then adds a second IPC hop: every step goes environment ->
-coordinator thread -> inference server -> back, unbatched, and its main process
-burns *more* than one core spinning on transport. The barrier was never what
-cost the time.
+**V-trace is correct but idle here.** 402 fps against GAE's 404 on the same
+collector, i.e. it costs nothing and corrects a drift that is not large enough
+to matter. It exists for the asynchronous path; nothing currently recommends
+taking that path.
 
-### 6.3 `multi_sync` inverts the worker-count advice
+### 6.4 After this change, the update is the bottleneck
+
+The per-frame decomposition is consistent across both collectors:
+
+| | collection | update | total | fps |
+|---|---|---|---|---|
+| `sync` | 2.52 ms | 1.46 ms | 3.98 ms | 251 |
+| `multi_sync` | 1.16 ms | 1.46 ms | 2.62 ms | 382 |
+
+The update is unchanged by the collector, as it must be, and its share rises
+from 37% to 56%. **Collection is no longer where the time goes.** The next
+lever is the update itself (`sub_batch_size`, `num_epochs`, AMP), not the
+collector.
+
+This also explains why the collection-only speedup (2.15x, 397 to 861 fps) is
+larger than the end-to-end one (1.52x). Quoting the collection-only figure as
+the run's speedup would be wrong by 40%.
+
+### 6.5 What `multi_sync` costs and what it needs
+
+It puts a policy copy in every worker process. Two consequences:
+
+- **Collection must run on the CPU.** Not an optimisation, a requirement: the
+  workers are forked, and CUDA refuses to initialize in a forked child, so a
+  CUDA collection policy dies with `Cannot re-initialize CUDA in forked
+  subprocess`. `build_collector` rejects the combination with a message naming
+  the setting (`tests/test_collectors.py` pins it).
+
+  Do *not* fix this with `agent.device=cpu`, which drags the PPO update onto the
+  CPU and gives back the 7.8x from section 2. The two devices are separately
+  configurable: set **`agent.device=cuda` with `agent.collector_device=cpu`**,
+  so the update keeps the GPU while collection runs one CPU policy copy per
+  worker.
+- **Weights must be pushed to the workers after every update.** `Trainer._collect`
+  does this and `tests/test_collectors.py` pins it, including across the
+  cuda/cpu boundary. Without it a run collects at full speed against the weights
+  the workers forked with and looks healthy while learning nothing.
+`multi_sync` is compatible with the level curriculum; `multi_async` is not. The
+curriculum accumulates a residual per collector row and commits it when that row
+reports `done`, which assumes row `r` of the next batch continues the same
+environment as row `r` of this one. `sync`, `multi_sync` and `async_batched` all
+honour that. `multi_async` yields rollouts in completion order and does not, so
+`PPOTrainer` rejects that pairing at construction rather than silently scoring
+one matchup with another matchup's evidence.
+
+### 6.6 `async_batched` cannot carry this observation
+
+It does not run. `AsyncEnvPool` ships every transition through a
+`multiprocessing.Queue`, and torch moves each leaf tensor by allocating a fresh
+shared-memory segment that the receiver maps. This environment's observation is
+~288 leaf tensors (9 phase groups of 32), so one transition costs several
+hundred mappings, and the receiving process exhausts Linux's `vm.max_map_count`
+(65530 by default) within a few hundred steps:
+
+```
+RuntimeError: unable to mmap 124 bytes from file </torch_...>:
+Cannot allocate memory (12)
+```
+
+That is the mapping limit, not memory: RAM, `/dev/shm` and the file-descriptor
+limit were all far from exhausted, and it fails identically under both
+`file_descriptor` and `file_system` sharing. At 16 workers it hangs rather than
+crashing, which is what thrashing at the limit looks like.
+
+The batched environments every other kind uses allocate one shared tensordict
+at startup and write into it in place, so they never map per step and never hit
+this. It is a property of that transport, not of asynchrony.
+
+The kind stays selectable so the result can be re-measured (raising
+`vm.max_map_count` may be enough to make it run), but the failure is now
+recognised and reported with its cause, and is deliberately *not* treated as
+worker death, so it fails immediately instead of spending the restart budget
+reproducing a deterministic error.
+
+### 6.7 Worker count: measure it, do not carry a number over
 
 Section 1 found throughput still climbing at 8x oversubscription and recommended
 pushing `env.num_workers` well past the core count. That holds only while
-workers are latency-bound. Under `multi_sync` they are not -- each one now runs
-a policy forward per step -- and oversubscription starts costing throughput
-rather than buying it. Under `sync` the same sweep is flat, because the parent
-is the bottleneck either way.
+workers are latency-bound. Under `multi_sync` they are not, since each one now
+runs a policy forward per step.
 
-**Under `multi_sync`, size `env.num_workers` to the physical core count**, and
-measure it per machine rather than carrying a number over.
+Collection-only, with the league:
 
-### 6.4 What this costs and what it needs
+| workers | 6 | 8 | 12 | 16 | 24 |
+|---|---|---|---|---|---|
+| fps | 420 | 665 | 830 | 861 | 745 |
 
-`multi_sync` puts a policy copy in every worker process. Two consequences:
+The peak is at 16, the **thread** count, not 8, the physical core count. An
+earlier revision of this section recommended sizing to physical cores; on this
+machine that costs 23%.
 
-- **Keep the collection policy on CPU.** On CUDA it opens one context per
-  worker for batch-size-1 forwards, which is the case a GPU is worst at. The
-  trainer logs a warning if you do it anyway.
+End to end the curve is flat and noisy: 10 workers 396, 12 workers 402/471/415
+over three runs, 14 workers 400, 16 workers 382/392. **The spread at one
+setting is as wide as the spread between settings**, so the worker count is not
+resolvable at this run length, and short runs additionally penalise larger
+counts because forking N workers that each load the deck pool and the league is
+a fixed cost inside a two-minute window. Over 15M frames that cost vanishes,
+which is why the collection-only ordering is the better guide.
 
-  Do *not* do this by setting `agent.device=cpu`, which would drag the PPO
-  update onto the CPU as well and give back the 7.8x section 2 measured. The two
-  devices are separately configurable: set **`agent.device=cuda` with
-  `agent.collector_device=cpu`**, so the update keeps the GPU while collection
-  runs one CPU policy copy per worker. Weight pushes move across that boundary
-  (pinned by `tests/test_collectors.py`).
-- **Weights must be pushed to the workers after every update.** The trainer does
-  this (`Trainer._collect`), and `tests/test_collectors.py` pins it. Without it
-  a run collects at full speed against the weights the workers forked with and
-  looks perfectly healthy while learning nothing.
+**Keep `env.num_workers: 16` and do not tune it further.** The collector choice
+is a 60% gain against a 15% noise floor; the worker count is inside the noise.
 
-Not measured, and worth measuring before a long run: the profiler runs without
-a self-play league, which section 3 found costs 46% of throughput by running an
-opponent forward inside every worker. `multi_sync` adds a *second* per-worker
-forward on top of that, so on a core-bound node the two may contend in a way
-idle environments do not show.
+### 6.8 Reproducing this
 
-### 6.5 Reproducing this
+The synthetic scenario (no deck pool, no league) is the default and is the one
+that misled the earlier revision. Pass `--config-name` to profile a real run:
 
 ```bash
-# Where the time goes, for one configuration.
 uv run python scripts/bench_throughput.py --mode profile --policy ppo \
-  --collector sync --device cuda --num-workers <cores> \
-  --model-override model/backbone=transformer \
-  --model-override model/head=pointer_dot \
-  --model-override model.backbone.option_tokens=true
-
-# The same, per collector kind.
-... --collector multi_sync --device cpu
+  --collector multi_sync --device cpu --num-workers 16 \
+  --config-name ppo_selfplay_multideck \
+  --override paths.data_dir=decks \
+  --override deck_corpus=heuristic-resolved \
+  --override env.agent_deck=null \
+  --override env.deck_weighting=observation \
+  --override model/backbone=transformer \
+  --override model/head=pointer \
+  --override "model.backbone.token_groups=[pokemon]" \
+  --override model.backbone.option_tokens=true \
+  --override train.pool_size=5 \
+  --override train.snapshot_interval=200000 \
+  --checkpoint-dir outputs/<group>/<run>/checkpoints
 ```
 
-`--policy ppo` matters: under the default random policy the policy-forward
+`--checkpoint-dir` matters: without it the league is empty and every worker
+faces the random warmup opponent, which is not what a run in progress costs.
+`--policy ppo` matters too; under the default random policy the policy-forward
 bucket measures a `multinomial` call rather than the network the real runs
-collect with, and the conclusion above inverts.
+collect with.
+
+For end-to-end fps, run `src/train.py` itself with a small
+`collector.total_frames` and `train.eval_interval=0`, pointing
+`train.checkpoint_dir` at an absolute path holding a few snapshots. An absolute
+path is used as given, so the league can be pre-populated.
 
 ---
 
-
 ## Recommendations
 
-1. **Set `collector.type: multi_sync`** with **`agent.device=cuda`** and
-   **`agent.collector_device=cpu`** — the change that unpegs the main process,
-   and the fastest option on every machine tried, while the update keeps the
-   GPU. Batches stay on-policy, so nothing else about the run has to change
-   (§6).
-2. **Size `env.num_workers` to the physical core count under `multi_sync`.** The
-   §1 advice to oversubscribe applies to `sync` only (§6.3).
-3. **Always `agent.device=cuda`** for PPO training, under every collector.
-4. **Leave the curriculum on** when wanted; it is free — but note it cannot be
-   combined with `multi_async`, which is rejected at construction (§6.4).
-5. If throughput is still binding, attack the **league opponent forward** — it is
-   46% of the budget under `sync` and nothing else comes close.
-
-At 32 workers with the league active under `sync`, a 2M-frame arm takes roughly
-**16 minutes** of training (plus evaluation), against ~22 minutes at the old
-default.
+1. **Set `collector.type: multi_sync` with `agent.device=cuda` and
+   `agent.collector_device=cpu`.** 1.6x end to end on the reference machine,
+   251 to ~400 fps, with ESS and `clip_fraction` unchanged. Batches stay
+   on-policy, so nothing else about the run has to change (§6.3).
+2. **Leave `env.num_workers` at 16** under `multi_sync`, and do not tune it: the
+   differences between 10 and 16 are inside run-to-run noise (§6.7).
+3. **Always `agent.device=cuda`** for the update, under every collector.
+4. **Leave the curriculum on** when wanted; it is free. It cannot be combined
+   with `multi_async`, which is rejected at construction (§6.5).
+5. **Do not use `multi_async` or `async_batched`.** The first ties `multi_sync`
+   while costing on-policy batches; the second does not run (§6.6).
+6. If throughput is still binding, attack **the PPO update**, which is 56% of
+   the loop after this change, and the **league opponent forward**, which
+   section 3 measured at 46% of collection.
 
 ## Methodology caveats
 
