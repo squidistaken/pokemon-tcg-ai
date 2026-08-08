@@ -28,10 +28,10 @@ class CurriculumStateCallback(TrainingCallback):
     """
 
     def __init__(
-            self,
-            curriculum: Curriculum,
-            state_dir: str | Path,
-            interval: int,
+        self,
+        curriculum: Curriculum,
+        state_dir: str | Path,
+        interval: int,
     ) -> None:
         """
         :param curriculum: Curriculum whose buffer is dumped; shared with the
@@ -53,7 +53,9 @@ class CurriculumStateCallback(TrainingCallback):
         if self._interval > 0:
             self._state_dir.mkdir(parents=True, exist_ok=True)
             logger.info(
-                "Curriculum state every %d frames -> %s", self._interval, self._state_dir
+                "Curriculum state every %d frames -> %s",
+                self._interval,
+                self._state_dir,
             )
 
     def on_rollout_start(self, step: int) -> None:

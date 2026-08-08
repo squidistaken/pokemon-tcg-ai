@@ -1,0 +1,65 @@
+default_install_hook_types: [pre-commit, pre-push]
+
+exclude: '^(cg/|ptcg_engine/|.*\.csv$)'
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+
+      - id: protected-paths
+        name: protected paths (cg/, ptcg_engine/)
+        entry: >-
+          bash -c '
+          changed=$(git diff --cached --name-only --diff-filter=ACMRD -- cg ptcg_engine);
+          if [ -n "$changed" ]; then
+            echo "Protected paths are blocked by CI:" >&2;
+            echo "$changed" >&2;
+            exit 1;
+          fi'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: uv-lock-check
+        name: uv lock --check
+        # CI fails when pyproject metadata changes without regenerating uv.lock.
+        entry: uv lock --check
+        language: system
+        pass_filenames: false
+        files: '^(pyproject\.toml|uv\.lock)$'
+
+      - id: pyright
+        name: pyright
+        entry: uv run pyright
+        language: system
+        pass_filenames: false
+        types: [python]
+        stages: [pre-push]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: [--maxkb=512]

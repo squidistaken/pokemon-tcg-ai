@@ -265,6 +265,7 @@ def test_stale_and_incomplete_rules_are_rejected(tmp_path, rule, message):
     with pytest.raises(MappingRuleError, match=message):
         MappingRuleSet.load(tmp_path, CardIndex())
 
+
 def test_ordinary_source_cannot_target_ace_spec(tmp_path):
     target = [{"card_id": 1088, "expected_name": "Prime Catcher"}]
     _write_fragment(tmp_path / "rules.json", [_rule(targets=target)])
@@ -452,12 +453,14 @@ def test_fingerprint_is_stable_and_tracks_material_rule_changes(tmp_path):
     first = MappingRuleSet.load(tmp_path, CardIndex()).fingerprint
     assert MappingRuleSet.load(tmp_path, CardIndex()).fingerprint == first
 
-    base["targets"] = [{
-        "card_id": 1181,
-        "expected_name": "Billy & O'Nare",
-        "mapping_confidence": 3,
-        "rationale": "A different target.",
-    }]
+    base["targets"] = [
+        {
+            "card_id": 1181,
+            "expected_name": "Billy & O'Nare",
+            "mapping_confidence": 3,
+            "rationale": "A different target.",
+        }
+    ]
     _write_fragment(path, [base])
     retargeted = MappingRuleSet.load(tmp_path, CardIndex()).fingerprint
     assert retargeted != first

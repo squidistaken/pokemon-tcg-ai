@@ -483,4 +483,3 @@ Backbones are ordered by literature maturity + integration cost.
 - **Phase 3 — sequence/history follow-up.** `TemporalTransformerBackbone` (DT-style history window),
   needing recurrent-aware collection (`InitTracker`, sequence batching). `RecurrentBackbone` (LSTM)
   is backburner — a fallback only if the temporal transformer underperforms or proves too costly.
-

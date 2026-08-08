@@ -51,7 +51,9 @@ def _attack(attack_id: int, name: str) -> Attack:
 CARD_INDEX = CardIndex(
     cards={
         100: _card(100, "Basic Mon"),
-        200: _card(200, "Evolved Mon", basic=False, stage1=True, evolves_from="Basic Mon"),
+        200: _card(
+            200, "Evolved Mon", basic=False, stage1=True, evolves_from="Basic Mon"
+        ),
         300: _card(300, "Ultra Ball", card_type=CardType.ITEM),
         400: _card(400, "Basic ex", ex=True),
         500: _card(500, "Mega ex", ex=True, mega_ex=True),
@@ -186,7 +188,9 @@ def test_build_report_first_attack_turn_none_when_never_attacked() -> None:
     assert report.average_first_attack_turn_losses is None
 
 
-def test_build_report_first_attack_turns_excludes_episodes_that_never_attacked() -> None:
+def test_build_report_first_attack_turns_excludes_episodes_that_never_attacked() -> (
+    None
+):
     episodes = [
         _episode(episode_id=1, result="win", first_attack_turn=3),
         _episode(episode_id=2, result="loss", first_attack_turn=None),
@@ -330,8 +334,12 @@ def test_build_report_card_stats_track_prize_rate() -> None:
 def test_build_report_evolution_stats_conversion_rate() -> None:
     episodes = [
         _episode(episode_id=1, result="win", cards_played={100}, evolutions_made={200}),
-        _episode(episode_id=2, result="loss", cards_played={100}),  # played but never evolved
-        _episode(episode_id=3, result="win", cards_played=set()),  # pre-evo never played
+        _episode(
+            episode_id=2, result="loss", cards_played={100}
+        ),  # played but never evolved
+        _episode(
+            episode_id=3, result="win", cards_played=set()
+        ),  # pre-evo never played
     ]
 
     report = build_report(episodes, decklist=[100, 200], card_index=CARD_INDEX)
@@ -344,7 +352,9 @@ def test_build_report_evolution_stats_conversion_rate() -> None:
     assert stat.conversion_rate == 0.5
 
 
-def test_build_report_evolution_stats_deduplicates_multi_copy_decklist_entries() -> None:
+def test_build_report_evolution_stats_deduplicates_multi_copy_decklist_entries() -> (
+    None
+):
     """A decklist lists an id once per physical copy (e.g. 4 lines for a
     4-of) - a multi-copy evolution card must still produce one stat, not
     one per copy."""
@@ -352,13 +362,17 @@ def test_build_report_evolution_stats_deduplicates_multi_copy_decklist_entries()
         _episode(episode_id=1, result="win", cards_played={100}, evolutions_made={200}),
     ]
 
-    report = build_report(episodes, decklist=[100, 200, 200, 200, 200], card_index=CARD_INDEX)
+    report = build_report(
+        episodes, decklist=[100, 200, 200, 200, 200], card_index=CARD_INDEX
+    )
 
     assert len(report.evolution_stats) == 1
 
 
 def test_build_report_evolution_stats_empty_without_decklist() -> None:
-    episodes = [_episode(episode_id=1, result="win", cards_played={100}, evolutions_made={200})]
+    episodes = [
+        _episode(episode_id=1, result="win", cards_played={100}, evolutions_made={200})
+    ]
 
     report = build_report(episodes, decklist=None, card_index=CARD_INDEX)
 
@@ -382,7 +396,9 @@ def test_evolution_stat_conversion_rate_clips_at_one() -> None:
 
 
 def test_build_report_decklist_surfaces_never_seen_cards() -> None:
-    episodes = [_episode(episode_id=1, result="win", cards_seen={100}, cards_played={100})]
+    episodes = [
+        _episode(episode_id=1, result="win", cards_seen={100}, cards_played={100})
+    ]
 
     report = build_report(episodes, decklist=[100, 200], card_index=CARD_INDEX)
 
@@ -397,12 +413,16 @@ def test_build_report_attack_stats_aggregate_across_episodes() -> None:
         _episode(
             episode_id=1,
             result="win",
-            attacks=[AttackUsage(attack_id=999, card_id=100, damage=50, knocked_out=False)],
+            attacks=[
+                AttackUsage(attack_id=999, card_id=100, damage=50, knocked_out=False)
+            ],
         ),
         _episode(
             episode_id=2,
             result="win",
-            attacks=[AttackUsage(attack_id=999, card_id=100, damage=70, knocked_out=True)],
+            attacks=[
+                AttackUsage(attack_id=999, card_id=100, damage=70, knocked_out=True)
+            ],
         ),
     ]
 
@@ -486,7 +506,9 @@ def test_build_report_card_stats_track_games_attacked_with() -> None:
 
 def test_card_stat_is_pokemon_distinguishes_trainer_cards() -> None:
     episodes = [
-        _episode(episode_id=1, result="win", cards_seen={100, 300}, cards_played={100, 300})
+        _episode(
+            episode_id=1, result="win", cards_seen={100, 300}, cards_played={100, 300}
+        )
     ]
 
     report = build_report(episodes, decklist=None, card_index=CARD_INDEX)
@@ -586,7 +608,9 @@ def test_loss_postmortem_decked_out() -> None:
 
 def test_loss_postmortem_wiped_out() -> None:
     episodes = [
-        _episode(episode_id=1, result="loss", game_end_reason=GameEndReason.NO_POKEMON_LEFT)
+        _episode(
+            episode_id=1, result="loss", game_end_reason=GameEndReason.NO_POKEMON_LEFT
+        )
     ]
 
     report = build_report(episodes, decklist=None, card_index=CARD_INDEX)
@@ -613,7 +637,9 @@ def test_loss_postmortem_prizes_taken_reason_is_not_itself_a_cause() -> None:
     """The normal win/loss condition (reason=1) doesn't explain anything on
     its own - it's the "expected" way a game ends, not a distinguishing tag."""
     episodes = [
-        _episode(episode_id=1, result="loss", game_end_reason=GameEndReason.PRIZES_TAKEN)
+        _episode(
+            episode_id=1, result="loss", game_end_reason=GameEndReason.PRIZES_TAKEN
+        )
     ]
 
     report = build_report(episodes, decklist=None, card_index=CARD_INDEX)
@@ -660,14 +686,17 @@ def test_generate_recommendations_flags_dominant_loss_cause() -> None:
     recommendations = generate_recommendations(report)
 
     assert any(
-        r.category == "loss cause" and "lost the KO trade" in r.text for r in recommendations
+        r.category == "loss cause" and "lost the KO trade" in r.text
+        for r in recommendations
     )
 
 
 def test_generate_recommendations_min_games_filters_noise() -> None:
     """A card played (and lost with) only once must not be flagged - one
     data point is noise, not a pattern."""
-    episodes = [_episode(episode_id=1, result="loss", cards_seen={100}, cards_played={100})]
+    episodes = [
+        _episode(episode_id=1, result="loss", cards_seen={100}, cards_played={100})
+    ]
 
     report = build_report(episodes, decklist=None, card_index=CARD_INDEX)
     recommendations = generate_recommendations(report, min_games=3)

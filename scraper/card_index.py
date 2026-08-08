@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import NamedTuple
 
-FUZZY_THRESHOLD = 0.90 # Minimum string-similarity score required for a misspelled card name to be accepted.
+FUZZY_THRESHOLD = 0.90  # Minimum string-similarity score required for a misspelled card name to be accepted.
 
 _POWER_MARKERS = {
     "mega",
@@ -142,7 +142,9 @@ class CardInfo:
     is_basic_energy: bool
     is_basic_pokemon: bool
     is_ace_spec: bool
-    previous_stage: str | None  # immediate evolution base (Card Name), or None for Basics
+    previous_stage: (
+        str | None
+    )  # immediate evolution base (Card Name), or None for Basics
 
 
 class MatchResult(NamedTuple):
@@ -345,7 +347,7 @@ class CardIndex:
 
         1. set-availability: Card whose set we don't have is genuinely
           absent, so don't fuzz it;
-        2. power markers: both names must carry the identical set of markers, 
+        2. power markers: both names must carry the identical set of markers,
            so distinct power levels never collapse together;
         3. similarity: ratio must reach ``FUZZY_THRESHOLD``.
 
@@ -386,7 +388,5 @@ class CardIndex:
                     round(best_score, 3),
                     tuple(hits),
                 )
-            return MatchResult(
-                hits[0], "fuzzy", best_name, round(best_score, 3)
-            )
+            return MatchResult(hits[0], "fuzzy", best_name, round(best_score, 3))
         return MatchResult(None, "unresolved")

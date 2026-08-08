@@ -73,7 +73,10 @@ def validate_deck(
             has_basic = True
 
     for name, count in name_counts.items():
-        if count > DECK_SAME_CARD_MAX and not index.by_id[name_sample[name]].is_basic_energy:
+        if (
+            count > DECK_SAME_CARD_MAX
+            and not index.by_id[name_sample[name]].is_basic_energy
+        ):
             # Look up whether this name is a Basic Energy (exempt from the cap).
             errors.append(f"{count} copies of {name!r} (max {DECK_SAME_CARD_MAX})")
 
@@ -88,7 +91,10 @@ def validate_deck(
         present = {normalize_name(name) for name in name_counts}
         for name in name_counts:
             info = index.by_id[name_sample[name]]
-            if info.previous_stage and normalize_name(info.previous_stage) not in present:
+            if (
+                info.previous_stage
+                and normalize_name(info.previous_stage) not in present
+            ):
                 warnings.append(
                     f"{name!r} has no {info.previous_stage!r} in the deck "
                     "(legal, but that copy can never evolve)"

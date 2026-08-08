@@ -51,12 +51,12 @@ class MatchResult:
 
 
 def play_match(
-        handle: BattleHandle,
-        deck0: list[int],
-        deck1: list[int],
-        policy0: Policy,
-        policy1: Policy,
-        max_selections: int = 5000,
+    handle: BattleHandle,
+    deck0: list[int],
+    deck1: list[int],
+    policy0: Policy,
+    policy1: Policy,
+    max_selections: int = 5000,
 ) -> int | None:
     """
     Play one battle to the end, each seat driven by its own policy.
@@ -79,7 +79,9 @@ def play_match(
                 return state.result
             select = observation.select
             if select is None:
-                raise RuntimeError("Engine returned no selection while the battle is running.")
+                raise RuntimeError(
+                    "Engine returned no selection while the battle is running."
+                )
             if select.maxCount == 0:
                 observation = handle.select([])
                 continue
@@ -91,13 +93,13 @@ def play_match(
 
 
 def play_series(
-        handle: BattleHandle,
-        policy_a: Policy,
-        policy_b: Policy,
-        deck_sampler: DeckSampler,
-        n_games: int,
-        rng: random.Random,
-        max_selections: int = 5000,
+    handle: BattleHandle,
+    policy_a: Policy,
+    policy_b: Policy,
+    deck_sampler: DeckSampler,
+    n_games: int,
+    rng: random.Random,
+    max_selections: int = 5000,
 ) -> MatchResult:
     """
     Play ``n_games`` between two policies, alternating which seat A takes.
@@ -132,11 +134,11 @@ def play_series(
 
 
 def crossplay_matrix(
-        policies: Mapping[str, Policy],
-        deck_sampler_factory: Callable[[], DeckSampler],
-        n_games: int = 20,
-        seed: int = 0,
-        max_selections: int = 5000,
+    policies: Mapping[str, Policy],
+    deck_sampler_factory: Callable[[], DeckSampler],
+    n_games: int = 20,
+    seed: int = 0,
+    max_selections: int = 5000,
 ) -> tuple[list[str], dict[str, dict[str, float]], dict[str, dict[str, int]]]:
     """
     Score every pair of policies against each other.
@@ -176,7 +178,10 @@ def crossplay_matrix(
             games[a][b] = games[b][a] = result.scored
             logger.info(
                 "Cross-play %s vs %s over %d game(s): score=%.3f",
-                a, b, result.scored, result.score,
+                a,
+                b,
+                result.scored,
+                result.score,
             )
     finally:
         handle.finish()
@@ -184,11 +189,11 @@ def crossplay_matrix(
 
 
 def bradley_terry_elo(
-        names: Sequence[str],
-        scores: Mapping[str, Mapping[str, float]],
-        games: Mapping[str, Mapping[str, int]],
-        prior_games: float = 1.0,
-        iterations: int = 200,
+    names: Sequence[str],
+    scores: Mapping[str, Mapping[str, float]],
+    games: Mapping[str, Mapping[str, int]],
+    prior_games: float = 1.0,
+    iterations: int = 200,
 ) -> dict[str, float]:
     """
     Fit Elo ratings from a cross-play score matrix (Bradley-Terry, order-free).
@@ -216,9 +221,7 @@ def bradley_terry_elo(
         for a in names:
             total_wins = sum(wins[a][b] for b in names if b != a)
             denom = sum(
-                played[a][b] / (strength[a] + strength[b])
-                for b in names
-                if b != a
+                played[a][b] / (strength[a] + strength[b]) for b in names if b != a
             )
             updated[a] = total_wins / denom if denom > 0 else strength[a]
         # Normalize by the geometric mean so the scale cannot drift each pass.

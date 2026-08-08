@@ -28,10 +28,10 @@ class ObservationEncoder(ABC):
 
     @abstractmethod
     def encode(
-            self,
-            observation: Observation,
-            agent_seat: int,
-            already_chosen_option_count: int,
+        self,
+        observation: Observation,
+        agent_seat: int,
+        already_chosen_option_count: int,
     ) -> TensorDict:
         """
         Encode an engine observation from the agent's perspective.
@@ -46,9 +46,9 @@ class ObservationEncoder(ABC):
         raise NotImplementedError
 
     def update_already_chosen_option_count(  # noqa: PLR6301 - optional instance extension point
-            self,
-            encoded: TensorDict,
-            already_chosen_option_count: int,
+        self,
+        encoded: TensorDict,
+        already_chosen_option_count: int,
     ) -> bool:
         """
         Update a cached encoding for the next partial multi-select pick.

@@ -55,7 +55,9 @@ def _charmeleon_profile() -> SourceProfile:
         weakness="Water",
         resistance="none",
         retreat=2,
-        moves=(("Heat Tackle", "RR", "70", "This Pokémon also does 20 damage to itself."),),
+        moves=(
+            ("Heat Tackle", "RR", "70", "This Pokémon also does 20 damage to itself."),
+        ),
     )
 
 
@@ -70,9 +72,7 @@ def test_resolve_deck_without_swapper_behaves_as_before(tmp_path):
     resolved = resolve_deck(raw, index)
 
     assert resolved.ids == [1]
-    assert [card.name for card in resolved.unresolved_cards] == [
-        "Totally Missing Card"
-    ]
+    assert [card.name for card in resolved.unresolved_cards] == ["Totally Missing Card"]
     assert resolved.swaps == []
 
 
@@ -163,9 +163,7 @@ def test_exact_legal_energy_is_never_swapped():
 
 def test_unique_same_name_printing_has_variant_provenance():
     index = CardIndex()
-    raw = RawDeck(
-        "test", "judge", [RawCard(2, "Judge", "PAF", "228", "trainer")]
-    )
+    raw = RawDeck("test", "judge", [RawCard(2, "Judge", "PAF", "228", "trainer")])
 
     resolved = resolve_deck(raw, index)
 
@@ -302,13 +300,9 @@ def test_unrelated_exact_pokemon_cannot_satisfy_a_mapping_family(tmp_path):
                     "reviewed family",
                     family_id="family-1",
                     source_stage=(
-                        "Basic Pokémon"
-                        if card.name == "Larva"
-                        else "Stage 1 Pokémon"
+                        "Basic Pokémon" if card.name == "Larva" else "Stage 1 Pokémon"
                     ),
-                    source_previous_stage=(
-                        "Larva" if card.name == "Moth" else None
-                    ),
+                    source_previous_stage=("Larva" if card.name == "Moth" else None),
                 ),
             )
 
@@ -352,9 +346,7 @@ def test_family_mapping_supports_a_reviewed_rare_candy_style_chain(tmp_path):
                     "reviewed family",
                     family_id="family-1",
                     source_stage=(
-                        "Basic Pokémon"
-                        if card.name == "Larva"
-                        else "Stage 2 Pokémon"
+                        "Basic Pokémon" if card.name == "Larva" else "Stage 2 Pokémon"
                     ),
                     source_previous_stage=(
                         "Cocoon" if card.name == "Moth King" else None
@@ -362,9 +354,7 @@ def test_family_mapping_supports_a_reviewed_rare_candy_style_chain(tmp_path):
                 ),
             )
 
-    raw = RawDeck(
-        "test", "family", [RawCard(2, "Larva"), RawCard(2, "Moth King")]
-    )
+    raw = RawDeck("test", "family", [RawCard(2, "Larva"), RawCard(2, "Moth King")])
 
     resolved = resolve_deck(raw, index, CandyFamilySwapper())
 

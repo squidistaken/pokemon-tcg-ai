@@ -150,7 +150,9 @@ def deck_winrates(manifest: Manifest, name: str) -> list[float]:
     entry = manifest.decks.get(name)
     if entry is None:
         return []
-    return [wr for o in entry.observations if (wr := parse_winrate(o.record)) is not None]
+    return [
+        wr for o in entry.observations if (wr := parse_winrate(o.record)) is not None
+    ]
 
 
 def archetype_winrates(
@@ -186,7 +188,9 @@ def archetype_winrates(
             wr = parse_winrate(obs.record)
             if wr is None:
                 continue
-            w, l = (int(p) for p in obs.record.split("-")[:2])  # parse_winrate validated it
+            w, l = (
+                int(p) for p in obs.record.split("-")[:2]
+            )  # parse_winrate validated it
             wins[arch] += w
             losses[arch] += l
             per_deck[arch].append(wr)
@@ -239,7 +243,9 @@ def deck_popularity_ranking(
             wr = parse_winrate(obs.record)
             if wr is None:
                 continue
-            w, l = (int(p) for p in obs.record.split("-")[:2])  # parse_winrate validated it
+            w, l = (
+                int(p) for p in obs.record.split("-")[:2]
+            )  # parse_winrate validated it
             wins += w
             losses += l
         total_games = wins + losses
@@ -321,7 +327,12 @@ def card_placement_correlation(
 
     n = len(kept_decks)
     if not n:  # no source reported a record; averaging nothing yields NaNs
-        return {"n_decks_scored": 0, "n_cards_tested": 0, "positive": [], "negative": []}
+        return {
+            "n_decks_scored": 0,
+            "n_cards_tested": 0,
+            "positive": [],
+            "negative": [],
+        }
 
     y = np.array(winrates, dtype=np.float64)
     y_centered = y - y.mean()

@@ -196,8 +196,7 @@ def test_embedded_config_warns_that_explicit_override_is_ignored(
     assert info.config == checkpoint_config()
     assert (
         f"warning: config override {override} was ignored because the checkpoint "
-        "contains an embedded configuration."
-        in capsys.readouterr().err
+        "contains an embedded configuration." in capsys.readouterr().err
     )
 
 
@@ -582,7 +581,9 @@ def test_kaggle_cli_command_is_used_for_submission(
     ]
 
 
-def _isolate_local_paths(root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_local_paths(
+    root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Redirect every local-file default into tmp_path.
 
     Leaves ``repo_root()`` pointing at the real repository so a build can
@@ -591,7 +592,9 @@ def _isolate_local_paths(root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyP
     stays the repository's real example deck: the native battle engine
     enforces per-card copy limits a synthetic all-one-card deck would violate.
     """
-    monkeypatch.setenv("CHECKPOINT_KEYS_FILE", str(tmp_path / "logs" / "checkpoint_keys.csv"))
+    monkeypatch.setenv(
+        "CHECKPOINT_KEYS_FILE", str(tmp_path / "logs" / "checkpoint_keys.csv")
+    )
     monkeypatch.setenv("KAGGLE_DECK_PATH", str(root / "decks" / "example.csv"))
     monkeypatch.setenv("KAGGLE_SUBMISSIONS_DIR", str(tmp_path / "submissions"))
 
@@ -612,7 +615,9 @@ def _prepare_registered_checkpoint(root: Path, tmp_path: Path, marker: int) -> s
     return digest[:12]
 
 
-def test_main_completes_a_successful_build(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_completes_a_successful_build(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = Path(__file__).parents[1]
     _prepare_registered_checkpoint(root, tmp_path, 9)
     _isolate_local_paths(root, tmp_path, monkeypatch)

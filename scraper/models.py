@@ -7,8 +7,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class RawCard:
-    """A single card line as scraped from a source, before ID resolution.
-    """
+    """A single card line as scraped from a source, before ID resolution."""
 
     count: int
     name: str

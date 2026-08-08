@@ -209,9 +209,13 @@ def test_lazy_discovery_never_reenters_coverage_mode() -> None:
 
     buffer.commit(2, 0.5)  # a brand-new pair_id, still immature -> probation only
 
-    assert buffer.size == 2, "the probationary level must not enter the scored buffer yet"
+    assert buffer.size == 2, (
+        "the probationary level must not enter the scored buffer yet"
+    )
     distribution = buffer.distribution()
-    assert distribution[1] > distribution[0], "prioritization must survive an in-flight discovery"
+    assert distribution[1] > distribution[0], (
+        "prioritization must survive an in-flight discovery"
+    )
 
 
 def test_staleness_lifts_neglected_levels() -> None:
@@ -603,7 +607,9 @@ def test_sampling_fidelity_reads_one_when_draws_follow_the_distribution() -> Non
     )
 
     expected = probabilities[drawn] / float(np.square(probabilities).sum())
-    assert curriculum.metrics()["sampling_fidelity"] == pytest.approx(expected, rel=1e-6)
+    assert curriculum.metrics()["sampling_fidelity"] == pytest.approx(
+        expected, rel=1e-6
+    )
     assert expected > 1.0, "an uneven distribution should score above one here"
 
 

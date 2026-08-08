@@ -16,10 +16,10 @@ class OpponentPool:
     """
 
     def __init__(
-            self,
-            opponents: list[Callable[[Observation], list[int]]],
-            weights: list[float] | None = None,
-            seed: int | None = None,
+        self,
+        opponents: list[Callable[[Observation], list[int]]],
+        weights: list[float] | None = None,
+        seed: int | None = None,
     ) -> None:
         """
         :param opponents: Initial pool members, each mapping an observation
@@ -59,9 +59,9 @@ class OpponentPool:
         return tuple(self._weights)
 
     def set_opponents(
-            self,
-            opponents: list[Callable[[Observation], list[int]]],
-            weights: list[float] | None = None,
+        self,
+        opponents: list[Callable[[Observation], list[int]]],
+        weights: list[float] | None = None,
     ) -> None:
         """
         Replace the pool's members wholesale.
@@ -89,7 +89,9 @@ class OpponentPool:
         if not any(member is active for member in self._opponents):
             self._active = self._opponents[0]
 
-    def add(self, opponent: Callable[[Observation], list[int]], weight: float = 1.0) -> None:
+    def add(
+        self, opponent: Callable[[Observation], list[int]], weight: float = 1.0
+    ) -> None:
         """
         Add a new member to the pool (e.g. a frozen policy snapshot).
 

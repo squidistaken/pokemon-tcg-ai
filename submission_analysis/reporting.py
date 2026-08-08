@@ -142,7 +142,8 @@ def report_card_stats(report: DeckReport, *, top: int = 25) -> None:
     console.print(impact_table)
 
     never_seen = sorted(
-        (stat for stat in report.card_stats if stat.games_seen == 0), key=lambda stat: stat.name
+        (stat for stat in report.card_stats if stat.games_seen == 0),
+        key=lambda stat: stat.name,
     )
     if never_seen:
         console.print(
@@ -296,7 +297,9 @@ def report_opponent_attack_stats(report: DeckReport, *, top: int = 15) -> None:
     :param top: Maximum rows in the table.
     :return: None.
     """
-    stats = sorted(report.opponent_attack_stats, key=lambda stat: stat.kos, reverse=True)
+    stats = sorted(
+        report.opponent_attack_stats, key=lambda stat: stat.kos, reverse=True
+    )
     if not stats:
         return
     table = Table(

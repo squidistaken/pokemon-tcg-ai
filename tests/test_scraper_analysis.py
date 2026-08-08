@@ -25,9 +25,7 @@ def test_pairwise_reports_accept_a_single_deck():
 
 
 def test_diversity_uses_full_vectors_with_a_pairwise_sample():
-    presence = np.array(
-        [[True, False], [False, True], [True, True], [True, False]]
-    )
+    presence = np.array([[True, False], [False, True], [True, True], [True, False]])
     counts = presence.astype(np.int32)
     sampled_similarity = np.array([[1.0, 0.5], [0.5, 1.0]])
 

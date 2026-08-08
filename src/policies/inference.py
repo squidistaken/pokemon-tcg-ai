@@ -131,9 +131,7 @@ class InferenceAgent:
                 if update_count is None or not update_count(
                     encoded_observation, len(picks)
                 ):
-                    encoded = self._encode_observation(
-                        observation, seat, len(picks)
-                    )
+                    encoded = self._encode_observation(observation, seat, len(picks))
         return picks
 
     def _encode_observation(

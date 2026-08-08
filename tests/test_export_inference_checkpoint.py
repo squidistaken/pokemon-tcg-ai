@@ -42,7 +42,9 @@ def _adapter_width(actor_critic) -> int:
     return int(cast(StructuredObsAdapter, actor_critic.backbone.adapter).out_features)
 
 
-def test_export_uses_the_training_runs_config(tmp_path: Path, structured_model_cfg) -> None:
+def test_export_uses_the_training_runs_config(
+    tmp_path: Path, structured_model_cfg
+) -> None:
     """Export preserves semantic config that state-dict shape checks cannot detect."""
     cfg = _training_config(structured_model_cfg)
     run_dir = tmp_path / "run"

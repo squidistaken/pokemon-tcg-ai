@@ -18,6 +18,10 @@ defaults:
   - override /model/backbone: transformer
   - _self_
 
+model:
+  backbone:
+    option_tokens: true
+
 # Fixed seed so the two arms see the same deck split, curriculum bootstrap and
 # initialization schedule; the ablation is otherwise unreadable.
 set_seed: true

@@ -44,13 +44,13 @@ class SnapshotCallback(TrainingCallback):
     """
 
     def __init__(
-            self,
-            actor_critic: ActorCritic,
-            checkpoint_dir: str | Path,
-            interval: int,
-            checkpoint_loggers: Iterable[CheckpointLogger] = (),
-            registry_path: str | Path | None = None,
-            repo_root: str | Path | None = None,
+        self,
+        actor_critic: ActorCritic,
+        checkpoint_dir: str | Path,
+        interval: int,
+        checkpoint_loggers: Iterable[CheckpointLogger] = (),
+        registry_path: str | Path | None = None,
+        repo_root: str | Path | None = None,
     ) -> None:
         """
         :param actor_critic: Learner to snapshot; shared with the trainer, so
@@ -89,7 +89,11 @@ class SnapshotCallback(TrainingCallback):
         self._checkpoint_config = _inference_config(run_config)
         self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
         if self._interval > 0:
-            logger.info("Self-play snapshots every %d frames -> %s", self._interval, self._checkpoint_dir)
+            logger.info(
+                "Self-play snapshots every %d frames -> %s",
+                self._interval,
+                self._checkpoint_dir,
+            )
         else:
             logger.info("Final checkpoint -> %s", self._checkpoint_dir)
 

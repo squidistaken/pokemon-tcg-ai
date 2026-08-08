@@ -77,7 +77,9 @@ class SimilarityConfig:
     def __post_init__(self) -> None:
         values = vars(self)
         if any(not 0.0 <= value <= 1.0 for value in values.values()):
-            raise ValueError("similarity weights and thresholds must be between 0 and 1")
+            raise ValueError(
+                "similarity weights and thresholds must be between 0 and 1"
+            )
         if not isclose(
             self.move_name_weight
             + self.move_cost_weight
@@ -208,8 +210,12 @@ def _text_similarity(
         if left_tokens or right_tokens
         else 1.0
     )
-    sequence = SequenceMatcher(None, normalize_name(left), normalize_name(right)).ratio()
-    return (1.0 - config.text_sequence_weight) * dice + config.text_sequence_weight * sequence
+    sequence = SequenceMatcher(
+        None, normalize_name(left), normalize_name(right)
+    ).ratio()
+    return (
+        1.0 - config.text_sequence_weight
+    ) * dice + config.text_sequence_weight * sequence
 
 
 def _numeric_similarity(left: int | None, right: int | None, scale: int) -> float:
@@ -342,7 +348,9 @@ def parse_limitless_profile(html: str) -> SourceProfile:
         stage = type_text.split("-")[-1].strip()
     elif type_text.startswith("Energy"):
         energy_kind = type_text.split("-")[-1].strip()
-        stage = energy_kind if energy_kind.endswith("Energy") else f"{energy_kind} Energy"
+        stage = (
+            energy_kind if energy_kind.endswith("Energy") else f"{energy_kind} Energy"
+        )
     else:
         raise ValueError(f"unknown Limitless card type {type_text!r}")
 
@@ -353,7 +361,9 @@ def parse_limitless_profile(html: str) -> SourceProfile:
     all_text = card_text.get_text(" ", strip=True)
     if "ACE SPEC" in all_text:
         rule = "ACE SPEC"
-    elif "mega" in normalize_name(name).split() and normalize_name(name).endswith(" ex"):
+    elif "mega" in normalize_name(name).split() and normalize_name(name).endswith(
+        " ex"
+    ):
         rule = "Mega Pokémon ex"
     elif normalize_name(name).endswith(" ex"):
         rule = "Pokémon ex"
@@ -389,8 +399,7 @@ def parse_limitless_profile(html: str) -> SourceProfile:
         sections = [
             section
             for section in card_text.select(".card-text-section")
-            if "card-text-artist"
-            not in cast(list[str], section.get("class", []))
+            if "card-text-artist" not in cast(list[str], section.get("class", []))
             and section.select_one(".card-text-title") is None
             and section.select_one(".card-text-wrr") is None
         ]
@@ -476,9 +485,7 @@ class LimitlessProfileLoader:
         if path.exists():
             html = path.read_text(encoding="utf-8")
         else:
-            html = self.client.get_text(
-                CARD_URL.format(set_code=key[0], number=key[1])
-            )
+            html = self.client.get_text(CARD_URL.format(set_code=key[0], number=key[1]))
             path.write_text(html, encoding="utf-8")
         profile = parse_limitless_profile(html)
         self._profiles[key] = profile
@@ -525,7 +532,10 @@ class HeuristicCardSwapper(CardSwapper):
             self.index.profiles[best.card_id].moves,
             self.config,
         )
-        if "Pokémon" in source.stage and move_score < self.config.pokemon_min_move_score:
+        if (
+            "Pokémon" in source.stage
+            and move_score < self.config.pokemon_min_move_score
+        ):
             return ()
         return (
             CardSwap(

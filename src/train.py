@@ -147,7 +147,9 @@ def _build_ppo_trainer(
         # against one frozen agent, and its eval win-rate is that agent's
         # exploitability. No self-play league, so cross-play against the
         # learner's own history is meaningless.
-        opponent_factory = build_best_response_opponent_factory(cfg, obs_spec, action_spec)
+        opponent_factory = build_best_response_opponent_factory(
+            cfg, obs_spec, action_spec
+        )
         eval_opponent_factory = opponent_factory
     else:
         opponent_factory = build_opponent_factory(
@@ -157,7 +159,8 @@ def _build_ppo_trainer(
 
     snapshot_interval = int(cfg.train.get("snapshot_interval", 0))
     cross_play_enabled = (
-        not is_best_response and opponent_factory is not None
+        not is_best_response
+        and opponent_factory is not None
         and bool(cfg.train.get("cross_play", False))
     )
     eval_interval = int(cfg.train.get("eval_interval", 0))
@@ -327,9 +330,7 @@ def _warm_start(
             f"number its snapshots after it. Set train.start_frames explicitly."
         )
 
-    resume_state = (
-        payload.get("optimizer") if isinstance(payload, Mapping) else None
-    )
+    resume_state = payload.get("optimizer") if isinstance(payload, Mapping) else None
     if resume_configured and resume_state is None:
         raise ValueError(
             f"train.resume_state {source} carries no optimizer state. Point it at "

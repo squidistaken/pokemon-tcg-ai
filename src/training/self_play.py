@@ -22,11 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 def build_eval_opponent_factory(
-        cfg: DictConfig,
-        obs_spec: Composite | None = None,
-        action_spec: Categorical | None = None,
-        checkpoint_dir: str | Path | None = None,
-        opponent: str | None = None,
+    cfg: DictConfig,
+    obs_spec: Composite | None = None,
+    action_spec: Categorical | None = None,
+    checkpoint_dir: str | Path | None = None,
+    opponent: str | None = None,
 ) -> OpponentFactory:
     """
     Build the fixed reference opponent the evaluator scores against.
@@ -143,11 +143,11 @@ def build_eval_opponent_factory(
 
 
 def _load_oldest_snapshot_opponent(
-        checkpoint_dir: Path,
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
-        fallback_seed: int,
+    checkpoint_dir: Path,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
+    fallback_seed: int,
 ) -> Callable[[Observation], list[int]]:
     """
     Load the oldest snapshot from ``checkpoint_dir`` as a greedy opponent.
@@ -187,10 +187,10 @@ def _load_oldest_snapshot_opponent(
 
 
 def _load_checkpoint_opponent(
-        checkpoint_path: Path,
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
+    checkpoint_path: Path,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
 ) -> Callable[[Observation], list[int]]:
     """
     Load a specific checkpoint as a greedy opponent.
@@ -213,9 +213,9 @@ def _load_checkpoint_opponent(
 
 
 def build_best_response_opponent_factory(
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
 ) -> OpponentFactory:
     """
     Build the fixed opponent for a best-response (exploitability) run.
@@ -246,12 +246,12 @@ def build_best_response_opponent_factory(
 
 
 def _checkpoint_opponent_factory(
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
-        checkpoint: Any,
-        missing_message: str,
-        not_found_prefix: str,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
+    checkpoint: Any,
+    missing_message: str,
+    not_found_prefix: str,
 ) -> OpponentFactory:
     """
     Validate a config-supplied checkpoint path and build its opponent factory.
@@ -282,10 +282,10 @@ def _checkpoint_opponent_factory(
 
 
 def _make_checkpoint_opponent(
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
-        checkpoint_path: Path,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
+    checkpoint_path: Path,
 ) -> Callable[[Observation], list[int]]:
     """
     Load a frozen snapshot as a greedy opponent (fixed eval reference or the
@@ -297,17 +297,19 @@ def _make_checkpoint_opponent(
     :param checkpoint_path: Path to a ``save_actor_critic`` snapshot.
     :return: A greedy opponent playing that snapshot on CPU.
     """
-    encoder = make_encoder(cfg.env.get("encoder", "structured"), int(cfg.env.max_options))
+    encoder = make_encoder(
+        cfg.env.get("encoder", "structured"), int(cfg.env.max_options)
+    )
     return load_greedy_opponent(
         checkpoint_path, cfg, obs_spec, action_spec, encoder, device="cpu"
     )
 
 
 def build_opponent_factory(
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
-        checkpoint_dir: str | Path,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
+    checkpoint_dir: str | Path,
 ) -> OpponentFactory | None:
     """
     Build the self-play opponent factory described by ``cfg.train``.
@@ -356,13 +358,13 @@ def build_opponent_factory(
 
 
 def _make_pool(
-        checkpoint_dir: Path,
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
-        pool_size: int,
-        seed: int,
-        sampling: str = "uniform",
+    checkpoint_dir: Path,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
+    pool_size: int,
+    seed: int,
+    sampling: str = "uniform",
 ) -> SnapshotOpponentPool:
     """
     Construct one worker's self-play league.
@@ -383,7 +385,9 @@ def _make_pool(
     # and only the pool's active member ever runs, so sharing is safe. Building
     # one per snapshot instead would allocate a fresh set of buffers per league
     # member, and would re-arm each encoder's one-shot truncation warning.
-    encoder = make_encoder(cfg.env.get("encoder", "structured"), int(cfg.env.max_options))
+    encoder = make_encoder(
+        cfg.env.get("encoder", "structured"), int(cfg.env.max_options)
+    )
     common = {
         "checkpoint_dir": checkpoint_dir,
         "load_snapshot": partial(
@@ -409,11 +413,11 @@ def _make_pool(
 
 
 def _load_snapshot(
-        checkpoint_path: Path,
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
-        encoder: ObservationEncoder,
+    checkpoint_path: Path,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
+    encoder: ObservationEncoder,
 ) -> Callable[[Observation], list[int]]:
     """
     Load one snapshot into a greedy opponent inside the calling worker.

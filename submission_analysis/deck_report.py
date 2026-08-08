@@ -37,7 +37,9 @@ class CardStat:
     @property
     def attack_utilization(self) -> float:
         """Fraction of games played in which it landed at least one attack."""
-        return self.games_attacked_with / self.games_played if self.games_played else 0.0
+        return (
+            self.games_attacked_with / self.games_played if self.games_played else 0.0
+        )
 
     @property
     def win_rate_when_played(self) -> float:
@@ -54,7 +56,7 @@ class CardStat:
     def prize_rate(self) -> float:
         """Fraction of games seen where it ended up revealed from our prizes.
 
-        A card can only be revealed from prizes by drawing it out of them, 
+        A card can only be revealed from prizes by drawing it out of them,
         which always adds it to ``cards_seen`` too, so ``games_prized <= games_seen``.
         """
         return self.games_prized / self.games_seen if self.games_seen else 0.0
@@ -188,7 +190,9 @@ class Recommendation(NamedTuple):
     text: str
 
 
-def generate_recommendations(report: DeckReport, *, min_games: int = 3) -> list[Recommendation]:
+def generate_recommendations(
+    report: DeckReport, *, min_games: int = 3
+) -> list[Recommendation]:
     """
     Turn the report's numbers into a short, prioritized list of what to check.
 
@@ -203,14 +207,26 @@ def generate_recommendations(report: DeckReport, *, min_games: int = 3) -> list[
     if losses:
         total = len(losses)
         causes = [
-            ("no Basic Pokemon in opener", sum(1 for loss in losses if loss.no_basic_pokemon)),
-            ("never landed an attack", sum(1 for loss in losses if loss.never_attacked)),
+            (
+                "no Basic Pokemon in opener",
+                sum(1 for loss in losses if loss.no_basic_pokemon),
+            ),
+            (
+                "never landed an attack",
+                sum(1 for loss in losses if loss.never_attacked),
+            ),
             ("evolution stalled", sum(1 for loss in losses if loss.evolution_stalled)),
             ("lost the KO trade", sum(1 for loss in losses if loss.ko_deficit > 0)),
-            ("lost the prize trade", sum(1 for loss in losses if loss.lost_prize_trade)),
+            (
+                "lost the prize trade",
+                sum(1 for loss in losses if loss.lost_prize_trade),
+            ),
             ("decked out", sum(1 for loss in losses if loss.decked_out)),
             ("wiped out", sum(1 for loss in losses if loss.wiped_out)),
-            ("ended by a card effect", sum(1 for loss in losses if loss.ended_by_card_effect)),
+            (
+                "ended by a card effect",
+                sum(1 for loss in losses if loss.ended_by_card_effect),
+            ),
         ]
         top_cause, top_count = max(causes, key=lambda cause: cause[1])
         if top_count and top_count / total >= 0.3:
@@ -234,7 +250,11 @@ def generate_recommendations(report: DeckReport, *, min_games: int = 3) -> list[
 
     wins_turn = report.average_first_attack_turn_wins
     losses_turn = report.average_first_attack_turn_losses
-    if wins_turn is not None and losses_turn is not None and losses_turn - wins_turn >= 2:
+    if (
+        wins_turn is not None
+        and losses_turn is not None
+        and losses_turn - wins_turn >= 2
+    ):
         notes.append(
             Recommendation(
                 "deck speed",
@@ -363,7 +383,9 @@ def generate_recommendations(report: DeckReport, *, min_games: int = 3) -> list[
             )
         )
 
-    threats = sorted(report.opponent_attack_stats, key=lambda stat: stat.kos, reverse=True)
+    threats = sorted(
+        report.opponent_attack_stats, key=lambda stat: stat.kos, reverse=True
+    )
     if threats and threats[0].kos >= min_games:
         top_threat = threats[0]
         notes.append(
@@ -502,29 +524,31 @@ def _evolution_stats(
     """
     if not decklist:
         return []
-    name_to_id = {
-        card_index.cards[card_id].name: card_id
-        for card_id in decklist
-        if card_id in card_index.cards
-    }
+    ids_by_name: dict[str, set[int]] = {}
+    for card_id in decklist:  # decklist repeats an id once per physical copy
+        card = card_index.cards.get(card_id)
+        if card is not None:
+            ids_by_name.setdefault(card.name, set()).add(card_id)
 
     stats = []
-    for card_id in set(decklist):  # decklist repeats an id once per physical copy
-        card = card_index.cards.get(card_id)
-        if card is None or not card.evolvesFrom:
+    for name, evo_ids in ids_by_name.items():
+        card = card_index.cards[min(evo_ids)]
+        if not card.evolvesFrom:
             continue
-        pre_evo_id = name_to_id.get(card.evolvesFrom)
-        if pre_evo_id is None:
+        pre_evo_ids = ids_by_name.get(card.evolvesFrom)
+        if not pre_evo_ids:
             continue
-        games_evolved = sum(1 for episode in episodes if card_id in episode.evolutions_made)
+        games_evolved = sum(
+            1 for episode in episodes if episode.evolutions_made & evo_ids
+        )
         games_pre_evo_played = sum(
-            1 for episode in episodes if pre_evo_id in episode.cards_played
+            1 for episode in episodes if episode.cards_played & pre_evo_ids
         )
         stats.append(
             EvolutionStat(
-                evo_card_id=card_id,
-                evo_name=card.name,
-                pre_evo_card_id=pre_evo_id,
+                evo_card_id=min(evo_ids),
+                evo_name=name,
+                pre_evo_card_id=min(pre_evo_ids),
                 pre_evo_name=card.evolvesFrom,
                 games_pre_evo_played=games_pre_evo_played,
                 games_evolved=games_evolved,
@@ -564,7 +588,9 @@ def _prize_value_sum(card_ids: Sequence[int], card_index: CardIndex) -> int:
 
 
 def _loss_postmortems(
-    episodes: Sequence[ParsedEpisode], evolution_card_ids: set[int], card_index: CardIndex
+    episodes: Sequence[ParsedEpisode],
+    evolution_card_ids: set[int],
+    card_index: CardIndex,
 ) -> list[LossPostmortem]:
     """
     Tag each lost episode with a quick "why did we lose" cause set.
@@ -591,7 +617,8 @@ def _loss_postmortems(
                 evolution_stalled=bool(seen_evolutions) and not played_evolutions,
                 decked_out=episode.game_end_reason == GameEndReason.DECKED_OUT,
                 wiped_out=episode.game_end_reason == GameEndReason.NO_POKEMON_LEFT,
-                ended_by_card_effect=episode.game_end_reason == GameEndReason.CARD_EFFECT,
+                ended_by_card_effect=episode.game_end_reason
+                == GameEndReason.CARD_EFFECT,
                 prize_deficit=(
                     _prize_value_sum(episode.our_kos_cards, card_index)
                     - _prize_value_sum(episode.opponent_kos_cards, card_index)
@@ -620,7 +647,9 @@ def build_report(
     losses = sum(1 for episode in episodes if episode.result == "loss")
     draws = sum(1 for episode in episodes if episode.result == "draw")
 
-    no_basic_games = [episode for episode in episodes if episode.had_basic_pokemon is not None]
+    no_basic_games = [
+        episode for episode in episodes if episode.had_basic_pokemon is not None
+    ]
     no_basic_pokemon_rate = (
         sum(1 for episode in no_basic_games if episode.had_basic_pokemon is False)
         / len(no_basic_games)
@@ -637,7 +666,9 @@ def build_report(
         for episode in episodes
     ]
     average_prize_margin = (
-        sum(prize_margin_values) / len(prize_margin_values) if prize_margin_values else 0.0
+        sum(prize_margin_values) / len(prize_margin_values)
+        if prize_margin_values
+        else 0.0
     )
 
     def _average_first_attack_turn(result: str) -> float | None:
@@ -670,7 +701,8 @@ def build_report(
             if episode.first_attack_turn is not None
         ],
         ko_margins=[
-            (episode.result, episode.opponent_kos - episode.our_kos) for episode in episodes
+            (episode.result, episode.opponent_kos - episode.our_kos)
+            for episode in episodes
         ],
         game_lengths=[
             (episode.result, episode.final_turn)
