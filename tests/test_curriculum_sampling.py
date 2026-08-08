@@ -114,7 +114,9 @@ def test_sampler_falls_back_before_the_first_publish() -> None:
     Collection starts before the first update, so an empty channel is normal.
     """
     index = make_index({"a": 2, "b": 2})
-    sampler = CurriculumDeckSampler([DECK] * 4, index, CurriculumHandles.allocate(CAPACITY), seed=0)
+    sampler = CurriculumDeckSampler(
+        [DECK] * 4, index, CurriculumHandles.allocate(CAPACITY), seed=0
+    )
 
     assert sampler.level_id == NO_LEVEL
     deck0, deck1 = sampler.sample()
@@ -302,14 +304,18 @@ def test_explore_prob_bypasses_the_published_distribution() -> None:
     handles = CurriculumHandles.allocate(CAPACITY)
     published = index.pair_id(0, 1)
     handles.publish(torch.tensor([published]), torch.tensor([1.0]))
-    sampler = CurriculumDeckSampler([DECK] * 3, index, handles, seed=0, explore_prob=1.0)
+    sampler = CurriculumDeckSampler(
+        [DECK] * 3, index, handles, seed=0, explore_prob=1.0
+    )
 
     seen = set()
     for _ in range(50):
         sampler.sample()
         seen.add(sampler.level_id)
 
-    assert seen != {published}, "explore_prob=1 must not always reproduce the published draw"
+    assert seen != {published}, (
+        "explore_prob=1 must not always reproduce the published draw"
+    )
 
 
 def test_explore_prob_zero_matches_prior_behaviour() -> None:
@@ -320,7 +326,9 @@ def test_explore_prob_zero_matches_prior_behaviour() -> None:
     handles = CurriculumHandles.allocate(CAPACITY)
     wanted = index.pair_id(0, 2)
     handles.publish(torch.tensor([wanted]), torch.tensor([1.0]))
-    sampler = CurriculumDeckSampler([DECK] * 6, index, handles, seed=0, explore_prob=0.0)
+    sampler = CurriculumDeckSampler(
+        [DECK] * 6, index, handles, seed=0, explore_prob=0.0
+    )
 
     for _ in range(20):
         sampler.sample()
@@ -371,7 +379,9 @@ def make_curriculum_env(
     :return: TransformedEnv with the ActionMask transform applied.
     """
     sampler = CurriculumDeckSampler([DECK] * 4, index, handles, seed=seed)
-    return TransformedEnv(TCGEnv(max_options=128, seed=seed, deck_sampler=sampler), ActionMask())
+    return TransformedEnv(
+        TCGEnv(max_options=128, seed=seed, deck_sampler=sampler), ActionMask()
+    )
 
 
 def test_level_updates_reach_running_parallel_workers() -> None:
@@ -537,7 +547,9 @@ def test_workers_track_a_republished_distribution_through_the_trainer_path() -> 
 
 
 @pytest.mark.parametrize("agent_seat", [0, 1])
-def test_curriculum_deals_the_agent_archetype_to_the_agents_seat(agent_seat: int) -> None:
+def test_curriculum_deals_the_agent_archetype_to_the_agents_seat(
+    agent_seat: int,
+) -> None:
     """
     ``pair_id`` is asymmetric, so ``(a, b)`` and ``(b, a)`` are different
     levels. Dealing the drawn agent archetype positionally to seat 0 hands it

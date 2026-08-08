@@ -16,6 +16,7 @@ Run from the repository root::
 Note the engine RNG is not seedable (see the docs), so exact fps varies a few
 percent run to run and is hardware dependent; the ratios are stable.
 """
+
 import argparse
 import sys
 from dataclasses import dataclass
@@ -81,7 +82,9 @@ def build_config(deck: str, num_workers: int, parallel: bool) -> DictConfig:
     )
 
 
-def run_case(case: BenchCase, deck: str, frames_per_batch: int, total_frames: int) -> float:
+def run_case(
+    case: BenchCase, deck: str, frames_per_batch: int, total_frames: int
+) -> float:
     """
     Time a single configuration and return its throughput.
 
@@ -110,9 +113,15 @@ def main() -> None:
     Run every benchmark case and print a throughput/speedup table.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--deck", default=DEFAULT_DECK, help="Deck CSV used for both seats.")
-    parser.add_argument("--total-frames", type=int, default=65536, help="Frames per timed run.")
-    parser.add_argument("--frames-per-batch", type=int, default=2048, help="Frames per collector batch.")
+    parser.add_argument(
+        "--deck", default=DEFAULT_DECK, help="Deck CSV used for both seats."
+    )
+    parser.add_argument(
+        "--total-frames", type=int, default=65536, help="Frames per timed run."
+    )
+    parser.add_argument(
+        "--frames-per-batch", type=int, default=2048, help="Frames per collector batch."
+    )
     args = parser.parse_args()
 
     results: list[tuple[BenchCase, float]] = []
@@ -122,7 +131,9 @@ def main() -> None:
         print(f"{case.label:24s} fps={fps:8.0f}")
 
     baseline_fps = results[0][1]
-    print(f"\n=== throughput ({args.total_frames} frames), speedup vs {results[0][0].label} ===")
+    print(
+        f"\n=== throughput ({args.total_frames} frames), speedup vs {results[0][0].label} ==="
+    )
     for case, fps in results:
         print(f"{case.label:24s} {fps:8.0f} fps  ({fps / baseline_fps:5.2f}x)")
 

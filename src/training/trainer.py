@@ -24,7 +24,14 @@ logger = logging.getLogger(__name__)
 # Metrics every iteration reports.
 # Anything else in a metrics mapping comes from the algorithm's _update and is
 # formatted generically.
-_CORE_METRICS = ("frames", "episodes", "win_rate", "draw_rate", "fps")
+_CORE_METRICS = (
+    "frames",
+    "episodes",
+    "win_rate",
+    "draw_rate",
+    "truncation_rate",
+    "fps",
+)
 
 #: Lowercase substrings identifying torchrl's report that a ParallelEnv worker
 #: process is gone. The engine aborts the process outright rather than raising
@@ -71,9 +78,11 @@ class _RunTotals:
     all survive untouched.
 
     :param frames: Frames collected so far *by this run*.
-    :param episodes: Episodes finished so far.
+    :param episodes: Episodes finished so far, decided or not.
     :param wins: Episodes won so far.
     :param draws: Episodes drawn so far.
+    :param truncations: Episodes cut off by the engine's selection cap, which
+        produce no result and are therefore excluded from the win/draw rates.
     :param last_eval_frames: Absolute frame count at the most recent evaluation.
     :param start_frames: Frames a warm-started run inherits from the checkpoint
         it continues, so reported counts carry on from there rather than
@@ -84,6 +93,7 @@ class _RunTotals:
     episodes: int = 0
     wins: int = 0
     draws: int = 0
+    truncations: int = 0
     last_eval_frames: int = 0
     start_frames: int = 0
 
@@ -126,7 +136,9 @@ def _deferred_interrupt() -> Generator[None, None, None]:
     finally:
         signal.signal(
             signal.SIGINT,
-            previous_handler if previous_handler is not None else signal.default_int_handler,
+            previous_handler
+            if previous_handler is not None
+            else signal.default_int_handler,
         )
 
 
@@ -145,22 +157,23 @@ class Trainer(BaseTrainer):
     _callbacks: CallbackList
 
     def __init__(
-            self,
-            env_factories: list[Callable[[], EnvBase]],
-            policy: nn.Module,
-            frames_per_batch: int,
-            total_frames: int,
-            use_parallel_env: bool = True,
-            mp_start_method: str = "fork",
-            serial_for_single: bool = True,
-            callbacks: Iterable[TrainingCallback] | None = None,
-            run_config: Mapping[str, Any] | None = None,
-            evaluator: Evaluator | MultiEvaluator | None = None,
-            eval_interval: int = 0,
-            max_collector_restarts: int = 0,
-            rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]] | None = None,
-            pipe_timeout: float | None = None,
-            start_frames: int = 0,
+        self,
+        env_factories: list[Callable[[], EnvBase]],
+        policy: nn.Module,
+        frames_per_batch: int,
+        total_frames: int,
+        use_parallel_env: bool = True,
+        mp_start_method: str = "fork",
+        serial_for_single: bool = True,
+        callbacks: Iterable[TrainingCallback] | None = None,
+        run_config: Mapping[str, Any] | None = None,
+        evaluator: Evaluator | MultiEvaluator | None = None,
+        eval_interval: int = 0,
+        max_collector_restarts: int = 0,
+        rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]]
+        | None = None,
+        pipe_timeout: float | None = None,
+        start_frames: int = 0,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -334,6 +347,7 @@ class Trainer(BaseTrainer):
                 totals.draws,
                 time.time() - start_time,
                 collected_frames=totals.frames,
+                truncations=totals.truncations,
             )
             if restarts:
                 logger.warning(
@@ -343,11 +357,11 @@ class Trainer(BaseTrainer):
         return summary
 
     def _collect(
-            self,
-            collector: Collector,
-            progress_bar: tqdm,
-            totals: _RunTotals,
-            start_time: float,
+        self,
+        collector: Collector,
+        progress_bar: tqdm,
+        totals: _RunTotals,
+        start_time: float,
     ) -> None:
         """
         Drain one collector, updating and reporting after every rollout.
@@ -368,10 +382,14 @@ class Trainer(BaseTrainer):
             batch_frames = data.numel()
             totals.frames += batch_frames
             done = cast(Tensor, data["next", "done"]).reshape(-1)
-            final_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[done]
+            terminated = cast(Tensor, data["next", "terminated"]).reshape(-1)
+            decided_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[
+                terminated
+            ]
             totals.episodes += int(done.sum())
-            totals.wins += int((final_rewards > 0).sum())
-            totals.draws += int((final_rewards == 0).sum())
+            totals.truncations += int(done.sum()) - int(terminated.sum())
+            totals.wins += int((decided_rewards > 0).sum())
+            totals.draws += int((decided_rewards == 0).sum())
 
             # Perform update step (return surrgate loss)
             losses = self._update(data)
@@ -384,6 +402,7 @@ class Trainer(BaseTrainer):
                 time.time() - start_time,
                 losses,
                 collected_frames=totals.frames,
+                truncations=totals.truncations,
             )
             progress_bar.update(batch_frames)
             self._log_progress(progress_bar, metrics)
@@ -431,8 +450,8 @@ class Trainer(BaseTrainer):
 
     @staticmethod
     def _shutdown_collector(
-            collector: Collector,
-            preexisting_pids: set[int | None] | None = None,
+        collector: Collector,
+        preexisting_pids: set[int | None] | None = None,
     ) -> None:
         """
         Tear a collector down without letting cleanup mask the original failure.
@@ -459,9 +478,7 @@ class Trainer(BaseTrainer):
             try:
                 collector.shutdown()
             except Exception:
-                logger.warning(
-                    "Collector shutdown failed; continuing.", exc_info=True
-                )
+                logger.warning("Collector shutdown failed; continuing.", exc_info=True)
             if preexisting_pids is None:
                 return
             for child in torch_mp.active_children():
@@ -489,20 +506,25 @@ class Trainer(BaseTrainer):
 
     @staticmethod
     def _metrics(
-            frames: int,
-            episodes: int,
-            wins: int,
-            draws: int,
-            elapsed: float,
-            losses: dict[str, float] | None = None,
-            collected_frames: int | None = None,
+        frames: int,
+        episodes: int,
+        wins: int,
+        draws: int,
+        elapsed: float,
+        losses: dict[str, float] | None = None,
+        collected_frames: int | None = None,
+        truncations: int = 0,
     ) -> dict[str, float]:
         """
         Build the metrics mapping for the run so far.
 
+        Win and draw rates are over *decided* episodes only. A truncated run has
+        no winner, so counting it would drag both rates toward zero by an amount
+        that says nothing about how the policy played.
+
         :param frames: Frame count as reported, spanning a warm-started run's
             inherited frames.
-        :param episodes: Total episodes finished so far.
+        :param episodes: Total episodes finished so far, decided or not.
         :param wins: Total wins so far.
         :param draws: Total draws so far.
         :param elapsed: Wall-clock seconds since training started.
@@ -510,14 +532,17 @@ class Trainer(BaseTrainer):
         :param collected_frames: Frames this process actually collected, which
             is what the throughput figure is per second *of*. None means the
             run collected everything it reports, i.e. no warm start.
+        :param truncations: Episodes that ended without a result.
         :return: Metrics keyed by :data:`_CORE_METRICS` plus any loss keys.
         """
         throughput_frames = frames if collected_frames is None else collected_frames
+        decided = max(episodes - truncations, 1)
         metrics: dict[str, float] = {
             "frames": frames,
             "episodes": episodes,
-            "win_rate": wins / max(episodes, 1),
-            "draw_rate": draws / max(episodes, 1),
+            "win_rate": wins / decided,
+            "draw_rate": draws / decided,
+            "truncation_rate": truncations / max(episodes, 1),
             # Guarded because a fast first batch can land inside the clock's
             # resolution, making elapsed 0.
             "fps": throughput_frames / max(elapsed, 1e-9),
@@ -606,8 +631,9 @@ class Trainer(BaseTrainer):
                 mp_start_method=self._mp_start_method,
                 serial_for_single=self._serial_for_single,
             )
-        return SerialEnv(num_workers=len(self._env_factories),
-                         create_env_fn=self._env_factories)
+        return SerialEnv(
+            num_workers=len(self._env_factories), create_env_fn=self._env_factories
+        )
 
     @staticmethod
     def _log_progress(progress_bar: tqdm, metrics: Mapping[str, float]) -> None:

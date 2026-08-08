@@ -197,6 +197,5 @@ class BulbapediaSource(DeckSource):
             )
         if titles and deck_count == 0:
             raise SourceFetchError(
-                f"no recognized decklist tables across {len(titles)} "
-                "Bulbapedia page(s)"
+                f"no recognized decklist tables across {len(titles)} Bulbapedia page(s)"
             )

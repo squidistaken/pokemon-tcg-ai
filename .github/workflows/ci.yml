@@ -78,6 +78,10 @@ jobs:
         # Run Ruff to catch style issues and common bug patterns.
         run: uv run ruff check .
 
+      - name: Format
+        # Fail if anything is unformatted.
+        run: uv run ruff format --check .
+
       - name: Type-check
         # Run Pyright to catch static typing errors.
         run: uv run pyright

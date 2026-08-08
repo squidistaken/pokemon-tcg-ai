@@ -121,7 +121,7 @@ def test_hash_rejects_string_ids():
     how its IDs happened to be typed.
     """
     with pytest.raises(TypeError, match="must be ints"):
-        deck_hash(["9", "10", "100"])  # type: ignore[list-item]
+        deck_hash(["9", "10", "100"])
 
 
 def test_hash_is_stable_across_processes():
@@ -209,7 +209,9 @@ def test_reordered_duplicate_is_deduplicated(tmp_path):
 
     writer = DeckWriter(str(tmp_path))
     first = writer.write(make_deck(ids, archetype="Charizard ex", event="Event A"))
-    second = writer.write(make_deck(reordered, archetype="Charizard ex", event="Event B"))
+    second = writer.write(
+        make_deck(reordered, archetype="Charizard ex", event="Event B")
+    )
 
     assert first.new_deck
     assert not second.new_deck
@@ -377,7 +379,9 @@ def test_observation_count_is_derived_from_the_observations(tmp_path):
     writer = DeckWriter(str(tmp_path))
     for i in range(3):
         writer.write(
-            make_deck(ids, **occurrence(placing=i, external_ids={"tournament_id": f"t{i}"}))
+            make_deck(
+                ids, **occurrence(placing=i, external_ids={"tournament_id": f"t{i}"})
+            )
         )
 
     raw = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
@@ -399,9 +403,15 @@ def test_bulbapedia_style_occurrences_stay_distinct(tmp_path):
         "archetype": "Abyss (TCG)",
         "url": "https://bulbapedia.bulbagarden.net/wiki/Abyss_(TCG)",
     }
-    writer.write(make_deck(ids, **common, external_ids={"page": "Abyss (TCG)", "table_index": "0"}))
+    writer.write(
+        make_deck(
+            ids, **common, external_ids={"page": "Abyss (TCG)", "table_index": "0"}
+        )
+    )
     result = writer.write(
-        make_deck(ids, **common, external_ids={"page": "Abyss (TCG)", "table_index": "1"})
+        make_deck(
+            ids, **common, external_ids={"page": "Abyss (TCG)", "table_index": "1"}
+        )
     )
 
     assert result.new_observation
@@ -410,15 +420,33 @@ def test_bulbapedia_style_occurrences_stay_distinct(tmp_path):
 
 def test_occurrence_key_ignores_the_scrape_date():
     """Scrape date is provenance, never identity — else every day looks new."""
-    a = Observation(source="s", url="u", event="e", placing=1, record="5-0-0", scraped_date="2026-01-01")
-    b = Observation(source="s", url="u", event="e", placing=1, record="5-0-0", scraped_date="2026-09-09")
+    a = Observation(
+        source="s",
+        url="u",
+        event="e",
+        placing=1,
+        record="5-0-0",
+        scraped_date="2026-01-01",
+    )
+    b = Observation(
+        source="s",
+        url="u",
+        event="e",
+        placing=1,
+        record="5-0-0",
+        scraped_date="2026-09-09",
+    )
     assert a.key() == b.key()
 
 
 def test_occurrence_key_distinguishes_placings():
     """Two players at one event are two occurrences, not one."""
-    a = Observation(source="limitless", external_ids={"tournament_id": "t", "placing": "1"})
-    b = Observation(source="limitless", external_ids={"tournament_id": "t", "placing": "2"})
+    a = Observation(
+        source="limitless", external_ids={"tournament_id": "t", "placing": "1"}
+    )
+    b = Observation(
+        source="limitless", external_ids={"tournament_id": "t", "placing": "2"}
+    )
     assert a.key() != b.key()
 
 
@@ -473,7 +501,9 @@ def test_v1_manifest_upgrades_its_single_occurrence(tmp_path):
     assert entry.observations[0].scraped_date == "2026-01-05"
     assert entry.observations[0].event_date is None
 
-    result = writer.write(make_deck(list(reversed(ids)), archetype="Charizard ex", event="New Event"))
+    result = writer.write(
+        make_deck(list(reversed(ids)), archetype="Charizard ex", event="New Event")
+    )
     assert not result.new_deck
     assert result.slug == "charizard-ex"
     assert writer.manifest.decks["charizard-ex"].observation_count == 2
@@ -684,7 +714,9 @@ def raw_from_ids(ids: list[int], index: CardIndex, **kwargs) -> RawDeck:
     return RawDeck(**fields)
 
 
-def test_pipeline_records_a_second_occurrence_instead_of_dropping_it(tmp_path, card_index):
+def test_pipeline_records_a_second_occurrence_instead_of_dropping_it(
+    tmp_path, card_index
+):
     """The full pipeline counts a repeat list as an occurrence, not a discard.
 
     The dedup check used to short-circuit ahead of the writer, so a duplicate deck
@@ -701,7 +733,9 @@ def test_pipeline_records_a_second_occurrence_instead_of_dropping_it(tmp_path, c
     # The same 60 cards, listed in a different order, from a different event.
     shuffled = ids[:]
     random.Random(3).shuffle(shuffled)
-    second = raw_from_ids(shuffled, card_index, event="Event B", external_ids={"t": "2"})
+    second = raw_from_ids(
+        shuffled, card_index, event="Event B", external_ids={"t": "2"}
+    )
     process_deck(second, card_index, writer, summary, date="2026-07-02")
 
     assert summary.written == 1  # no second file
@@ -742,7 +776,11 @@ def test_pruning_folds_observations_into_the_survivor(tmp_path):
 
     writer = DeckWriter(str(tmp_path))
     kept = writer.write(
-        make_deck(base, archetype="Gardevoir ex", **{k: v for k, v in occurrence().items() if k != "archetype"})
+        make_deck(
+            base,
+            archetype="Gardevoir ex",
+            **{k: v for k, v in occurrence().items() if k != "archetype"},
+        )
     )
     dropped = writer.write(
         make_deck(
@@ -761,7 +799,9 @@ def test_pruning_folds_observations_into_the_survivor(tmp_path):
     prune_near_duplicates(tmp_path, threshold=0.9)
 
     after = manifest_mod.load(tmp_path)
-    assert len(after.decks) == 1, "the near-duplicate cluster should collapse to one deck"
+    assert len(after.decks) == 1, (
+        "the near-duplicate cluster should collapse to one deck"
+    )
     survivor = next(iter(after.decks.values()))
     assert survivor.observation_count == 2, "the pruned deck's occurrence must survive"
     merged = [o for o in survivor.observations if o.merged_from]
@@ -787,7 +827,9 @@ def test_unique_deck_count_uses_the_same_identity_as_dedup(tmp_path):
     writer = DeckWriter(str(tmp_path))
     for ids in (base, reordered, redistributed):
         writer.write(make_deck(ids, archetype="Deck"))
-    assert len(writer.manifest.decks) == count_unique_decks([base, reordered, redistributed])
+    assert len(writer.manifest.decks) == count_unique_decks(
+        [base, reordered, redistributed]
+    )
 
 
 def test_pruning_keeps_the_schema_envelope(tmp_path):

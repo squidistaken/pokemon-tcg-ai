@@ -36,12 +36,12 @@ class SnapshotOpponentPool(OpponentPool):
     """
 
     def __init__(
-            self,
-            checkpoint_dir: str | Path,
-            load_snapshot: Callable[[Path], Callable[[Observation], list[int]]],
-            warmup_opponents: list[Callable[[Observation], list[int]]],
-            pool_size: int = 5,
-            seed: int | None = None,
+        self,
+        checkpoint_dir: str | Path,
+        load_snapshot: Callable[[Path], Callable[[Observation], list[int]]],
+        warmup_opponents: list[Callable[[Observation], list[int]]],
+        pool_size: int = 5,
+        seed: int | None = None,
     ) -> None:
         """
         :param checkpoint_dir: Directory scanned for ``*.pt`` snapshots. It need
@@ -65,7 +65,9 @@ class SnapshotOpponentPool(OpponentPool):
         self._checkpoint_dir = Path(checkpoint_dir)
         self._load_snapshot = load_snapshot
         self._warmup_opponents = list(warmup_opponents)
-        self._warmup_keys = [f"warmup:{index}" for index in range(len(warmup_opponents))]
+        self._warmup_keys = [
+            f"warmup:{index}" for index in range(len(warmup_opponents))
+        ]
         self._pool_size = pool_size
         self._loaded: dict[Path, Callable[[Observation], list[int]]] = {}
 
@@ -77,6 +79,16 @@ class SnapshotOpponentPool(OpponentPool):
         :return: Count of loaded snapshot members, excluding warmup opponents.
         """
         return len(self._loaded)
+
+    @property
+    def active_is_anchor(self) -> bool:
+        """
+        Whether the member playing this episode is a fixed reference opponent.
+
+        :return: True if the drawn member is a warmup opponent.
+        """
+        active = self.active
+        return any(member is active for member in self._warmup_opponents)
 
     def on_reset(self) -> None:
         """
@@ -98,7 +110,7 @@ class SnapshotOpponentPool(OpponentPool):
         paths = sorted(self._checkpoint_dir.glob(f"*{SNAPSHOT_SUFFIX}"))
         if not paths:
             return
-        keep = paths[-self._pool_size:] if self._pool_size else []
+        keep = paths[-self._pool_size :] if self._pool_size else []
         for path in keep:
             if path in self._loaded:
                 continue
@@ -106,7 +118,11 @@ class SnapshotOpponentPool(OpponentPool):
                 self._loaded[path] = self._load_snapshot(path)
             except Exception:
                 # Most likely the trainer is mid-write. Retried next episode.
-                logger.debug("Could not load snapshot %s yet; retrying later.", path, exc_info=True)
+                logger.debug(
+                    "Could not load snapshot %s yet; retrying later.",
+                    path,
+                    exc_info=True,
+                )
         keep_set = set(keep)
         for path in list(self._loaded):
             if path not in keep_set:

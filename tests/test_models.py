@@ -47,9 +47,7 @@ def _transformer_cfg(base: DictConfig, **backbone: object) -> DictConfig:
     :param backbone: Keys to set under ``model.backbone``.
     :return: A merged copy; the fixture is left untouched.
     """
-    return cast(
-        DictConfig, OmegaConf.merge(base, {"model": {"backbone": backbone}})
-    )
+    return cast(DictConfig, OmegaConf.merge(base, {"model": {"backbone": backbone}}))
 
 
 def _dummy_obs(structured_obs_spec: Composite, batch: int) -> TensorDict:
@@ -68,7 +66,9 @@ def _dummy_obs(structured_obs_spec: Composite, batch: int) -> TensorDict:
     :return: TensorDict with the ``observation`` groups and ``action_mask``.
     """
     obs = structured_obs_spec.zero((batch,))
-    obs[("observation", "globals")] += torch.randn(batch, obs[("observation", "globals")].shape[-1])
+    obs[("observation", "globals")] += torch.randn(
+        batch, obs[("observation", "globals")].shape[-1]
+    )
     obs[("observation", "my", "hand_ids")][:, :3] = torch.tensor([5, 9, 14])
     obs[("observation", "my", "hand_mask")][:, :3] = True
     obs[("observation", "options", "card_id")][:, :4] = 7
@@ -86,24 +86,30 @@ def test_activation_class_unknown_raises() -> None:
         activation_class("sigmoidz")
 
 
-def test_actor_critic_forward_shapes(structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_actor_critic_forward_shapes(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     A forward pass produces logits ``(B, 97)`` and a scalar value ``(B, 1)``.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     out = actor_critic(_dummy_obs(structured_obs_spec, 5))
     assert out["logits"].shape == (5, N_ACTIONS)
     assert out["state_value"].shape == (5, 1)
 
 
 def test_gradients_reach_trunk_and_both_heads(
-        structured_model_cfg, structured_obs_spec, action_spec
+    structured_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     Backprop from both outputs reaches the shared trunk (including the
     adapter's card embedding) and both heads.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     out = actor_critic(_dummy_obs(structured_obs_spec, 4))
     (out["logits"].sum() + out["state_value"].sum()).backward()
 
@@ -125,7 +131,9 @@ def test_mlp_backbone_rejects_wrong_input_count() -> None:
     """
     The MLP backbone validates that it receives one tensor per input key.
     """
-    backbone = MLPBackbone(input_dim=16, out_features=8, num_cells=[8], in_keys=["observation"])
+    backbone = MLPBackbone(
+        input_dim=16, out_features=8, num_cells=[8], in_keys=["observation"]
+    )
     with pytest.raises(ValueError, match="expected 1 inputs"):
         backbone(torch.randn(2, 16), torch.randn(2, 16))
 
@@ -150,26 +158,30 @@ def test_value_head_scalar_output() -> None:
 
 
 def test_transformer_actor_critic_forward_shapes(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     The transformer backbone slots into the same actor-critic assembly as the
     MLP backbone and produces the same output shapes.
     """
-    actor_critic = build_actor_critic(transformer_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        transformer_model_cfg, structured_obs_spec, action_spec
+    )
     out = actor_critic(_dummy_obs(structured_obs_spec, 5))
     assert out["logits"].shape == (5, N_ACTIONS)
     assert out["state_value"].shape == (5, 1)
 
 
 def test_transformer_gradients_reach_trunk_and_both_heads(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     Backprop from both outputs reaches the transformer trunk (including the
     adapter's card embedding) and both heads.
     """
-    actor_critic = build_actor_critic(transformer_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        transformer_model_cfg, structured_obs_spec, action_spec
+    )
     out = actor_critic(_dummy_obs(structured_obs_spec, 4))
     (out["logits"].sum() + out["state_value"].sum()).backward()
 
@@ -232,7 +244,7 @@ def test_transformer_rejects_unknown_pooling(structured_obs_spec) -> None:
 
 @pytest.mark.parametrize("pooling", ["mean", "cls", "attention"])
 def test_transformer_pooling_modes_produce_state_repr(
-        pooling, transformer_model_cfg, structured_obs_spec, action_spec
+    pooling, transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     Every readout mode yields the same downstream shapes (``+experiment=tf_pooling``).
@@ -245,7 +257,7 @@ def test_transformer_pooling_modes_produce_state_repr(
 
 
 def test_transformer_pre_ln_forward(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     Pre-LN plus a final LayerNorm composes and stays finite
@@ -259,7 +271,7 @@ def test_transformer_pre_ln_forward(
 
 
 def test_transformer_entity_tokens_reach_gradients(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     Expanding a group into per-entity tokens keeps output shapes and trains
@@ -285,7 +297,7 @@ def test_transformer_entity_tokens_reach_gradients(
 
 
 def test_transformer_ignores_padded_entities(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     Content in a masked-out entity slot cannot influence ``state_repr``.
@@ -311,7 +323,7 @@ def test_transformer_ignores_padded_entities(
 
 
 def test_pointer_head_scores_option_tokens(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     The pointer head consumes the backbone's per-option tokens and emits one
@@ -320,7 +332,9 @@ def test_pointer_head_scores_option_tokens(
     cfg = _transformer_cfg(transformer_model_cfg, option_tokens=True)
     cfg = cast(
         DictConfig,
-        OmegaConf.merge(cfg, {"model": {"head": {"_target_": "src.models.heads.PointerPolicyHead"}}}),
+        OmegaConf.merge(
+            cfg, {"model": {"head": {"_target_": "src.models.heads.PointerPolicyHead"}}}
+        ),
     )
     actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec)
     assert actor_critic.backbone.produces_option_repr
@@ -370,7 +384,7 @@ def test_pointer_head_rejects_slot_mismatch() -> None:
 
 
 def test_transformer_combined_arm(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     Every diagnosis change stacked, as ``+experiment=tf_combined`` runs it.
@@ -387,7 +401,9 @@ def test_transformer_combined_arm(
     )
     cfg = cast(
         DictConfig,
-        OmegaConf.merge(cfg, {"model": {"head": {"_target_": "src.models.heads.PointerPolicyHead"}}}),
+        OmegaConf.merge(
+            cfg, {"model": {"head": {"_target_": "src.models.heads.PointerPolicyHead"}}}
+        ),
     )
     actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec)
     out = actor_critic(_dummy_obs(structured_obs_spec, 4))
@@ -400,7 +416,9 @@ def test_encode_entity_tokens_shapes_and_masks(structured_obs_spec) -> None:
     """
     Entity tokens keep the padded slot count and report validity per slot.
     """
-    adapter = StructuredObsAdapter(obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS)
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS
+    )
     obs = _dummy_obs(structured_obs_spec, 2)
     inputs = [obs.get(key) for key in _STRUCTURED_IN_KEYS]
 
@@ -420,7 +438,9 @@ def test_encode_entity_tokens_rejects_scalar_groups(structured_obs_spec) -> None
     """
     ``globals`` has no entity axis; it is already one token via encode_groups.
     """
-    adapter = StructuredObsAdapter(obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS)
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS
+    )
     obs = _dummy_obs(structured_obs_spec, 2)
     inputs = [obs.get(key) for key in _STRUCTURED_IN_KEYS]
 
@@ -431,7 +451,7 @@ def test_encode_entity_tokens_rejects_scalar_groups(structured_obs_spec) -> None
 
 
 def test_pointer_head_without_structured_groups_raises(
-        pointer_model_cfg, structured_obs_spec, action_spec
+    pointer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     A pointer head over a non-structured observation is rejected.
@@ -447,7 +467,7 @@ def test_pointer_head_without_structured_groups_raises(
 
 
 def test_pointer_head_is_permutation_equivariant(
-        pointer_model_cfg, structured_obs_spec, action_spec
+    pointer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     Reordering the option rows reorders the logits to match.
@@ -457,10 +477,14 @@ def test_pointer_head_is_permutation_equivariant(
     permutation while the correct action moves, leaving slot index the only
     thing it can learn.
     """
-    actor_critic = build_actor_critic(pointer_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        pointer_model_cfg, structured_obs_spec, action_spec
+    )
     n_options = 5
     obs = _dummy_obs(structured_obs_spec, batch=1)
-    obs[("observation", "options", "card_id")][:, :n_options] = torch.arange(1, n_options + 1)
+    obs[("observation", "options", "card_id")][:, :n_options] = torch.arange(
+        1, n_options + 1
+    )
 
     original = actor_critic.policy_logits(obs)[0]
     permutation = torch.tensor([4, 1, 0, 3, 2])
@@ -472,12 +496,14 @@ def test_pointer_head_is_permutation_equivariant(
         options.set(leaf, options.get(leaf)[:, index])
     permuted = actor_critic.policy_logits(reordered)[0]
 
-    assert torch.allclose(original[:n_options][permutation], permuted[:n_options], atol=1e-5)
+    assert torch.allclose(
+        original[:n_options][permutation], permuted[:n_options], atol=1e-5
+    )
     assert torch.allclose(original[-1], permuted[-1], atol=1e-5)
 
 
 def test_flat_head_is_permutation_invariant(
-        structured_model_cfg, structured_obs_spec, action_spec
+    structured_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     The flat baseline's logits do *not* follow a permutation of the options.
@@ -485,10 +511,14 @@ def test_flat_head_is_permutation_invariant(
     Pinned deliberately: this is the defect the pointer heads exist to fix, and
     a regression here would mean the two had silently converged.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     n_options = 5
     obs = _dummy_obs(structured_obs_spec, batch=1)
-    obs[("observation", "options", "card_id")][:, :n_options] = torch.arange(1, n_options + 1)
+    obs[("observation", "options", "card_id")][:, :n_options] = torch.arange(
+        1, n_options + 1
+    )
 
     original = actor_critic.policy_logits(obs)[0]
     reordered = obs.clone()
@@ -514,7 +544,7 @@ def test_pointer_head_requires_option_tokens() -> None:
 
 
 def test_transformer_pokemon_seat_swap_changes_state_repr(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     A Pokemon's segment id encodes its seat; moving the same card from the
@@ -544,7 +574,7 @@ def test_transformer_pokemon_seat_swap_changes_state_repr(
 
 
 def test_transformer_pokemon_bench_swap_within_seat_is_invariant(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     Two bench slots on the same seat share one segment id, so swapping them
@@ -571,7 +601,7 @@ def test_transformer_pokemon_bench_swap_within_seat_is_invariant(
 
 
 def test_transformer_zone_identity_distinguishes_hand_from_discard(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     The same card in ``my.hand`` vs. ``my.discard`` gets a different zone
@@ -598,7 +628,7 @@ def test_transformer_zone_identity_distinguishes_hand_from_discard(
 
 
 def test_stop_slot_pointer_logit_differs_from_padded_slot(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     The stop slot's own segment embedding gives it a representation distinct
@@ -608,7 +638,9 @@ def test_stop_slot_pointer_logit_differs_from_padded_slot(
     cfg = _transformer_cfg(transformer_model_cfg, option_tokens=True)
     cfg = cast(
         DictConfig,
-        OmegaConf.merge(cfg, {"model": {"head": {"_target_": "src.models.heads.PointerPolicyHead"}}}),
+        OmegaConf.merge(
+            cfg, {"model": {"head": {"_target_": "src.models.heads.PointerPolicyHead"}}}
+        ),
     )
     actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec)
     actor_critic.eval()
@@ -625,7 +657,7 @@ def test_stop_slot_pointer_logit_differs_from_padded_slot(
 
 
 def test_option_repr_defaults_to_pre_attention_projection(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     ``encoded_option_repr`` defaults to False: ``option_repr`` is exactly the
@@ -639,7 +671,9 @@ def test_option_repr_defaults_to_pre_attention_projection(
     inputs = [obs.get(key) for key in _STRUCTURED_IN_KEYS]
 
     _, option_repr = backbone(*inputs)
-    option_rows, _ = backbone.adapter.encode_entity_tokens(*inputs, groups=["options"])["options"]
+    option_rows, _ = backbone.adapter.encode_entity_tokens(*inputs, groups=["options"])[
+        "options"
+    ]
     segment_ids = backbone.adapter.group_segment_ids["options"]
     expected = (
         backbone.entity_projections["options"](option_rows)
@@ -650,7 +684,7 @@ def test_option_repr_defaults_to_pre_attention_projection(
 
 
 def test_encoded_option_repr_reads_attended_tokens(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     ``encoded_option_repr=True`` scores option tokens after they pass through
@@ -659,7 +693,10 @@ def test_encoded_option_repr_reads_attended_tokens(
     """
     cheap_cfg = _transformer_cfg(transformer_model_cfg, option_tokens=True)
     encoded_cfg = _transformer_cfg(
-        transformer_model_cfg, option_tokens=True, token_groups=["options"], encoded_option_repr=True
+        transformer_model_cfg,
+        option_tokens=True,
+        token_groups=["options"],
+        encoded_option_repr=True,
     )
     cheap = build_actor_critic(cheap_cfg, structured_obs_spec, action_spec)
     encoded = build_actor_critic(encoded_cfg, structured_obs_spec, action_spec)
@@ -684,29 +721,46 @@ def test_replace_pooled_drops_token_and_parameters(structured_obs_spec) -> None:
     entry and ``token_type_embedding`` row for every name in ``token_groups``,
     keeping the parameter count honest rather than duplicating capacity.
     """
-    adapter = StructuredObsAdapter(obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS)
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS
+    )
     kept = TransformerBackbone(
-        input_dim=adapter.out_features, out_features=32, adapter=adapter, num_heads=4,
-        token_groups=["pokemon"], in_keys=_STRUCTURED_IN_KEYS,
+        input_dim=adapter.out_features,
+        out_features=32,
+        adapter=adapter,
+        num_heads=4,
+        token_groups=["pokemon"],
+        in_keys=_STRUCTURED_IN_KEYS,
     )
     dropped = TransformerBackbone(
-        input_dim=adapter.out_features, out_features=32, adapter=adapter, num_heads=4,
-        token_groups=["pokemon"], replace_pooled=True, in_keys=_STRUCTURED_IN_KEYS,
+        input_dim=adapter.out_features,
+        out_features=32,
+        adapter=adapter,
+        num_heads=4,
+        token_groups=["pokemon"],
+        replace_pooled=True,
+        in_keys=_STRUCTURED_IN_KEYS,
     )
     assert len(dropped.token_projections) == len(kept.token_projections) - 1
-    assert dropped.token_type_embedding.shape[0] == kept.token_type_embedding.shape[0] - 1
+    assert (
+        dropped.token_type_embedding.shape[0] == kept.token_type_embedding.shape[0] - 1
+    )
     assert "pokemon" not in dropped.pooled_group_names
     assert "pokemon" in kept.pooled_group_names
 
 
-def test_replace_pooled_rejects_config_that_can_be_fully_padded(structured_obs_spec) -> None:
+def test_replace_pooled_rejects_config_that_can_be_fully_padded(
+    structured_obs_spec,
+) -> None:
     """
     Dropping every pooled token via ``replace_pooled``, with no ``options``
     stop slot to backstop it, can leave a row with zero valid tokens; this is
     rejected at construction rather than emitting NaN from the encoder later.
     """
     single_group_keys = [("observation", "pokemon")]
-    adapter = StructuredObsAdapter(obs_spec=structured_obs_spec, in_keys=single_group_keys)
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=single_group_keys
+    )
     with pytest.raises(ValueError, match="zero valid tokens"):
         TransformerBackbone(
             input_dim=adapter.out_features,
@@ -729,7 +783,7 @@ def test_replace_pooled_rejects_config_that_can_be_fully_padded(structured_obs_s
     ids=["pokemon", "my", "options"],
 )
 def test_replace_pooled_finite_on_empty_observation(
-        token_groups, extra_kwargs, transformer_model_cfg, structured_obs_spec, action_spec
+    token_groups, extra_kwargs, transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     Every accepted ``replace_pooled`` configuration stays finite on a fully
@@ -737,7 +791,10 @@ def test_replace_pooled_finite_on_empty_observation(
     mechanism the construction-time check exists to prevent.
     """
     cfg = _transformer_cfg(
-        transformer_model_cfg, token_groups=token_groups, replace_pooled=True, **extra_kwargs
+        transformer_model_cfg,
+        token_groups=token_groups,
+        replace_pooled=True,
+        **extra_kwargs,
     )
     actor_critic = build_actor_critic(cfg, structured_obs_spec, action_spec)
     out = actor_critic(structured_obs_spec.zero((2,)))
@@ -749,7 +806,12 @@ def test_replace_pooled_finite_on_empty_observation(
 @pytest.mark.parametrize("replace_pooled", [False, True])
 @pytest.mark.parametrize("encoded_option_repr", [False, True])
 def test_transformer_stays_finite_across_toggle_combinations(
-        pooling, replace_pooled, encoded_option_repr, transformer_model_cfg, structured_obs_spec, action_spec
+    pooling,
+    replace_pooled,
+    encoded_option_repr,
+    transformer_model_cfg,
+    structured_obs_spec,
+    action_spec,
 ) -> None:
     """
     Every combination of ``pooling`` x ``replace_pooled`` x
@@ -782,11 +844,17 @@ def test_transformer_rejects_unknown_token_group(structured_obs_spec) -> None:
     A ``token_groups`` name absent from the adapter's registered groups
     raises at construction, not on first forward (finding 4).
     """
-    adapter = StructuredObsAdapter(obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS)
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS
+    )
     with pytest.raises(ValueError, match="not among the adapter's registered groups"):
         TransformerBackbone(
-            input_dim=adapter.out_features, out_features=32, adapter=adapter, num_heads=4,
-            token_groups=["not_a_group"], in_keys=_STRUCTURED_IN_KEYS,
+            input_dim=adapter.out_features,
+            out_features=32,
+            adapter=adapter,
+            num_heads=4,
+            token_groups=["not_a_group"],
+            in_keys=_STRUCTURED_IN_KEYS,
         )
 
 
@@ -795,11 +863,17 @@ def test_transformer_rejects_scalar_token_group(structured_obs_spec) -> None:
     ``globals``/``select_cats`` have no entity axis and are rejected from
     ``token_groups`` at construction.
     """
-    adapter = StructuredObsAdapter(obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS)
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS
+    )
     with pytest.raises(ValueError, match="no entity axis"):
         TransformerBackbone(
-            input_dim=adapter.out_features, out_features=32, adapter=adapter, num_heads=4,
-            token_groups=["globals"], in_keys=_STRUCTURED_IN_KEYS,
+            input_dim=adapter.out_features,
+            out_features=32,
+            adapter=adapter,
+            num_heads=4,
+            token_groups=["globals"],
+            in_keys=_STRUCTURED_IN_KEYS,
         )
 
 
@@ -812,25 +886,40 @@ def test_transformer_rejects_duplicate_token_group(structured_obs_spec) -> None:
     option offset would point at the last occurrence only. Both failures are
     silent, which is what makes rejecting cheaper than allowing.
     """
-    adapter = StructuredObsAdapter(obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS)
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS
+    )
     with pytest.raises(ValueError, match=r"token_groups repeats \['pokemon'\]"):
         TransformerBackbone(
-            input_dim=adapter.out_features, out_features=32, adapter=adapter, num_heads=4,
-            token_groups=["pokemon", "pokemon"], in_keys=_STRUCTURED_IN_KEYS,
+            input_dim=adapter.out_features,
+            out_features=32,
+            adapter=adapter,
+            num_heads=4,
+            token_groups=["pokemon", "pokemon"],
+            in_keys=_STRUCTURED_IN_KEYS,
         )
 
 
-def test_transformer_rejects_wasteful_option_attention_combo(structured_obs_spec) -> None:
+def test_transformer_rejects_wasteful_option_attention_combo(
+    structured_obs_spec,
+) -> None:
     """
     ``options`` in ``token_groups`` with ``option_tokens=True`` and
     ``encoded_option_repr=False`` pays for the option tokens' attention pass
     and then discards the result; rejected at construction.
     """
-    adapter = StructuredObsAdapter(obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS)
+    adapter = StructuredObsAdapter(
+        obs_spec=structured_obs_spec, in_keys=_STRUCTURED_IN_KEYS
+    )
     with pytest.raises(ValueError, match="encoded_option_repr"):
         TransformerBackbone(
-            input_dim=adapter.out_features, out_features=32, adapter=adapter, num_heads=4,
-            token_groups=["options"], option_tokens=True, in_keys=_STRUCTURED_IN_KEYS,
+            input_dim=adapter.out_features,
+            out_features=32,
+            adapter=adapter,
+            num_heads=4,
+            token_groups=["options"],
+            option_tokens=True,
+            in_keys=_STRUCTURED_IN_KEYS,
         )
 
 
@@ -838,7 +927,7 @@ def test_transformer_rejects_wasteful_option_attention_combo(structured_obs_spec
 
 
 def test_mlp_option_tokens_trains_option_projection(
-        structured_model_cfg, structured_obs_spec, action_spec
+    structured_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     ``MLPBackbone(option_tokens=True)`` pairs with the pointer head and
@@ -872,14 +961,16 @@ def test_mlp_option_tokens_trains_option_projection(
 
 
 def test_reference_arm_state_dict_loads_strictly(
-        transformer_model_cfg, structured_obs_spec, action_spec
+    transformer_model_cfg, structured_obs_spec, action_spec
 ) -> None:
     """
     A reference-arm config (``token_groups=[]``, ``option_tokens=false``)
     still loads strictly: A2-A4's new modules only appear once their flags
     are set, so the parameter set is unchanged from before this work.
     """
-    reference = build_actor_critic(transformer_model_cfg, structured_obs_spec, action_spec)
+    reference = build_actor_critic(
+        transformer_model_cfg, structured_obs_spec, action_spec
+    )
     fresh = build_actor_critic(transformer_model_cfg, structured_obs_spec, action_spec)
     fresh.load_state_dict(reference.state_dict(), strict=True)
 

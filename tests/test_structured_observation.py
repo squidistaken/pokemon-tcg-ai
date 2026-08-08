@@ -64,8 +64,10 @@ def test_zone_tables_consistent_with_state() -> None:
         assert int(obs["my", "prize_mask"].sum()) == len(my_state.prize)
         assert int(obs["opp", "prize_mask"].sum()) == len(opp_state.prize)
         expected_pokemon = (
-            len(my_state.active) + min(len(my_state.bench), 8)
-            + len(opp_state.active) + min(len(opp_state.bench), 8)
+            len(my_state.active)
+            + min(len(my_state.bench), 8)
+            + len(opp_state.active)
+            + min(len(opp_state.bench), 8)
         )
         assert int(obs["pokemon", "mask"].sum()) == expected_pokemon
 
@@ -112,8 +114,15 @@ def test_fixture_observations_match_spec() -> None:
     fixtures = torch.load(FIXTURE_DIR / "observations.pt", weights_only=False)
     env = TCGEnv(DECK, DECK)
     expected_cases = {
-        "setup", "main_select", "card_select", "multi_select_partial",
-        "deck_search", "yes_no", "attack_option", "energy_select", "terminal",
+        "setup",
+        "main_select",
+        "card_select",
+        "multi_select_partial",
+        "deck_search",
+        "yes_no",
+        "attack_option",
+        "energy_select",
+        "terminal",
     }
     assert expected_cases.issubset(set(fixtures.keys()))
     # The fixtures are the encoder handoff contract, so they carry the encoded
@@ -209,7 +218,9 @@ def test_option_rows_carry_the_target_pokemons_live_state() -> None:
                         assert bool(encoded["target_state"][right, 0])
 
                 n_options = len(select.option)
-                count = max(1, rng.randint(select.minCount, min(select.maxCount, n_options)))
+                count = max(
+                    1, rng.randint(select.minCount, min(select.maxCount, n_options))
+                )
                 observation = handle.select(rng.sample(range(n_options), count))
         finally:
             handle.finish()
@@ -237,6 +248,6 @@ def test_target_state_is_zero_when_an_option_targets_no_pokemon() -> None:
             if pokemon is None:
                 assert not encoded["target_state"][slot].any()
         # Padding rows past the option count are zero too.
-        assert not encoded["target_state"][len(select.option):].any()
+        assert not encoded["target_state"][len(select.option) :].any()
     finally:
         handle.finish()

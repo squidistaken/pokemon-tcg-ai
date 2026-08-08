@@ -153,7 +153,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Margin of error used to calculate the sample size.",
     )
     parser.add_argument(
-        "--seed", type=int, default=0, help="Random seed for deterministic deck sampling."
+        "--seed",
+        type=int,
+        default=0,
+        help="Random seed for deterministic deck sampling.",
     )
     parser.add_argument(
         "--dupe-threshold",
@@ -237,8 +240,7 @@ def _analyze_corpus(deck_dir: Path, args: argparse.Namespace) -> None:
             else f"explicit cap of {sample_size} decks"
         )
         sample_line = (
-            f"\n[bold]sample seed[/]     {args.seed}"
-            f"\n[bold]sample target[/]   {target}"
+            f"\n[bold]sample seed[/]     {args.seed}\n[bold]sample target[/]   {target}"
         )
     else:
         sample_line = ""
@@ -270,7 +272,10 @@ def _analyze_corpus(deck_dir: Path, args: argparse.Namespace) -> None:
         descriptors, _ = build_semantic_descriptors(decks, db)
         sem_sim = semantic_similarity_matrix(descriptors)
         report(
-            names, sem_sim, archetypes, args.top,
+            names,
+            sem_sim,
+            archetypes,
+            args.top,
             "Card-semantic (cosine of z-scored descriptors)",
         )
         caveat(
@@ -313,10 +318,14 @@ def _analyze_corpus(deck_dir: Path, args: argparse.Namespace) -> None:
     console.print()
     console.rule("[bold]Plots[/]")
     save_heatmap(
-        count_sim, archetypes, out_dir / "similarity_heatmap.png",
+        count_sim,
+        archetypes,
+        out_dir / "similarity_heatmap.png",
         "Weighted-Jaccard similarity",
     )
-    plot_similarity_histogram(count_sim, args.dupe_threshold, out_dir / "similarity_histogram.png")
+    plot_similarity_histogram(
+        count_sim, args.dupe_threshold, out_dir / "similarity_histogram.png"
+    )
     plot_card_inclusion(full_presence, out_dir / "card_inclusion.png")
     if all_archetypes is not None:
         plot_archetype_distribution(
@@ -325,7 +334,9 @@ def _analyze_corpus(deck_dir: Path, args: argparse.Namespace) -> None:
     if index is not None:
         plot_set_usage(all_decks, index, out_dir / "set_usage.png")
     if stats is not None and columns is not None:
-        plot_structure_distributions(stats, columns, out_dir / "structure_distributions.png")
+        plot_structure_distributions(
+            stats, columns, out_dir / "structure_distributions.png"
+        )
 
     # Report
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")  # noqa: DTZ005

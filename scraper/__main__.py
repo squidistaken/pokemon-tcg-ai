@@ -59,7 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Source: limitless | bulbapedia | text | all (default: limitless)",
     )
     p.add_argument(
-        "--limit", type=int, default=20, help="Tournaments per page / wiki pages to scan"
+        "--limit",
+        type=int,
+        default=20,
+        help="Tournaments per page / wiki pages to scan",
     )
     p.add_argument(
         "--format", dest="fmt", default="standard", help="Game format (limitless)"

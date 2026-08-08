@@ -46,14 +46,14 @@ class MLPBackbone(Backbone):
     """
 
     def __init__(
-            self,
-            input_dim: int,
-            out_features: int,
-            num_cells: list[int],
-            activation: str = "tanh",
-            in_keys: list[str] | None = None,
-            adapter: nn.Module | None = None,
-            option_tokens: bool = False,
+        self,
+        input_dim: int,
+        out_features: int,
+        num_cells: list[int],
+        activation: str = "tanh",
+        in_keys: list[str] | None = None,
+        adapter: nn.Module | None = None,
+        option_tokens: bool = False,
     ) -> None:
         """
         :param input_dim: Width of the concatenated feature vector fed to the
@@ -88,7 +88,9 @@ class MLPBackbone(Backbone):
                 f"Adapter produces {adapter.out_features} features but the MLP expects "
                 f"input_dim={input_dim}."
             )
-        adapter_emits = bool(adapter is not None and getattr(adapter, "emits_option_tokens", False))
+        adapter_emits = bool(
+            adapter is not None and getattr(adapter, "emits_option_tokens", False)
+        )
         if option_tokens and adapter_emits:
             raise ValueError(
                 "option_tokens=True and an adapter built with emit_option_tokens both "
@@ -101,7 +103,9 @@ class MLPBackbone(Backbone):
                 "tokens from; pass one, or leave option_tokens=False for the flat head."
             )
         if option_tokens:
-            group_slot_counts = cast(dict[str, int], cast(nn.Module, adapter).group_slot_counts)
+            group_slot_counts = cast(
+                dict[str, int], cast(nn.Module, adapter).group_slot_counts
+            )
             if "options" not in group_slot_counts:
                 raise ValueError(
                     "option_tokens=True needs an 'options' group registered on the adapter to "
@@ -133,7 +137,9 @@ class MLPBackbone(Backbone):
         )
         if self.option_tokens:
             self.option_projection = nn.Linear(int(entity_dim), out_features)
-            segment_ids = cast(torch.Tensor, cast(nn.Module, adapter).group_segment_ids["options"])
+            segment_ids = cast(
+                torch.Tensor, cast(nn.Module, adapter).group_segment_ids["options"]
+            )
             #: One learned vector per option segment (real slot vs. the
             #: synthetic stop slot), mirroring
             #: ``TransformerBackbone.entity_segment_embedding`` so the stop
@@ -188,16 +194,27 @@ class MLPBackbone(Backbone):
                     batch_ndim = len(value.batch_size)
                     for leaf_key in value.keys(include_nested=True, leaves_only=True):
                         leaf = value.get(leaf_key)
-                        flat_parts.append(leaf.reshape(*leaf.shape[:batch_ndim], -1).to(torch.float32))
+                        flat_parts.append(
+                            leaf.reshape(*leaf.shape[:batch_ndim], -1).to(torch.float32)
+                        )
                 else:
-                    flat_parts.append(value.reshape(*value.shape[:-1], -1).to(torch.float32))
-            features = flat_parts[0] if len(flat_parts) == 1 else torch.cat(flat_parts, dim=-1)
+                    flat_parts.append(
+                        value.reshape(*value.shape[:-1], -1).to(torch.float32)
+                    )
+            features = (
+                flat_parts[0] if len(flat_parts) == 1 else torch.cat(flat_parts, dim=-1)
+            )
             state_repr = self.mlp(features)
 
         if not self.option_tokens:
             return state_repr
         adapter = cast(nn.Module, self.adapter)
-        option_rows, _ = adapter.encode_entity_tokens(*inputs, groups=["options"])["options"]
+        option_rows, _ = adapter.encode_entity_tokens(*inputs, groups=["options"])[
+            "options"
+        ]
         segment_ids = cast(torch.Tensor, adapter.group_segment_ids["options"])
-        option_repr = self.option_projection(option_rows) + self.option_segment_embedding[segment_ids]
+        option_repr = (
+            self.option_projection(option_rows)
+            + self.option_segment_embedding[segment_ids]
+        )
         return state_repr, option_repr

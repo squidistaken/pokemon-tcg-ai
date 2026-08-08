@@ -79,23 +79,23 @@ class TransformerBackbone(Backbone):
     """
 
     def __init__(
-            self,
-            input_dim: int,
-            out_features: int,
-            adapter: nn.Module | None = None,
-            num_heads: int = 4,
-            num_layers: int = 1,
-            ff_dim: int = 256,
-            dropout: float = 0.0,
-            activation: str = "gelu",
-            norm_first: bool = False,
-            final_norm: bool = False,
-            pooling: str = "mean",
-            token_groups: Sequence[str] = (),
-            option_tokens: bool = False,
-            replace_pooled: bool = False,
-            encoded_option_repr: bool = False,
-            in_keys: list[str] | None = None,
+        self,
+        input_dim: int,
+        out_features: int,
+        adapter: nn.Module | None = None,
+        num_heads: int = 4,
+        num_layers: int = 1,
+        ff_dim: int = 256,
+        dropout: float = 0.0,
+        activation: str = "gelu",
+        norm_first: bool = False,
+        final_norm: bool = False,
+        pooling: str = "mean",
+        token_groups: Sequence[str] = (),
+        option_tokens: bool = False,
+        replace_pooled: bool = False,
+        encoded_option_repr: bool = False,
+        in_keys: list[str] | None = None,
     ) -> None:
         """
         :param input_dim: Summed width of the adapter's per-group vectors;
@@ -217,7 +217,13 @@ class TransformerBackbone(Backbone):
             # sequence twice: the readout would double-count it, and
             # `entity_offsets` (which `encoded_option_repr` slices at) records
             # only the last occurrence. Both are silent, so reject the config.
-            duplicates = sorted({name for name in self.token_groups if self.token_groups.count(name) > 1})
+            duplicates = sorted(
+                {
+                    name
+                    for name in self.token_groups
+                    if self.token_groups.count(name) > 1
+                }
+            )
             raise ValueError(
                 f"token_groups repeats {duplicates}; each group can only be expanded once. "
                 "A repeat would put that group's entity tokens into the sequence twice and "
@@ -229,7 +235,11 @@ class TransformerBackbone(Backbone):
                 "encode per-option tokens from; this adapter registered only "
                 f"{sorted(group_slot_counts)}."
             )
-        if "options" in self.token_groups and self.option_tokens and not self.encoded_option_repr:
+        if (
+            "options" in self.token_groups
+            and self.option_tokens
+            and not self.encoded_option_repr
+        ):
             raise ValueError(
                 "token_groups=[..., 'options', ...] with option_tokens=True routes every "
                 "option row through the encoder's quadratic attention and then discards the "
@@ -237,7 +247,9 @@ class TransformerBackbone(Backbone):
                 "Set encoded_option_repr=True to use the attended rows instead, or drop "
                 "'options' from token_groups to keep the cheap projection."
             )
-        if self.encoded_option_repr and not (self.option_tokens and "options" in self.token_groups):
+        if self.encoded_option_repr and not (
+            self.option_tokens and "options" in self.token_groups
+        ):
             raise ValueError(
                 "encoded_option_repr=True slices option_repr out of the encoder's output at "
                 "the 'options' tokens' offset, so it requires option_tokens=True and "
@@ -252,13 +264,17 @@ class TransformerBackbone(Backbone):
         # are byte-identical to before this flag existed: an existing
         # checkpoint's backbone.token_projections.0..9 indices keep meaning
         # what they meant, because only the *shorter*-list arms are new.
-        dropped_pooled = frozenset(self.token_groups) if self.replace_pooled else frozenset()
+        dropped_pooled = (
+            frozenset(self.token_groups) if self.replace_pooled else frozenset()
+        )
         self._dropped_pooled_groups = dropped_pooled
         #: Names of the groups still contributing one pooled ``encode_groups``
         #: token, in :attr:`token_projections`/:attr:`token_type_embedding`
         #: order. Equal to every registered group when :attr:`replace_pooled`
         #: is False.
-        self.pooled_group_names: list[str] = [name for name in group_names if name not in dropped_pooled]
+        self.pooled_group_names: list[str] = [
+            name for name in group_names if name not in dropped_pooled
+        ]
         self.token_projections = nn.ModuleList(
             [
                 nn.Linear(width, out_features)
@@ -268,7 +284,9 @@ class TransformerBackbone(Backbone):
         )
         # Learned per-group identity: attention over these tokens would
         # otherwise be permutation-invariant to which group is which.
-        self.token_type_embedding = nn.Parameter(torch.zeros(len(self.pooled_group_names), out_features))
+        self.token_type_embedding = nn.Parameter(
+            torch.zeros(len(self.pooled_group_names), out_features)
+        )
         nn.init.normal_(self.token_type_embedding, std=0.02)
 
         # A row with zero valid tokens makes nn.TransformerEncoder itself
@@ -296,17 +314,25 @@ class TransformerBackbone(Backbone):
         # accompanying type embedding keeps "an option" distinguishable from
         # "a Pokemon" after they are concatenated into one sequence.
         entity_dim = adapter.entity_dim
-        self._needs_entity_tokens = sorted(set(self.token_groups) | ({"options"} if self.option_tokens else set()))
+        self._needs_entity_tokens = sorted(
+            set(self.token_groups) | ({"options"} if self.option_tokens else set())
+        )
         if self._needs_entity_tokens and entity_dim is None:
             raise ValueError(
                 "token_groups/option_tokens need per-entity encodings, which require the "
                 "adapter to be built with entity_dim set (the default)."
             )
         self.entity_projections = nn.ModuleDict(
-            {name: nn.Linear(int(cast(int, entity_dim)), out_features) for name in self._needs_entity_tokens}
+            {
+                name: nn.Linear(int(cast(int, entity_dim)), out_features)
+                for name in self._needs_entity_tokens
+            }
         )
         self.entity_type_embedding = nn.ParameterDict(
-            {name: nn.Parameter(torch.zeros(out_features)) for name in self._needs_entity_tokens}
+            {
+                name: nn.Parameter(torch.zeros(out_features))
+                for name in self._needs_entity_tokens
+            }
         )
         for parameter in self.entity_type_embedding.values():
             nn.init.normal_(parameter, std=0.02)
@@ -320,7 +346,9 @@ class TransformerBackbone(Backbone):
         self.entity_segment_embedding = nn.ParameterDict(
             {
                 name: nn.Parameter(
-                    torch.zeros(int(adapter_segment_ids[name].max().item()) + 1, out_features)
+                    torch.zeros(
+                        int(adapter_segment_ids[name].max().item()) + 1, out_features
+                    )
                 )
                 for name in self._needs_entity_tokens
             }
@@ -376,7 +404,12 @@ class TransformerBackbone(Backbone):
             if name not in self._dropped_pooled_groups
         ]
         tokens = torch.stack(
-            [proj(vector) for proj, vector in zip(self.token_projections, kept_vectors, strict=True)],
+            [
+                proj(vector)
+                for proj, vector in zip(
+                    self.token_projections, kept_vectors, strict=True
+                )
+            ],
             dim=-2,
         )
         tokens = tokens + self.token_type_embedding
@@ -401,7 +434,9 @@ class TransformerBackbone(Backbone):
         :return: ``(*batch, n_slots, out_features)`` tokens carrying the
             group's learned type identity and each slot's segment identity.
         """
-        segment_ids = cast(dict[str, torch.Tensor], self.adapter.group_segment_ids)[name]
+        segment_ids = cast(dict[str, torch.Tensor], self.adapter.group_segment_ids)[
+            name
+        ]
         return (
             self.entity_projections[name](tokens)
             + self.entity_type_embedding[name]
@@ -448,7 +483,9 @@ class TransformerBackbone(Backbone):
             cls = self.cls_token.expand(*tokens.shape[:-2], 1, tokens.shape[-1])
             tokens = torch.cat([cls, tokens], dim=-2)
             valid = torch.cat([valid.new_ones(*valid.shape[:-1], 1), valid], dim=-1)
-            entity_offsets = {name: offset + 1 for name, offset in entity_offsets.items()}
+            entity_offsets = {
+                name: offset + 1 for name, offset in entity_offsets.items()
+            }
 
         # nn.TransformerEncoder only accepts a single leading batch dim;
         # flatten any extra ones (torchrl rollouts are often (*batch, feature)
@@ -473,12 +510,14 @@ class TransformerBackbone(Backbone):
         if self.pooling == "cls":
             pooled = encoded[:, 0, :]
         elif self.pooling == "attention":
-            scores = (encoded @ self.pool_query) / (self.out_features ** 0.5)
+            scores = (encoded @ self.pool_query) / (self.out_features**0.5)
             scores = scores.masked_fill(~flat_valid, float("-inf"))
             pooled = (scores.softmax(dim=-1).unsqueeze(-1) * encoded).sum(dim=-2)
         else:
             weights = flat_valid.to(encoded.dtype).unsqueeze(-1)
-            pooled = (encoded * weights).sum(dim=-2) / weights.sum(dim=-2).clamp(min=1.0)
+            pooled = (encoded * weights).sum(dim=-2) / weights.sum(dim=-2).clamp(
+                min=1.0
+            )
         state_repr = pooled.reshape(*batch_shape, self.out_features)
 
         if not self.option_tokens:

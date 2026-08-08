@@ -47,13 +47,13 @@ class CurriculumDeckSampler:
     """
 
     def __init__(
-            self,
-            decks: Sequence[Sequence[int]],
-            archetypes: ArchetypeIndex,
-            handles: CurriculumHandles,
-            seed: int | None = None,
-            explore_prob: float = 0.0,
-            weights: Sequence[float] | None = None,
+        self,
+        decks: Sequence[Sequence[int]],
+        archetypes: ArchetypeIndex,
+        handles: CurriculumHandles,
+        seed: int | None = None,
+        explore_prob: float = 0.0,
+        weights: Sequence[float] | None = None,
     ) -> None:
         """
         :param decks: The deck pool, indexed by the positions ``archetypes``
@@ -86,6 +86,9 @@ class CurriculumDeckSampler:
         self._archetypes = archetypes
         self._handles = handles
         self._rng = random.Random(seed)
+        self._torch_rng = torch.Generator()
+        if seed is not None:
+            self._torch_rng.manual_seed(seed)
         self._explore_prob = explore_prob
         self._weights = self._validate_weights(weights, archetypes, len(self._decks))
         self._archetype_weights = self._archetype_totals(self._weights, archetypes)
@@ -93,7 +96,7 @@ class CurriculumDeckSampler:
 
     @staticmethod
     def _archetype_totals(
-            weights: list[float] | None, archetypes: ArchetypeIndex
+        weights: list[float] | None, archetypes: ArchetypeIndex
     ) -> list[float] | None:
         """
         Sum per-deck weights into one weight per archetype.
@@ -114,9 +117,9 @@ class CurriculumDeckSampler:
 
     @staticmethod
     def _validate_weights(
-            weights: Sequence[float] | None,
-            archetypes: ArchetypeIndex,
-            pool_size: int,
+        weights: Sequence[float] | None,
+        archetypes: ArchetypeIndex,
+        pool_size: int,
     ) -> list[float] | None:
         """
         Validate and copy per-deck weights for the within-archetype draw.
@@ -204,13 +207,14 @@ class CurriculumDeckSampler:
 
     def seed(self, seed: int | None) -> None:
         """
-        Reseed the within-archetype draw.
+        Reseed the matchup draw and the within-archetype deal.
 
         :param seed: Seed value; None leaves the sampler untouched.
         """
         if seed is None:
             return
         self._rng.seed(seed)
+        self._torch_rng.manual_seed(seed)
 
     def _draw_pair(self) -> tuple[int, int]:
         """
@@ -228,7 +232,11 @@ class CurriculumDeckSampler:
         if not total > 0.0:
             slot = self._rng.randrange(size)
         else:
-            slot = self._draw_slot(probabilities, total)
+            slot = int(
+                torch.multinomial(
+                    probabilities, num_samples=1, generator=self._torch_rng
+                ).item()
+            )
         return self._archetypes.unpair(int(self._handles.pair_ids[slot].item()))
 
     def _explore_pair(self) -> tuple[int, int]:
@@ -256,28 +264,6 @@ class CurriculumDeckSampler:
             range(self._archetypes.count), weights=self._archetype_weights, k=2
         )
         return drawn[0], drawn[1]
-
-    def _draw_slot(self, probabilities: torch.Tensor, total: float) -> int:
-        """
-        Draw one buffer slot from the published distribution.
-
-        Deliberately not :func:`torch.multinomial`: that consumes torch's global
-        generator, which this sampler never seeds. Workers are forked -- the
-        curriculum requires ``mp_start_method=fork`` -- so every worker inherits
-        one torch RNG state and they would draw *the same* sequence of levels,
-        collapsing the diversity of a batch to what a single worker saw, while
-        :meth:`seed` silently failed to make any of it reproducible.
-
-        :param probabilities: Published probabilities for the held slots.
-        :param total: Their sum, already computed by the caller.
-        :return: The chosen slot.
-        """
-        cumulative = torch.cumsum(probabilities, dim=0)
-        target = torch.tensor(
-            self._rng.random() * total, dtype=cumulative.dtype
-        )
-        slot = int(torch.searchsorted(cumulative, target).item())
-        return min(slot, probabilities.numel() - 1)
 
     def _deal(self, archetype: int) -> Deck:
         """

@@ -84,8 +84,7 @@ def resolve_record_path(value: str, repo_root: Path) -> Path:
 
 @contextmanager
 def registry_lock(path: Path, *, exclusive: bool) -> Iterator[None]:
-    """Lock a sidecar file while reading or appending an append-only registry.
-    """
+    """Lock a sidecar file while reading or appending an append-only registry."""
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.parent / f".{path.name}.lock"
     with lock_path.open("a+", encoding="utf-8") as lock_file:

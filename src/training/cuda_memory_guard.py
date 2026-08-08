@@ -36,9 +36,7 @@ class CudaMemoryGuard:
         :raises ValueError: If ``fraction`` is outside ``(0, 1]``.
         """
         if fraction is not None and not 0.0 < fraction <= 1.0:
-            raise ValueError(
-                f"cuda_memory_fraction must be in (0, 1], got {fraction}."
-            )
+            raise ValueError(f"cuda_memory_fraction must be in (0, 1], got {fraction}.")
         self._device = torch.device(device)
         self._fraction = fraction
 

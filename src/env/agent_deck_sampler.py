@@ -31,12 +31,12 @@ class AgentDeckSampler:
     """
 
     def __init__(
-            self,
-            agent_deck: Sequence[int],
-            field_sampler: DeckSampler,
-            agent_label: str | None = None,
-            field_probability: float = 0.0,
-            seed: int | None = None,
+        self,
+        agent_deck: Sequence[int],
+        field_sampler: DeckSampler,
+        agent_label: str | None = None,
+        field_probability: float = 0.0,
+        seed: int | None = None,
     ) -> None:
         """
         :param agent_deck: The 60 card IDs the agent pilots.

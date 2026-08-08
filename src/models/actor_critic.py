@@ -24,10 +24,10 @@ class ActorCritic(nn.Module):
     """
 
     def __init__(
-            self,
-            backbone: Backbone,
-            policy_head: nn.Module,
-            value_head: nn.Module,
+        self,
+        backbone: Backbone,
+        policy_head: nn.Module,
+        value_head: nn.Module,
     ) -> None:
         """
         :param backbone: Shared trunk producing ``state_repr`` (and optionally

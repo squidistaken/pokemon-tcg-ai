@@ -95,12 +95,12 @@ class LevelBuffer:
     """
 
     def __init__(
-            self,
-            capacity: int,
-            score_temperature: float = 0.9,
-            staleness_coefficient: float = 0.4,
-            min_visits: int = 5,
-            seed: int | None = None,
+        self,
+        capacity: int,
+        score_temperature: float = 0.9,
+        staleness_coefficient: float = 0.4,
+        min_visits: int = 5,
+        seed: int | None = None,
     ) -> None:
         """
         :param capacity: Maximum number of matchups held at once.
@@ -209,10 +209,10 @@ class LevelBuffer:
         return victim
 
     def commit(
-            self,
-            pair_id: int,
-            mean_residual: float,
-            outcome: float | None = None,
+        self,
+        pair_id: int,
+        mean_residual: float,
+        outcome: float | None = None,
     ) -> bool:
         """
         Fold one completed episode into a matchup's statistics.
@@ -243,7 +243,9 @@ class LevelBuffer:
             return self._commit_probation(pair_id, mean_residual, outcome)
         entry = self._entries[slot]
         alpha = 1.0 / (entry.visits + 1)
-        entry.mean_residual = (1.0 - alpha) * entry.mean_residual + alpha * mean_residual
+        entry.mean_residual = (
+            1.0 - alpha
+        ) * entry.mean_residual + alpha * mean_residual
         entry.visits += 1
         entry.last_visit = self._episodes
         if outcome is not None:
@@ -254,10 +256,10 @@ class LevelBuffer:
         return True
 
     def _commit_probation(
-            self,
-            pair_id: int,
-            mean_residual: float,
-            outcome: float | None,
+        self,
+        pair_id: int,
+        mean_residual: float,
+        outcome: float | None,
     ) -> bool:
         """
         Fold an episode into a not-yet-scored level's probation record.
@@ -270,7 +272,9 @@ class LevelBuffer:
         """
         entry = self._probation.setdefault(pair_id, LevelEntry(pair_id=pair_id))
         alpha = 1.0 / (entry.visits + 1)
-        entry.mean_residual = (1.0 - alpha) * entry.mean_residual + alpha * mean_residual
+        entry.mean_residual = (
+            1.0 - alpha
+        ) * entry.mean_residual + alpha * mean_residual
         entry.visits += 1
         if outcome is not None:
             entry.wins += outcome

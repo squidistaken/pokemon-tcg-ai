@@ -52,8 +52,7 @@ def _archetype_metrics(per_archetype: dict[str, list[int]]) -> dict[str, float]:
     if not per_archetype:
         return {}
     rates = {
-        archetype: wins / scored
-        for archetype, (scored, wins) in per_archetype.items()
+        archetype: wins / scored for archetype, (scored, wins) in per_archetype.items()
     }
     values = list(rates.values())
     ordered = sorted(values)
@@ -103,14 +102,14 @@ class Evaluator:
     """
 
     def __init__(
-            self,
-            env_factory: Callable[[], EnvBase],
-            n_episodes: int = 100,
-            max_steps: int = 2000,
-            device: torch.device | str = "cpu",
-            deterministic: bool = True,
-            name: str = "eval",
-            per_archetype: bool = True,
+        self,
+        env_factory: Callable[[], EnvBase],
+        n_episodes: int = 100,
+        max_steps: int = 2000,
+        device: torch.device | str = "cpu",
+        deterministic: bool = True,
+        name: str = "eval",
+        per_archetype: bool = True,
     ) -> None:
         """
         :param env_factory: Builds the evaluation environment; called once and
@@ -183,7 +182,9 @@ class Evaluator:
         total_steps = 0
         per_archetype: dict[str, list[int]] = {}
         exploration = (
-            ExplorationType.DETERMINISTIC if self._deterministic else ExplorationType.RANDOM
+            ExplorationType.DETERMINISTIC
+            if self._deterministic
+            else ExplorationType.RANDOM
         )
         try:
             with set_exploration_type(exploration):
@@ -269,9 +270,16 @@ class Evaluator:
             steps += 1
             reward = float(tensordict["next", "reward"].reshape(-1)[-1])
             if bool(tensordict["next", "done"].reshape(-1)[-1]):
-                return reward, steps, bool(tensordict["next", "terminated"].reshape(-1)[-1])
+                return (
+                    reward,
+                    steps,
+                    bool(tensordict["next", "terminated"].reshape(-1)[-1]),
+                )
             tensordict = step_mdp(tensordict)
-        logger.warning("Evaluation episode hit the %d-step cap without terminating.", self._max_steps)
+        logger.warning(
+            "Evaluation episode hit the %d-step cap without terminating.",
+            self._max_steps,
+        )
         return reward, steps, False
 
     def close(self) -> None:

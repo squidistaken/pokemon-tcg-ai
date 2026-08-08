@@ -38,18 +38,18 @@ class WeightsAndBiases(TrainingCallback):
     """
 
     def __init__(
-            self,
-            project: str,
-            entity: str | None = None,
-            name: str | None = None,
-            group: str | None = None,
-            job_type: str | None = None,
-            tags: Sequence[str] | None = None,
-            mode: str = "online",
-            notes: str | None = None,
-            dir: str | None = None,
-            log_checkpoints: bool = True,
-            console: str = "redirect",
+        self,
+        project: str,
+        entity: str | None = None,
+        name: str | None = None,
+        group: str | None = None,
+        job_type: str | None = None,
+        tags: Sequence[str] | None = None,
+        mode: str = "online",
+        notes: str | None = None,
+        dir: str | None = None,
+        log_checkpoints: bool = True,
+        console: str = "redirect",
     ) -> None:
         """
         :param project: W&B project to log the run under.
@@ -169,21 +169,25 @@ class WeightsAndBiases(TrainingCallback):
         :param metrics: Evaluation metrics.
         """
         archetype_rates = {
-            key[len(_ARCHETYPE_PREFIX):]: value
+            key[len(_ARCHETYPE_PREFIX) :]: value
             for key, value in metrics.items()
             if key.startswith(_ARCHETYPE_PREFIX)
         }
         if archetype_rates:
             self._latest_archetype_rates = archetype_rates
         summary = {
-            key: value for key, value in metrics.items() if not key.startswith(_ARCHETYPE_PREFIX)
+            key: value
+            for key, value in metrics.items()
+            if not key.startswith(_ARCHETYPE_PREFIX)
         }
         self._log("eval", step, summary)
 
-    def log_table(self, key: str, columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
+    def log_table(
+        self, key: str, columns: Sequence[str], rows: Sequence[Sequence[Any]]
+    ) -> None:
         """
         Log a one-shot table to the run.
-        
+
         :param key: W&B key the table is logged under.
         :param columns: Column names.
         :param rows: Table rows, one sequence of cell values per row.
@@ -231,7 +235,9 @@ class WeightsAndBiases(TrainingCallback):
         """
         if self._run is None:
             return
-        self._run.log({f"{prefix}/{key}": value for key, value in metrics.items()}, step=step)
+        self._run.log(
+            {f"{prefix}/{key}": value for key, value in metrics.items()}, step=step
+        )
 
     def on_train_error(self, error: BaseException) -> None:
         """

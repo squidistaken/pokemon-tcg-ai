@@ -71,7 +71,9 @@ def test_parse_replay_records_has_basic_pokemon_for_our_side_only() -> None:
 
 
 def test_parse_replay_no_basic_pokemon_in_opener() -> None:
-    steps = [_our_step([{"type": 1, "playerIndex": OUR_INDEX, "hasBasicPokemon": False}])]
+    steps = [
+        _our_step([{"type": 1, "playerIndex": OUR_INDEX, "hasBasicPokemon": False}])
+    ]
 
     episode = _parse(steps)
 
@@ -80,8 +82,12 @@ def test_parse_replay_no_basic_pokemon_in_opener() -> None:
 
 def test_parse_replay_tracks_played_cards() -> None:
     steps = [
-        _our_step([{"type": 10, "playerIndex": OUR_INDEX, "cardId": 434, "serial": 71}]),
-        _our_step([{"type": 10, "playerIndex": OTHER_INDEX, "cardId": 999, "serial": 1}]),
+        _our_step(
+            [{"type": 10, "playerIndex": OUR_INDEX, "cardId": 434, "serial": 71}]
+        ),
+        _our_step(
+            [{"type": 10, "playerIndex": OTHER_INDEX, "cardId": 999, "serial": 1}]
+        ),
     ]
 
     episode = _parse(steps)
@@ -154,7 +160,13 @@ def test_parse_replay_attributes_damage_and_ko_to_the_attack_that_caused_them() 
     steps = [
         _our_step(
             [
-                {"type": 15, "playerIndex": OUR_INDEX, "cardId": 354, "serial": 11, "attackId": 490},
+                {
+                    "type": 15,
+                    "playerIndex": OUR_INDEX,
+                    "cardId": 354,
+                    "serial": 11,
+                    "attackId": 490,
+                },
                 {
                     "type": 16,
                     "playerIndex": OTHER_INDEX,
@@ -184,7 +196,9 @@ def test_parse_replay_attributes_damage_and_ko_to_the_attack_that_caused_them() 
     assert episode.our_kos == 0
 
 
-def test_parse_replay_attributes_damage_and_ko_of_our_pokemon_to_the_opponents_attack() -> None:
+def test_parse_replay_attributes_damage_and_ko_of_our_pokemon_to_the_opponents_attack() -> (
+    None
+):
     """Mirrors test_..._attributes_damage_and_ko_to_the_attack_that_caused_them,
     but for the opponent attacking us - the data needed to know which enemy
     cards/attacks are actually dangerous to our deck."""
@@ -227,19 +241,39 @@ def test_parse_replay_attributes_damage_and_ko_of_our_pokemon_to_the_opponents_a
     assert episode.opponent_kos == 0
 
 
-def test_parse_replay_does_not_attribute_opponent_damage_across_step_boundaries() -> None:
+def test_parse_replay_does_not_attribute_opponent_damage_across_step_boundaries() -> (
+    None
+):
     steps = [
         _our_step(
-            [{"type": 15, "playerIndex": OTHER_INDEX, "cardId": 401, "serial": 67, "attackId": 700}]
+            [
+                {
+                    "type": 15,
+                    "playerIndex": OTHER_INDEX,
+                    "cardId": 401,
+                    "serial": 67,
+                    "attackId": 700,
+                }
+            ]
         ),
         _our_step(
-            [{"type": 16, "playerIndex": OUR_INDEX, "cardId": 354, "serial": 11, "value": -100}]
+            [
+                {
+                    "type": 16,
+                    "playerIndex": OUR_INDEX,
+                    "cardId": 354,
+                    "serial": 11,
+                    "value": -100,
+                }
+            ]
         ),
     ]
 
     episode = _parse(steps)
 
-    assert episode.opponent_attacks == [AttackUsage(attack_id=700, card_id=401, damage=0)]
+    assert episode.opponent_attacks == [
+        AttackUsage(attack_id=700, card_id=401, damage=0)
+    ]
 
 
 def test_parse_replay_final_turn_tracks_the_last_observed_turn() -> None:
@@ -341,11 +375,27 @@ def test_parse_replay_records_the_turn_of_our_first_attack() -> None:
     steps = [
         _our_step([], turn=3),
         _our_step(
-            [{"type": 15, "playerIndex": OUR_INDEX, "cardId": 354, "serial": 11, "attackId": 490}],
+            [
+                {
+                    "type": 15,
+                    "playerIndex": OUR_INDEX,
+                    "cardId": 354,
+                    "serial": 11,
+                    "attackId": 490,
+                }
+            ],
             turn=5,
         ),
         _our_step(
-            [{"type": 15, "playerIndex": OUR_INDEX, "cardId": 354, "serial": 11, "attackId": 490}],
+            [
+                {
+                    "type": 15,
+                    "playerIndex": OUR_INDEX,
+                    "cardId": 354,
+                    "serial": 11,
+                    "attackId": 490,
+                }
+            ],
             turn=7,
         ),
     ]
@@ -368,7 +418,15 @@ def test_parse_replay_does_not_attribute_damage_across_step_boundaries() -> None
     entries that show up in a later, unrelated step."""
     steps = [
         _our_step(
-            [{"type": 15, "playerIndex": OUR_INDEX, "cardId": 354, "serial": 11, "attackId": 490}]
+            [
+                {
+                    "type": 15,
+                    "playerIndex": OUR_INDEX,
+                    "cardId": 354,
+                    "serial": 11,
+                    "attackId": 490,
+                }
+            ]
         ),
         _our_step(
             [
@@ -416,13 +474,40 @@ def test_parse_replay_tracks_which_of_our_pokemon_are_knocked_out() -> None:
     per-episode set - it stays comparable to cards_played (also per-episode)."""
     steps = [
         _our_step(
-            [{"type": 6, "playerIndex": OUR_INDEX, "cardId": 414, "serial": 75, "fromArea": 4, "toArea": 3}]
+            [
+                {
+                    "type": 6,
+                    "playerIndex": OUR_INDEX,
+                    "cardId": 414,
+                    "serial": 75,
+                    "fromArea": 4,
+                    "toArea": 3,
+                }
+            ]
         ),
         _our_step(
-            [{"type": 6, "playerIndex": OUR_INDEX, "cardId": 414, "serial": 12, "fromArea": 5, "toArea": 3}]
+            [
+                {
+                    "type": 6,
+                    "playerIndex": OUR_INDEX,
+                    "cardId": 414,
+                    "serial": 12,
+                    "fromArea": 5,
+                    "toArea": 3,
+                }
+            ]
         ),
         _our_step(
-            [{"type": 6, "playerIndex": OUR_INDEX, "cardId": 500, "serial": 3, "fromArea": 4, "toArea": 3}]
+            [
+                {
+                    "type": 6,
+                    "playerIndex": OUR_INDEX,
+                    "cardId": 500,
+                    "serial": 3,
+                    "fromArea": 4,
+                    "toArea": 3,
+                }
+            ]
         ),
     ]
 
@@ -438,10 +523,28 @@ def test_parse_replay_our_kos_cards_preserves_multiplicity() -> None:
     is knocked out more than once."""
     steps = [
         _our_step(
-            [{"type": 6, "playerIndex": OUR_INDEX, "cardId": 414, "serial": 75, "fromArea": 4, "toArea": 3}]
+            [
+                {
+                    "type": 6,
+                    "playerIndex": OUR_INDEX,
+                    "cardId": 414,
+                    "serial": 75,
+                    "fromArea": 4,
+                    "toArea": 3,
+                }
+            ]
         ),
         _our_step(
-            [{"type": 6, "playerIndex": OUR_INDEX, "cardId": 414, "serial": 12, "fromArea": 5, "toArea": 3}]
+            [
+                {
+                    "type": 6,
+                    "playerIndex": OUR_INDEX,
+                    "cardId": 414,
+                    "serial": 12,
+                    "fromArea": 5,
+                    "toArea": 3,
+                }
+            ]
         ),
     ]
 
@@ -453,7 +556,16 @@ def test_parse_replay_our_kos_cards_preserves_multiplicity() -> None:
 def test_parse_replay_tracks_opponent_kos_cards() -> None:
     steps = [
         _our_step(
-            [{"type": 6, "playerIndex": OTHER_INDEX, "cardId": 401, "serial": 67, "fromArea": 4, "toArea": 3}]
+            [
+                {
+                    "type": 6,
+                    "playerIndex": OTHER_INDEX,
+                    "cardId": 401,
+                    "serial": 67,
+                    "fromArea": 4,
+                    "toArea": 3,
+                }
+            ]
         )
     ]
 
