@@ -15,8 +15,12 @@ from src.training.env_factory import (
     _build_sampler_spec,
     _deck_labels,
     _deck_weights,
+    _eval_panel,
     _limit_pool_width,
+    _load_manifest_for,
+    _observation_weight,
     _record_winrate,
+    archetype_observations,
     make_env_factories,
 )
 
@@ -546,6 +550,131 @@ def test_limit_pool_width_rejects_below_one() -> None:
         _limit_pool_width([0], ["arch/a.csv"], width=0, seed=0)
 
 
+def test_eval_panel_keeps_the_most_observed_holdout_decks(tmp_path: Path) -> None:
+    """
+    The eval panel is the N most-observed held-out lists, deterministically.
+    """
+    paths = _observation_corpus(
+        tmp_path, {"rare": 1, "fringe": 3, "solid": 40, "meta": 200}
+    )
+    panel = _eval_panel(list(range(len(paths))), paths, panel_size=2)
+
+    assert [Path(paths[i]).parent.name for i in panel] == ["meta", "solid"]
+    assert _eval_panel(list(range(len(paths))), paths, panel_size=2) == panel
+
+
+def test_eval_panel_rejects_below_one(tmp_path: Path) -> None:
+    """
+    A panel of zero would leave evaluation with no opponent at all.
+    """
+    paths = _observation_corpus(tmp_path, {"a": 1, "b": 2})
+    with pytest.raises(ValueError, match="eval_panel_size"):
+        _eval_panel([0, 1], paths, panel_size=0)
+
+
+def test_eval_agent_deck_pins_eval_without_pinning_training(tmp_path: Path) -> None:
+    """
+    ``eval_agent_deck`` fixes the eval deck while training stays unpinned.
+
+    Pinning training degrades the self-play opponent; pinning eval does not,
+    since evaluation never feeds back into learning.
+    """
+    _observation_corpus(tmp_path, {"meta": 20, "fringe": 2, "rare": 1})
+    cfg = _env_cfg(
+        deck_pool=str(tmp_path),
+        deck_holdout_frac=0.0,
+        eval_agent_deck=EXAMPLE_DECK,
+    )
+    train = _build_sampler_spec(cfg, deck_split="train")
+    eval_ = _build_sampler_spec(cfg, deck_split="eval")
+
+    assert train["kind"] == "pool", "training must not be pinned"
+    assert eval_["kind"] == "agent_fixed", "eval must be pinned"
+    # Eval never mixes in a pool-drawn agent deck: the curve reads one deck.
+    assert eval_["field_probability"] == 0.0
+
+
+def test_limit_pool_width_rejects_unknown_selection() -> None:
+    """
+    An unknown selection mode is rejected rather than silently falling back.
+    """
+    with pytest.raises(ValueError, match="deck_pool_selection"):
+        _limit_pool_width([0], ["arch/a.csv"], width=1, seed=0, selection="popularity")
+
+
+def _observation_corpus(tmp_path: Path, counts: dict[str, int]) -> list[str]:
+    """
+    Fabricate a corpus of one list per archetype with a manifest.
+
+    :param tmp_path: Directory to build under.
+    :param counts: ``observation_count`` per archetype folder name.
+    :return: The deck CSV paths, in archetype-name order.
+    """
+    entries: dict[str, dict] = {}
+    paths: list[str] = []
+    for archetype, count in counts.items():
+        folder = tmp_path / archetype
+        folder.mkdir()
+        csv = folder / f"{archetype}-1.csv"
+        csv.write_text("\n".join("1" for _ in range(60)))
+        paths.append(str(csv))
+        entries[csv.stem] = {"archetype": archetype, "observation_count": count}
+    (tmp_path / "manifest.json").write_text(json.dumps({"decks": entries}))
+    return paths
+
+
+def test_limit_pool_width_keeps_the_most_observed_archetypes(tmp_path: Path) -> None:
+    """
+    The default selection keeps the ``width`` most-observed archetypes.
+    """
+    paths = _observation_corpus(
+        tmp_path, {"rare": 1, "fringe": 3, "solid": 40, "meta": 200}
+    )
+    idx = list(range(len(paths)))
+
+    kept = _limit_pool_width(idx, paths, width=2, seed=0)
+
+    assert {Path(paths[i]).parent.name for i in kept} == {"meta", "solid"}
+    # Nested as width grows, so a sweep adds archetypes rather than swapping them.
+    wider = _limit_pool_width(idx, paths, width=3, seed=0)
+    assert set(kept) < set(wider)
+
+
+def test_archetype_observations_sums_over_lists(tmp_path: Path) -> None:
+    """
+    An archetype's total is the sum of its lists' counts, not a per-list value.
+    """
+    folder = tmp_path / "meta"
+    folder.mkdir()
+    entries: dict[str, dict] = {}
+    paths: list[str] = []
+    for index, count in enumerate((5, 7, 11)):
+        csv = folder / f"meta-{index}.csv"
+        csv.write_text("\n".join("1" for _ in range(60)))
+        paths.append(str(csv))
+        entries[csv.stem] = {"archetype": "meta", "observation_count": count}
+    (tmp_path / "manifest.json").write_text(json.dumps({"decks": entries}))
+
+    assert archetype_observations(paths) == {"meta": 23.0}
+
+
+def test_random_selection_still_available(tmp_path: Path) -> None:
+    """
+    ``random`` keeps the seeded subset, for diversity sweeps.
+    """
+    paths = _observation_corpus(
+        tmp_path, {"rare": 1, "fringe": 3, "solid": 40, "meta": 200}
+    )
+    idx = list(range(len(paths)))
+
+    kept = {
+        Path(paths[i]).parent.name
+        for i in _limit_pool_width(idx, paths, width=2, seed=0, selection="random")
+    }
+    assert len(kept) == 2
+    assert kept != {"meta", "solid"}, "a random subset must not rank by observations"
+
+
 @requires_corpus
 def test_deck_pool_width_narrows_train_but_not_eval() -> None:
     """
@@ -595,6 +724,37 @@ def test_deck_weights_from_real_manifest() -> None:
     assert all(w >= 0.1 for w in weights)  # floor keeps every deck sampleable
     with pytest.raises(ValueError):
         _deck_weights(paths, "bogus")
+
+
+@requires_corpus
+def test_observation_weighting_matches_the_manifest_counts() -> None:
+    """
+    ``observation`` weighting reproduces each list's ``observation_count``.
+    """
+    paths = resolve_deck_paths(str(CORPUS_DIR))[:200]
+    manifest = _load_manifest_for(paths)
+    weights = _deck_weights(paths, "observation")
+
+    assert len(weights) == len(paths)
+    assert all(weight >= 1.0 for weight in weights)
+    for path, weight in zip(paths, weights, strict=True):
+        count = manifest.get(Path(path).stem, {}).get("observation_count")
+        expected = float(count) if isinstance(count, int) and count > 0 else 1.0
+        assert weight == expected
+    # A real corpus has a spread of counts, otherwise the scheme is a no-op.
+    assert len(set(weights)) > 1
+
+
+def test_observation_weight_falls_back_to_one() -> None:
+    """
+    A missing or nonsensical count weighs the same as a single observation.
+    """
+    assert _observation_weight(7) == 7.0
+    assert _observation_weight(1) == 1.0
+    assert _observation_weight(None) == 1.0
+    assert _observation_weight(0) == 1.0
+    assert _observation_weight(-3) == 1.0
+    assert _observation_weight("12") == 1.0
 
 
 @requires_corpus

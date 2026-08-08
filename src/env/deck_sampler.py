@@ -240,8 +240,8 @@ def build_deck_sampler(spec: dict[str, Any], seed: int | None = None) -> DeckSam
         ``{"kind": "pool", "decks": [[...], ...], "matchup": ..., "mode": ...,
         "mirror_prob": ..., "weights": [...], "labels": [...]}`` (everything
         past ``decks`` is optional), or ``{"kind": "curriculum", "decks":
-        [[...], ...], "archetypes": ..., "handles": ..., "explore_prob": ...}``
-        (``explore_prob`` optional, defaulting to 0).
+        [[...], ...], "archetypes": ..., "handles": ..., "explore_prob": ...,
+        "weights": [...]}`` (``explore_prob`` and ``weights`` optional).
     :param seed: Seed forwarded to the pool and curriculum samplers (ignored
         for fixed).
     :return: A constructed deck sampler.
@@ -261,6 +261,7 @@ def build_deck_sampler(spec: dict[str, Any], seed: int | None = None) -> DeckSam
             handles=spec["handles"],
             seed=seed,
             explore_prob=spec.get("explore_prob", 0.0),
+            weights=spec.get("weights"),
         )
     if kind == "agent_fixed":
         # Imported here rather than at module scope: the wrapper imports this
