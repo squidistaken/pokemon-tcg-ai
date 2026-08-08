@@ -308,9 +308,19 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
     :param deck_split: ``"train"`` or ``"eval"`` — which subset the sampler draws
         from when a pool is configured.
     :return: Spec dict consumed by :func:`~src.env.deck_sampler.build_deck_sampler`.
+    :raises ValueError: If ``env.agent_deck`` is set without ``env.deck_pool``,
+        which would otherwise drop the pin silently.
     """
     pool_spec = cfg.env.get("deck_pool")
     if not pool_spec:
+        if cfg.env.get("agent_deck"):
+            raise ValueError(
+                "env.agent_deck needs env.deck_pool: the pin only chooses which "
+                "deck the agent takes, and the opposing field it leaves at full "
+                "width is drawn from the pool. Without one there is no field to "
+                "draw, and env.deck0/deck1 already fix both seats. Set a deck "
+                "pool, or drop the pin and set env.deck0 instead."
+            )
         return {
             "kind": "fixed",
             "deck0": load_deck(to_absolute_path(cfg.env.deck0)),

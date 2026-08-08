@@ -713,6 +713,29 @@ def test_build_deck_sampler_wraps_a_field_spec() -> None:
     assert sampler.sample_for_seat(1) == ([2] * 60, [1] * 60)
 
 
+def test_agent_deck_without_a_deck_pool_is_rejected() -> None:
+    """
+    The pin only chooses the agent's seat; the opposing field it leaves at full
+    width comes from the pool. Without one there is nothing to pin against, and
+    the no-pool path used to return a plain fixed sampler -- dropping the pin
+    with no warning, so the run trained on env.deck0/deck1 while the config said
+    it was piloting agent_deck.
+    """
+    cfg = OmegaConf.create(
+        {
+            "seed": 0,
+            "env": {
+                "deck0": EXAMPLE_DECK,
+                "deck1": EXAMPLE_DECK,
+                "agent_deck": EXAMPLE_DECK,
+                "max_options": 8,
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="needs env.deck_pool"):
+        _build_sampler_spec(cfg, "train")
+
+
 def test_agent_deck_pin_and_curriculum_are_rejected_together() -> None:
     """
     A curriculum level is an ordered (agent, opponent) pair; pinning the agent

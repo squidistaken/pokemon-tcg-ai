@@ -621,7 +621,12 @@ def test_wandb_training_failure_publishes_traceback(
             done[-1] = True
             reward = torch.zeros(64, 1)
             yield TensorDict(
-                {"next": TensorDict({"done": done, "reward": reward}, batch_size=[64])},
+                {
+                    "next": TensorDict(
+                        {"done": done, "terminated": done.clone(), "reward": reward},
+                        batch_size=[64],
+                    )
+                },
                 batch_size=[64],
             )
 
