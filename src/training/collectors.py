@@ -510,8 +510,9 @@ def _warn_on_per_worker_cuda(
         return
     logger.warning(
         "collector.type=%s runs one policy copy per worker, so this will open %d "
-        "CUDA contexts for batch-size-1 forwards. Set agent.device=cpu for "
-        "collection-bound runs, or use collector.type=sync.",
+        "CUDA contexts for batch-size-1 forwards. Set agent.collector_device=cpu "
+        "to move collection off the GPU while the update keeps it; setting "
+        "agent.device=cpu instead would drag the update onto the CPU too.",
         kind.value,
         num_workers,
     )

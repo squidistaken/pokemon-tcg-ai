@@ -391,3 +391,41 @@ def test_multiprocess_collectors_force_fork(
     ).shutdown()
 
     assert recorded == ["fork"]
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
+def test_weight_sync_crosses_the_device_boundary() -> None:
+    """
+    A CUDA learner's weights reach worker policy copies held on CPU.
+
+    This is the configuration the throughput work recommends -- ``multi_sync``
+    with ``agent.device=cuda`` and ``agent.collector_device=cpu``, so the update
+    keeps the GPU while collection runs one CPU policy per worker instead of one
+    CUDA context per worker. It only works if the weight push moves devices on
+    the way, and the failure mode if it does not is the silent one: collection
+    continues at full speed against stale weights.
+    """
+    policy = ThresholdPolicy().to("cuda")
+    collector = build_collector(
+        CollectorKind.MULTI_SYNC,
+        env_factories=[make_counting_env, make_counting_env],
+        make_vec_env=make_counting_env,
+        policy=policy,
+        frames_per_batch=8,
+        total_frames=64,
+        collector_kwargs={"policy_device": "cpu"},
+        options=AsyncCollectorOptions(),
+    )
+    try:
+        iterator = iter(collector)
+        assert (next(iterator)["action"] == 1).all()
+
+        with torch.no_grad():
+            next(policy.parameters()).fill_(-1.0)
+        collector.update_policy_weights_()
+
+        # The batch already in flight may carry the old action; assert on the next.
+        next(iterator)
+        assert (next(iterator)["action"] == 0).all()
+    finally:
+        collector.shutdown()

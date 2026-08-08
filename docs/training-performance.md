@@ -274,9 +274,16 @@ measure it per machine rather than carrying a number over.
 
 `multi_sync` puts a policy copy in every worker process. Two consequences:
 
-- **Run it with `agent.device=cpu`.** On CUDA it opens one context per worker
-  for batch-size-1 forwards, which is the case a GPU is worst at. The trainer
-  logs a warning if you do it anyway.
+- **Keep the collection policy on CPU.** On CUDA it opens one context per
+  worker for batch-size-1 forwards, which is the case a GPU is worst at. The
+  trainer logs a warning if you do it anyway.
+
+  Do *not* do this by setting `agent.device=cpu`, which would drag the PPO
+  update onto the CPU as well and give back the 7.8x section 2 measured. The two
+  devices are separately configurable: set **`agent.device=cuda` with
+  `agent.collector_device=cpu`**, so the update keeps the GPU while collection
+  runs one CPU policy copy per worker. Weight pushes move across that boundary
+  (pinned by `tests/test_collectors.py`).
 - **Weights must be pushed to the workers after every update.** The trainer does
   this (`Trainer._collect`), and `tests/test_collectors.py` pins it. Without it
   a run collects at full speed against the weights the workers forked with and
@@ -311,20 +318,18 @@ collect with, and the conclusion above inverts.
 
 ## Recommendations
 
-1. **Set `collector.type: multi_sync`** with **`agent.device=cpu`** — the change
-   that unpegs the main process, and the fastest option on every machine tried.
-   Batches stay on-policy, so nothing else about the run has to change (§6).
+1. **Set `collector.type: multi_sync`** with **`agent.device=cuda`** and
+   **`agent.collector_device=cpu`** — the change that unpegs the main process,
+   and the fastest option on every machine tried, while the update keeps the
+   GPU. Batches stay on-policy, so nothing else about the run has to change
+   (§6).
 2. **Size `env.num_workers` to the physical core count under `multi_sync`.** The
    §1 advice to oversubscribe applies to `sync` only (§6.3).
-3. **Under `sync`, always `agent.device=cuda`** for PPO training.
-4. **Leave the curriculum on** when wanted; it is free.
+3. **Always `agent.device=cuda`** for PPO training, under every collector.
+4. **Leave the curriculum on** when wanted; it is free — but note it cannot be
+   combined with `multi_async`, which is rejected at construction (§6.4).
 5. If throughput is still binding, attack the **league opponent forward** — it is
    46% of the budget under `sync` and nothing else comes close.
-
-Recommendations 1–3 conflict on `agent.device` because they are about different
-configurations, and which wins depends on whether the update or collection is
-the constraint on the node in question. Measure both with
-`scripts/bench_throughput.py --mode profile` rather than carrying either over.
 
 At 32 workers with the league active under `sync`, a 2M-frame arm takes roughly
 **16 minutes** of training (plus evaluation), against ~22 minutes at the old
