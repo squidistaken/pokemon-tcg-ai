@@ -98,7 +98,16 @@ PY
 }
 
 # Newest curriculum dump, so a restart keeps the matchup scores it paid for.
+#
+# The directory only exists once a curriculum run has written one, so the guard
+# is load-bearing rather than defensive: `find` on a missing path exits 1, and
+# under `set -e` with `pipefail` that status propagates out of the command
+# substitution and kills the supervisor. It did, silently, on the first resume
+# of a run with `env.curriculum.enabled=false` -- after the "continuing it"
+# message and before the first attempt, so the run simply stopped with no error
+# and an exit code nobody was looking at.
 latest_curriculum() {
+  [ -d "$RUN_DIR/curriculum" ] || return 0
   find "$RUN_DIR/curriculum" -name 'curriculum_*.pt' 2>/dev/null | sort | tail -1
 }
 

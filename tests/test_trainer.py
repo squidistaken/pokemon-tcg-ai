@@ -2,7 +2,7 @@ import os
 import signal
 from multiprocessing.process import BaseProcess
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import torch
@@ -357,10 +357,13 @@ class _WorkerKillingTrainer(Trainer):
     def _collect(self, collector, progress_bar, totals, start_time) -> None:
         # ParallelEnv exposes its processes only privately and offers no public
         # accessor; an AttributeError here is the right failure if torchrl ever
-        # renames it, rather than a test that quietly kills nothing.
+        # renames it, rather than a test that quietly kills nothing. The cast is
+        # for `env` too: the trainer is typed against the narrower
+        # TrainingCollector protocol, and only the `sync` collector this test
+        # builds owns a batched environment at all.
         workers = cast(
             list[BaseProcess],
-            collector.env._workers,  # noqa: SLF001 - no public accessor
+            cast(Any, collector).env._workers,  # noqa: SLF001 - no public accessor
         )
         self.pools.append([cast(int, worker.pid) for worker in workers])
         original_update = self._update

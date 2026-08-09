@@ -1,6 +1,33 @@
 frames_per_batch: 2048
 total_frames: 16384
 
+# Which TorchRL collector runs data collection. Measured numbers per kind are in
+# docs/training-performance.md; `scripts/bench_throughput.py --mode profile` is what
+# regenerates them.
+#
+#   sync          -> one Collector over a ParallelEnv. The policy lives in this
+#                    process, every worker waits for the slowest at every step,
+#                    and the batch is fully on-policy. The historical default.
+#   multi_sync    -> one worker process per environment, each with its own copy
+#                    of the policy. Removes the per-step round trip through the
+#                    parent, which is where the main process was pegged at one
+#                    core; the learner still waits for every worker, so batches
+#                    stay on-policy.
+#   multi_async   -> as above, but the learner takes whichever rollouts are
+#                    ready and workers keep collecting through the update. Data
+#                    arrives stale, so pair it with agent.value_estimator=vtrace.
+#
+# torchrl's AsyncBatchedCollector was measured and removed: its transport maps a
+# shared-memory segment per leaf tensor per transition, so this observation
+# exhausts vm.max_map_count and it cannot collect a batch at all.
+type: sync
+
+# Rollouts stacked into one learner batch under multi_async. That collector
+# yields one worker's rollout at a time, so without this a PPO batch would be a
+# single environment's experience; stacking env.num_workers of them reproduces
+# the row count of a synchronous batch. null uses the worker count.
+workers_per_batch: null
+
 # Dead worker pools to rebuild and resume from before giving up on the run.
 #
 # The cabt engine aborts its process on rare game states rather than raising: a

@@ -105,9 +105,10 @@ src/
     inference.py                 SamplingPolicyAgent: main.py's submission agent, specs/checkpoint loading for Kaggle
     ppo_actor.py                 build_actor_critic / build_ppo_operator: assemble the ActorValueOperator from Hydra config
   training/
-    trainer.py                  Trainer: parallel rollout collection via TorchRL's Collector
+    trainer.py                  Trainer: parallel rollout collection through the configured collector
     base_trainer.py             BaseTrainer interface
-    ppo_trainer.py               PPOTrainer: Trainer subclass running GAE + ClipPPOLoss optimization
+    collectors.py                build_collector: the three TorchRL collector kinds, normalized to (rows, time) batches
+    ppo_trainer.py               PPOTrainer: Trainer subclass running GAE or V-trace + ClipPPOLoss optimization
     env_factory.py               Builds TransformedEnv instances (deck + opponent + ActionMask) for the collector
     self_play.py                 build_opponent_factory: the picklable self-play league factory handed to each env worker
     evaluator.py                 Evaluator: scores the policy against a fixed opponent (readable curve under self-play)

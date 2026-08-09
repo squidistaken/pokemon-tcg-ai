@@ -9,12 +9,19 @@ from typing import Any, cast
 import torch.multiprocessing as torch_mp
 from tensordict import TensorDict
 from torch import Tensor, nn
-from torchrl.collectors import Collector
 from torchrl.envs import EnvBase, ParallelEnv, SerialEnv
 from tqdm import tqdm
 
 from src.training.base_trainer import BaseTrainer
 from src.training.callbacks import CallbackList, TrainingCallback
+from src.training.collectors import (
+    AsyncCollectorOptions,
+    CollectorKind,
+    TrainingCollector,
+    build_collector,
+    parse_collector_kind,
+    requires_weight_sync,
+)
 from src.training.evaluator import Evaluator
 from src.training.multi_evaluator import MultiEvaluator
 from src.training.pipe_timeout import apply_pipe_timeout
@@ -174,6 +181,8 @@ class Trainer(BaseTrainer):
         | None = None,
         pipe_timeout: float | None = None,
         start_frames: int = 0,
+        collector_type: str | CollectorKind = CollectorKind.SYNC,
+        async_options: AsyncCollectorOptions | None = None,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -217,6 +226,8 @@ class Trainer(BaseTrainer):
             still means frames to collect *now*, so this only shifts what the
             run reports: metrics, snapshot filenames and evaluation intervals
             all count from here. ``0`` is a fresh run.
+        :param collector_type: Which TorchRL collector drives collection.
+        :param async_options: Settings only the asynchronous collectors read.
         """
         self._env_factories = env_factories
         self._policy = policy
@@ -233,6 +244,8 @@ class Trainer(BaseTrainer):
         self._rebuild_env_factories = rebuild_env_factories
         self._pipe_timeout = pipe_timeout
         self._start_frames = start_frames
+        self._collector_kind = parse_collector_kind(collector_type)
+        self._async_options = async_options or AsyncCollectorOptions()
         # The Collector rounds its budget up to a whole number of batches, so
         # anchoring the loop to the same rounded figure keeps the remaining
         # frames handed to a restarted Collector exactly divisible. Passing the
@@ -268,7 +281,7 @@ class Trainer(BaseTrainer):
         start_time = time.time()
         restarts = 0
         barren_restarts = 0
-        collector: Collector | None = None
+        collector: TrainingCollector | None = None
         try:
             self._callbacks.on_train_start(self._run_config)
             with tqdm(
@@ -358,7 +371,7 @@ class Trainer(BaseTrainer):
 
     def _collect(
         self,
-        collector: Collector,
+        collector: TrainingCollector,
         progress_bar: tqdm,
         totals: _RunTotals,
         start_time: float,
@@ -393,6 +406,8 @@ class Trainer(BaseTrainer):
 
             # Perform update step (return surrgate loss)
             losses = self._update(data)
+            if requires_weight_sync(self._collector_kind):
+                collector.update_policy_weights_()
 
             metrics = self._metrics(
                 totals.absolute_frames,
@@ -414,25 +429,26 @@ class Trainer(BaseTrainer):
                     totals.absolute_frames, self._evaluator.evaluate(self._policy)
                 )
 
-    def _make_collector(self, remaining_frames: int) -> Collector:
+    def _make_collector(self, remaining_frames: int) -> TrainingCollector:
         """
         Build a collector over a fresh worker pool for the frames still owed.
 
         :param remaining_frames: Frames this collector should produce, i.e. the
             run budget less what previous collectors already delivered.
-        :return: A Collector wrapping a newly built vectorized environment.
+        :return: A collector yielding ``(rows, time)`` batches, whichever kind
+            ``collector_type`` selected.
         """
-        # Opt out of torchrl's automatic policy-transform registration: env
-        # transforms are managed explicitly by the env factories, and the
-        # policies used here read "action_mask" directly without needing the
-        # InitTracker transform the collector's heuristic would append.
-        return Collector(
-            create_env_fn=self._make_vec_env(),
+        apply_pipe_timeout(self._pipe_timeout)
+        return build_collector(
+            self._collector_kind,
+            env_factories=self._env_factories,
+            make_vec_env=self._make_vec_env,
             policy=self._policy,
             frames_per_batch=self._frames_per_batch,
             total_frames=remaining_frames,
-            auto_register_policy_transforms=False,
-            **self._collector_kwargs(),
+            collector_kwargs=self._collector_kwargs(),
+            options=self._async_options,
+            mp_start_method=self._mp_start_method,
         )
 
     def _prepare_restart(self, restart_index: int) -> None:
@@ -450,7 +466,7 @@ class Trainer(BaseTrainer):
 
     @staticmethod
     def _shutdown_collector(
-        collector: Collector,
+        collector: TrainingCollector,
         preexisting_pids: set[int | None] | None = None,
     ) -> None:
         """
@@ -575,13 +591,15 @@ class Trainer(BaseTrainer):
         Run the algorithm-specific update on a collected batch.
 
         :param data: One batch of ``frames_per_batch`` transitions from the
-            Collector, as a TensorDict shaped ``(B, T)`` where ``B`` is
+            collector, as a TensorDict shaped ``(B, T)`` where ``B`` is
             ``num_workers`` and ``T`` is ``frames_per_batch // num_workers``
-            (2D: one row per vectorized worker, not flattened). Every entry
-            is one agent-side step of :class:`~src.env.tcg_env.TCGEnv` (a
-            single ``Categorical`` pick); opponent moves are played inside
-            the environment and never appear as separate entries. Layout,
-            with ``n_actions = max_options + 1``::
+            (2D: one row per vectorized worker, not flattened). Under the
+            asynchronous collectors a row is still a contiguous slice of one
+            environment's trajectory, but rows are no longer pinned to a
+            fixed worker and the batch may be slightly smaller than requested.
+            Every entry is one agent-side step of :class:`~src.env.tcg_env.TCGEnv`;
+            opponent moves are played inside the environment and never appear
+            as separate entries. Layout, with ``n_actions = max_options + 1``::
 
                 data                                    (state the policy acted on)
                 |-- "observation"   (B, T, ...)        nested   structured state, see
