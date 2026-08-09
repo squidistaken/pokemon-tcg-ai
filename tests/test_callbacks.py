@@ -566,7 +566,7 @@ def test_wandb_start_failure_creates_no_collector(
         def shutdown(self) -> None:
             self.shutdown_called = True
 
-    monkeypatch.setattr("src.training.trainer.Collector", FakeCollector)
+    monkeypatch.setattr("src.training.collectors.Collector", FakeCollector)
     monkeypatch.setitem(sys.modules, "wandb", BrokenWandbModule())
 
     trainer = make_trainer([WeightsAndBiases(project="pokemon-tcg-ai")])

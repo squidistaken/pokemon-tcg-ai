@@ -8,6 +8,7 @@ from .callbacks import (
     TrainStateCallback,
     WeightsAndBiases,
 )
+from .collectors import AsyncCollectorOptions, CollectorKind
 from .cuda_memory_guard import CudaMemoryGuard
 from .curriculum import Curriculum, build_curriculum
 from .env_factory import build_probe_specs, make_env, make_env_factories
@@ -22,8 +23,10 @@ from .self_play import (
 from .trainer import Trainer
 
 __all__ = [
+    "AsyncCollectorOptions",
     "BaseTrainer",
     "CallbackList",
+    "CollectorKind",
     "CrossPlayCallback",
     "CudaMemoryGuard",
     "Curriculum",

@@ -14,11 +14,17 @@ from torchrl.data import Categorical
 from torchrl.envs import EnvBase
 from torchrl.modules import ActorValueOperator
 from torchrl.objectives import ClipPPOLoss
-from torchrl.objectives.value import GAE
+from torchrl.objectives.value import GAE, ValueEstimatorBase, VTrace
 
 from src.models.actor_critic import ActorCritic
 from src.policies.ppo_actor import build_ppo_operator
 from src.training.callbacks import TrainingCallback, TrainStateCallback
+from src.training.collectors import (
+    AsyncCollectorOptions,
+    CollectorKind,
+    is_off_policy,
+    parse_collector_kind,
+)
 from src.training.curriculum import Curriculum
 from src.training.evaluator import Evaluator
 from src.training.loss._helpers import _sum_loss_keys
@@ -50,6 +56,55 @@ _LOGGED_DIAGNOSTICS = (
     "kl_approx",
     "explained_variance",
 )
+
+#: Advantage estimators the trainer can be configured with.
+#: ``gae`` assumes the batch came from a single behaviour policy, which is what
+#: ``collector.type=sync`` guarantees. ``vtrace`` does not: it recomputes the
+#: log-probs of the collected actions under the *current* policy and clips the
+#: resulting importance ratios, so a batch collected while the weights moved
+#: underneath it is corrected rather than trusted.
+_VALUE_ESTIMATORS = ("gae", "vtrace")
+
+
+def _reject_unstable_curriculum_rows(
+    collector_type: str | CollectorKind, curriculum: Curriculum | None
+) -> None:
+    """
+    Refuse the one collector/curriculum pairing that silently misattributes scores.
+
+    :class:`~src.training.curriculum.Curriculum` accumulates a residual per
+    *collector row* and commits it when that row reports ``done``, which assumes
+    row ``r`` of the next batch continues the same environment's episode as row
+    ``r`` of this one. ``sync`` and ``multi_sync`` honour that, since both stack
+    workers in a fixed order.
+
+    ``multi_async`` cannot. It yields whichever worker finished first, so rows
+    are in completion order and their identity shuffles between batches; a
+    half-finished episode's residuals would be committed under whichever *other*
+    environment's episode landed in that row next, scoring one matchup with
+    another matchup's evidence. TorchRL's ``traj_ids`` cannot repair this either
+    -- it identifies a trajectory, not a worker, and changes as soon as an
+    episode ends.
+
+    That is a silent scientific error rather than a crash, and the combination
+    buys nothing (``multi_sync`` measured faster anyway), so it is rejected
+    outright instead of warned about.
+
+    :param collector_type: Configured collector kind.
+    :param curriculum: The curriculum, if one is active.
+    :raises ValueError: If a curriculum is paired with ``multi_async``.
+    """
+    if curriculum is None:
+        return
+    if parse_collector_kind(collector_type) is not CollectorKind.MULTI_ASYNC:
+        return
+    raise ValueError(
+        "collector.type=multi_async cannot be combined with the level curriculum: "
+        "it yields rollouts in completion order, so the curriculum's per-row "
+        "episode accounting would attribute one matchup's residuals to another. "
+        "Use collector.type=multi_sync (faster in every measurement anyway), or "
+        "disable the curriculum with env.curriculum.enabled=false."
+    )
 
 
 class PPOTrainer(Trainer):
@@ -89,11 +144,15 @@ class PPOTrainer(Trainer):
         lmbda: float = 0.95,
         average_gae: bool = True,
         gae_num_chunks: int | None = None,
+        value_estimator: str = "gae",
+        vtrace_rho_thresh: float = 1.0,
+        vtrace_c_thresh: float = 1.0,
         lr: float = 3.0e-4,
         num_epochs: int = 4,
         sub_batch_size: int = 256,
         max_grad_norm: float = 1.0,
         device: torch.device | str = "cpu",
+        collector_device: torch.device | str | None = None,
         use_parallel_env: bool = True,
         mp_start_method: str = "fork",
         serial_for_single: bool = True,
@@ -116,6 +175,8 @@ class PPOTrainer(Trainer):
         | None = None,
         pipe_timeout: float | None = None,
         start_frames: int = 0,
+        collector_type: str | CollectorKind = CollectorKind.SYNC,
+        async_options: AsyncCollectorOptions | None = None,
         train_state_path: str | Path | None = None,
         train_state_interval: int = 0,
         resume_state: Mapping[str, Any] | None = None,
@@ -147,11 +208,33 @@ class PPOTrainer(Trainer):
             ``frames_per_batch`` 16384. Chunking is exact: worker rows are
             independent trajectories and GAE reduces along time, so the values
             are concatenated back unchanged.
+        :param value_estimator: Advantage estimator, one of
+            :data:`_VALUE_ESTIMATORS`. ``gae`` is the on-policy default and is
+            correct only when the whole batch came from one behaviour policy.
+            ``vtrace`` recomputes the collected actions' log-probs under the
+            current policy and clips the resulting importance ratios, which is
+            what makes an asynchronously collected -- and therefore stale --
+            batch usable. It costs one extra actor pass per batch and ignores
+            ``lmbda``, which V-trace has no equivalent of.
+        :param vtrace_rho_thresh: V-trace's rho-bar, the ceiling on the
+            importance ratio in the temporal-difference term. It sets which
+            policy's value function the critic converges to: at ``1.0`` (the
+            IMPALA default) that is the behaviour policy's, and raising it moves
+            the target toward the current policy at the cost of variance.
+        :param vtrace_c_thresh: V-trace's c-bar, the ceiling on the ratio inside
+            the trace. It controls how far a correction propagates back in time,
+            and so the variance of the estimate, without moving the fixed point.
         :param lr: Adam learning rate (the annealing start value).
         :param num_epochs: Optimization epochs over each collected batch.
         :param sub_batch_size: Minibatch size for the inner epoch loop.
         :param max_grad_norm: Global gradient-norm clipping threshold.
         :param device: Device for optimization tensors.
+        :param collector_device: Device the *collection* policy runs on.
+            ``None`` follows ``device``, which is the historical behaviour and
+            right for ``collector.type=sync``. Set it to ``cpu`` alongside
+            ``device=cuda`` under the multiprocess collectors, which would
+            otherwise put a CUDA context in every worker process to run
+            batch-size-1 forwards.
         :param use_parallel_env: Use ParallelEnv instead of SerialEnv.
         :param mp_start_method: Multiprocessing start method for ParallelEnv.
         :param serial_for_single: Fall back to a single-process env for one worker.
@@ -200,6 +283,12 @@ class PPOTrainer(Trainer):
         :param start_frames: Frames inherited from a warm-start checkpoint,
             forwarded to :class:`~src.training.trainer.Trainer`. Reporting only;
             ``total_frames`` still counts the frames this run collects.
+        :param collector_type: Collector kind, forwarded to
+            :class:`~src.training.trainer.Trainer`. Anything other than ``sync``
+            collects off-policy to some degree, which is what
+            ``value_estimator="vtrace"`` corrects for.
+        :param async_options: Asynchronous-collector settings, forwarded to
+            :class:`~src.training.trainer.Trainer`.
         :param train_state_path: Rolling file the optimizer state is written to,
             so an interrupted run can be continued without restarting Adam's
             moments. None writes no training state.
@@ -211,6 +300,7 @@ class PPOTrainer(Trainer):
         """
         self._actor_critic = actor_critic
         self._curriculum = curriculum
+        _reject_unstable_curriculum_rows(collector_type, curriculum)
 
         self._operator = cast(
             ActorValueOperator,
@@ -253,8 +343,13 @@ class PPOTrainer(Trainer):
             rebuild_env_factories=rebuild_env_factories,
             pipe_timeout=pipe_timeout,
             start_frames=start_frames,
+            collector_type=collector_type,
+            async_options=async_options,
         )
         self._device = torch.device(device)
+        self._collector_device = (
+            self._device if collector_device is None else torch.device(collector_device)
+        )
         self._num_epochs = num_epochs
         self._sub_batch_size = min(sub_batch_size, frames_per_batch)
         self._max_grad_norm = max_grad_norm
@@ -263,12 +358,24 @@ class PPOTrainer(Trainer):
         self._reward_scaling = reward_scaling
         self._compile_policy = compile_policy
 
-        self._advantage = GAE(
+        self._value_estimator_name = value_estimator
+        if is_off_policy(self._collector_kind) and value_estimator == "gae":
+            logger.warning(
+                "collector.type=%s keeps collecting through the update, but "
+                "agent.value_estimator=gae assumes every action in a batch came from "
+                "the weights currently loaded. The importance ratios PPO clips will "
+                "be biased by however far the policy moved during collection; "
+                "agent.value_estimator=vtrace is what corrects that.",
+                self._collector_kind.value,
+            )
+        self._advantage = self._build_advantage(
+            value_estimator=value_estimator,
             gamma=gamma,
             lmbda=lmbda,
-            value_network=self._operator.get_value_operator(),
             average_gae=average_gae,
             num_chunks=gae_num_chunks,
+            rho_thresh=vtrace_rho_thresh,
+            c_thresh=vtrace_c_thresh,
         )
         self._loss = ClipPPOLoss(
             actor_network=cast(
@@ -340,7 +447,7 @@ class PPOTrainer(Trainer):
             "PPOTrainer initialized: device=%s frames_per_batch=%d total_frames=%d "
             "num_epochs=%d sub_batch_size=%d lr=%g gamma=%g lmbda=%g clip_epsilon=%g "
             "entropy_bonus=%s entropy_coeff=%g target_kl=%s use_amp=%s lr_anneal=%s "
-            "ent_anneal=%s",
+            "ent_anneal=%s collector=%s value_estimator=%s",
             self._device,
             frames_per_batch,
             total_frames,
@@ -356,6 +463,8 @@ class PPOTrainer(Trainer):
             use_amp,
             lr_anneal,
             ent_anneal,
+            self._collector_kind.value,
+            value_estimator,
         )
 
     @property
@@ -367,6 +476,72 @@ class PPOTrainer(Trainer):
         """
         return self._actor_critic
 
+    def _build_advantage(
+        self,
+        *,
+        value_estimator: str,
+        gamma: float,
+        lmbda: float,
+        average_gae: bool,
+        num_chunks: int | None,
+        rho_thresh: float,
+        c_thresh: float,
+    ) -> ValueEstimatorBase:
+        """
+        Build the configured advantage estimator over the shared value operator.
+
+        Both estimators are constructed against fresh views of the same
+        shared-trunk operator, exactly as the loss module is, so nothing is
+        duplicated and the critic they read is the one being optimized. V-trace
+        additionally takes the actor, because correcting for off-policy drift
+        means re-evaluating the collected actions under the current policy --
+        which is precisely what GAE has no way to do.
+
+        :param value_estimator: Name from :data:`_VALUE_ESTIMATORS`.
+        :param gamma: Discount factor.
+        :param lmbda: Trace-decay factor; GAE only.
+        :param average_gae: Standardize the advantages over the batch.
+        :param num_chunks: Chunks for the critic pass along the worker dimension.
+        :param rho_thresh: V-trace rho-bar.
+        :param c_thresh: V-trace c-bar.
+        :return: The estimator, called once per collected batch in
+            :meth:`_update`.
+        :raises ValueError: If ``value_estimator`` is not a known name.
+        """
+        if value_estimator == "gae":
+            return GAE(
+                gamma=gamma,
+                lmbda=lmbda,
+                value_network=self._operator.get_value_operator(),
+                average_gae=average_gae,
+                num_chunks=num_chunks,
+            )
+        if value_estimator == "vtrace":
+            logger.info(
+                "Using V-trace (rho_thresh=%g, c_thresh=%g); agent.lmbda=%g is "
+                "unused, V-trace has no trace-decay parameter.",
+                rho_thresh,
+                c_thresh,
+                lmbda,
+            )
+            return VTrace(
+                gamma=gamma,
+                actor_network=cast(
+                    ProbabilisticTensorDictSequential,
+                    self._operator.get_policy_operator(),
+                ),
+                value_network=self._operator.get_value_operator(),
+                rho_thresh=rho_thresh,
+                c_thresh=c_thresh,
+                average_adv=average_gae,
+                num_chunks=num_chunks,
+            )
+        known = ", ".join(_VALUE_ESTIMATORS)
+        raise ValueError(
+            f"Unknown agent.value_estimator '{value_estimator}'; expected one of: "
+            f"{known}."
+        )
+
     def _collector_kwargs(self) -> dict:
         """
         Collector kwargs for the (possibly GPU-resident) policy.
@@ -377,9 +552,17 @@ class PPOTrainer(Trainer):
         straight into a CUDA policy and errors on the first mismatched
         buffer. The env stays on CPU regardless (``env_device`` unset).
 
-        :return: Mapping splatted into the ``Collector(...)`` construction.
+        This is deliberately *not* pinned to :attr:`_device`. Under
+        ``collector.type=multi_sync`` the two want opposite answers: collection
+        runs a policy copy inside every worker, which must stay on CPU or open
+        one CUDA context per worker for batch-size-1 forwards, while the update
+        is a large batched pass that CUDA is worth ~7.8x on
+        (``docs/training-performance.md`` section 2). ``agent.collector_device``
+        is what lets a run have both.
+
+        :return: Mapping splatted into the collector construction.
         """
-        kwargs: dict = {"policy_device": self._device}
+        kwargs: dict = {"policy_device": self._collector_device}
         if self._compile_policy:
             kwargs["compile_policy"] = True
         return kwargs
@@ -462,7 +645,9 @@ class PPOTrainer(Trainer):
         self._maybe_anneal()
         data = data.to(self._device)
 
-        # GAE once per batch (not per epoch): the more common PPO formulation.
+        # Advantages once per batch (not per epoch): the more common PPO
+        # formulation. Under V-trace this is also the only point at which the
+        # collected actions are re-scored against the current policy.
         with torch.no_grad():
             self._advantage(data)
             # Before the reshape: the curriculum attributes residuals to
