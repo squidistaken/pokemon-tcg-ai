@@ -395,10 +395,6 @@ def _async_collector_options(cfg: DictConfig) -> AsyncCollectorOptions:
     """
     workers_per_batch = cfg.collector.get("workers_per_batch")
     return AsyncCollectorOptions(
-        max_batch_size=int(cfg.collector.get("max_batch_size", 64)),
-        min_batch_size=int(cfg.collector.get("min_batch_size", 1)),
-        server_timeout=float(cfg.collector.get("server_timeout", 0.01)),
-        env_backend=str(cfg.collector.get("env_backend", "multiprocessing")),
         workers_per_batch=(
             None if workers_per_batch is None else int(workers_per_batch)
         ),

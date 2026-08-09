@@ -489,7 +489,7 @@ def test_curriculum_with_multi_async_is_rejected(
         )
 
 
-@pytest.mark.parametrize("collector_type", ["sync", "multi_sync", "async_batched"])
+@pytest.mark.parametrize("collector_type", ["sync", "multi_sync"])
 def test_curriculum_allowed_with_row_stable_collectors(
     structured_model_cfg, structured_obs_spec, action_spec, collector_type: str
 ) -> None:

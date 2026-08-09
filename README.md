@@ -107,7 +107,7 @@ src/
   training/
     trainer.py                  Trainer: parallel rollout collection through the configured collector
     base_trainer.py             BaseTrainer interface
-    collectors.py                build_collector: the four TorchRL collector kinds, normalized to (rows, time) batches
+    collectors.py                build_collector: the three TorchRL collector kinds, normalized to (rows, time) batches
     ppo_trainer.py               PPOTrainer: Trainer subclass running GAE or V-trace + ClipPPOLoss optimization
     env_factory.py               Builds TransformedEnv instances (deck + opponent + ActionMask) for the collector
     self_play.py                 build_opponent_factory: the picklable self-play league factory handed to each env worker

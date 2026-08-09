@@ -16,9 +16,10 @@ total_frames: 16384
 #   multi_async   -> as above, but the learner takes whichever rollouts are
 #                    ready and workers keep collecting through the update. Data
 #                    arrives stale, so pair it with agent.value_estimator=vtrace.
-#   async_batched -> one policy copy behind an in-process inference server, no
-#                    barrier. Adds a second IPC hop per step and measured far
-#                    slower here; kept selectable so that stays a measurement.
+#
+# torchrl's AsyncBatchedCollector was measured and removed: its transport maps a
+# shared-memory segment per leaf tensor per transition, so this observation
+# exhausts vm.max_map_count and it cannot collect a batch at all.
 type: sync
 
 # Rollouts stacked into one learner batch under multi_async. That collector
@@ -26,18 +27,6 @@ type: sync
 # single environment's experience; stacking env.num_workers of them reproduces
 # the row count of a synchronous batch. null uses the worker count.
 workers_per_batch: null
-
-# async_batched only. The inference server batches whatever observations have
-# arrived, up to max_batch_size, waiting up to server_timeout seconds for
-# min_batch_size of them. max_batch_size below env.num_workers means the server
-# can never serve every environment in one forward pass.
-max_batch_size: 64
-min_batch_size: 1
-server_timeout: 0.01
-# How async_batched's AsyncEnvPool runs environments. `multiprocessing` gives
-# each its own process as the other kinds do; `threading` keeps them here, where
-# the encoder contends for the GIL.
-env_backend: multiprocessing
 
 # Dead worker pools to rebuild and resume from before giving up on the run.
 #

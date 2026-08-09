@@ -2,7 +2,7 @@ from itertools import pairwise
 
 import pytest
 import torch
-from tensordict import TensorDict, lazy_stack
+from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torch import nn
 from torchrl.data import Bounded, Categorical, Composite, Unbounded
@@ -11,8 +11,6 @@ from torchrl.envs import EnvBase
 from src.training.collectors import (
     AsyncCollectorOptions,
     CollectorKind,
-    _EnvStreamAssembler,
-    _explain_mapping_exhaustion,
     _WorkerRolloutAssembler,
     build_collector,
     is_off_policy,
@@ -27,7 +25,7 @@ class CountingEnv(EnvBase):
 
     Stands in for :class:`~src.env.tcg_env.TCGEnv` wherever a test is about the
     collector wiring rather than about the game: it is cheap enough to run under
-    four collectors in a unit test, and its observation is a step counter, so a
+    every collector in a unit test, and its observation is a step counter, so a
     row of collected data can be checked for being a real contiguous trajectory
     rather than assumed to be one.
 
@@ -116,26 +114,6 @@ def make_counting_env() -> EnvBase:
     return CountingEnv()
 
 
-def make_transition(env_index: int, step: int) -> TensorDict:
-    """
-    Build one transition as the async collector would hand it over.
-
-    :param env_index: Environment the transition came from.
-    :param step: Step counter, used to check ordering survives regrouping.
-    :return: A batch-size-``[]`` transition tensordict.
-    """
-    return TensorDict(
-        {
-            "observation": torch.full((1,), float(step)),
-            "env_index": env_index,
-            "next": TensorDict(
-                {"observation": torch.full((1,), float(step + 1))}, batch_size=[]
-            ),
-        },
-        batch_size=[],
-    )
-
-
 def test_parse_collector_kind_accepts_every_kind() -> None:
     """
     Every documented name resolves, so the config keys are not aspirational.
@@ -158,13 +136,10 @@ def test_weight_sync_and_off_policy_classification() -> None:
 
     ``multi_sync`` runs a policy copy per worker (so it needs weight pushes) but
     its workers idle through the update (so its batches stay on-policy).
-    ``async_batched`` is the mirror image: one in-process policy, no push
-    needed, yet collection overlaps the update.
+    ``multi_async`` needs both; ``sync`` needs neither.
     """
     assert requires_weight_sync(CollectorKind.MULTI_SYNC)
     assert not is_off_policy(CollectorKind.MULTI_SYNC)
-    assert not requires_weight_sync(CollectorKind.ASYNC_BATCHED)
-    assert is_off_policy(CollectorKind.ASYNC_BATCHED)
     assert not requires_weight_sync(CollectorKind.SYNC)
     assert not is_off_policy(CollectorKind.SYNC)
     assert requires_weight_sync(CollectorKind.MULTI_ASYNC)
@@ -188,84 +163,6 @@ def test_worker_rollout_assembler_stacks_rows() -> None:
     assert tuple(batch.shape) == (3, 4)
     for index in range(3):
         assert torch.equal(batch["observation"][index], torch.arange(4.0) + 10 * index)
-
-
-def test_env_stream_assembler_separates_interleaved_environments() -> None:
-    """
-    Interleaved transitions are regrouped into one contiguous row per environment.
-
-    This is the property everything downstream depends on: a row handed to GAE
-    must be one environment's consecutive steps. Feeding the flat batch straight
-    through would put env 0's step 1 next to env 1's step 0 and call the pair a
-    trajectory.
-    """
-    assembler = _EnvStreamAssembler(num_envs=2)
-    interleaved = lazy_stack(
-        [
-            make_transition(0, 0),
-            make_transition(1, 0),
-            make_transition(1, 1),
-            make_transition(0, 1),
-        ]
-    )
-
-    batch = assembler(interleaved)
-
-    assert batch is not None
-    assert tuple(batch.shape) == (2, 2)
-    assert torch.equal(batch["observation"][0].reshape(-1), torch.tensor([0.0, 1.0]))
-    assert torch.equal(batch["observation"][1].reshape(-1), torch.tensor([0.0, 1.0]))
-    # The index only exists to make the split possible; carrying a non-tensor
-    # entry into the update would break the reshape/permutation the epoch loop does.
-    assert "env_index" not in list(batch.keys())
-
-
-def test_env_stream_assembler_carries_the_remainder() -> None:
-    """
-    A faster environment's surplus leads its next row rather than being dropped.
-
-    The batch is rectangular, so its width is what the *slowest* environment can
-    supply; the difference has to survive to the next batch, and it has to
-    survive in order, or the fast environment's row silently skips steps.
-    """
-    assembler = _EnvStreamAssembler(num_envs=2)
-    first = lazy_stack(
-        [make_transition(0, 0), make_transition(0, 1), make_transition(1, 0)]
-    )
-
-    batch = assembler(first)
-    assert batch is not None
-    assert tuple(batch.shape) == (2, 1)
-
-    second = lazy_stack([make_transition(1, 1), make_transition(1, 2)])
-    batch = assembler(second)
-
-    assert batch is not None
-    assert tuple(batch.shape) == (2, 1)
-    # Env 0's step 1 was buffered by the first call, not discarded.
-    assert torch.equal(batch["observation"][0].reshape(-1), torch.tensor([1.0]))
-    assert torch.equal(batch["observation"][1].reshape(-1), torch.tensor([1.0]))
-
-
-def test_env_stream_assembler_waits_for_a_silent_environment() -> None:
-    """
-    No batch is emitted while an environment has contributed nothing.
-
-    Emitting one would mean either a ragged batch or a row invented for the
-    missing environment.
-    """
-    assembler = _EnvStreamAssembler(num_envs=2)
-    assert assembler(lazy_stack([make_transition(0, 0)])) is None
-
-
-def test_env_stream_assembler_requires_the_environment_index() -> None:
-    """
-    Without the index the batch cannot be split, and that is an error, not a
-    reason to guess.
-    """
-    assembler = _EnvStreamAssembler(num_envs=1)
-    with pytest.raises(KeyError, match="env_index"):
-        assembler(TensorDict({"observation": torch.zeros(2, 1)}, batch_size=[2]))
 
 
 @pytest.mark.parametrize(
@@ -456,22 +353,3 @@ def test_cuda_collection_policy_is_rejected_under_fork(kind: CollectorKind) -> N
             options=AsyncCollectorOptions(),
             mp_start_method="fork",
         )
-
-
-def test_mapping_exhaustion_is_recognized_through_the_cause_chain() -> None:
-    """
-    The mmap-limit failure is named, and unrelated RuntimeErrors are left alone.
-
-    torchrl reports it as a generic "worker thread raised an exception" with the
-    real cause chained underneath, so matching only the outermost message would
-    miss it and matching too loosely would relabel every collector failure.
-    """
-    root = RuntimeError("unable to mmap 124 bytes from file <>: Cannot allocate memory")
-    wrapped = RuntimeError("A collector worker thread raised an exception.")
-    wrapped.__cause__ = root
-    explanation = _explain_mapping_exhaustion(wrapped)
-    assert explanation is not None
-    assert "vm.max_map_count" in explanation
-    assert "multi_sync" in explanation
-
-    assert _explain_mapping_exhaustion(RuntimeError("worker 6 died")) is None

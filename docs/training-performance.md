@@ -268,7 +268,7 @@ End to end, 49152 frames, `agent.device=cuda`, league populated, eval off:
 | `multi_sync` | cpu | 12 | 402 | 1.60x |
 | `multi_async` (GAE) | cpu | 16 | 404 | 1.61x |
 | `multi_async` (V-trace) | cpu | 16 | 402 | 1.60x |
-| `async_batched` | cpu | 16 | does not collect a batch (§6.6) | |
+| `async_batched` | cpu | 16 | does not collect a batch (§6.6) | removed |
 
 **`multi_sync` is the answer.** Giving every worker its own copy of the policy
 parallelises the one thing that was serialized. The main process drops from 99%
@@ -328,8 +328,8 @@ It puts a policy copy in every worker process. Two consequences:
 `multi_sync` is compatible with the level curriculum; `multi_async` is not. The
 curriculum accumulates a residual per collector row and commits it when that row
 reports `done`, which assumes row `r` of the next batch continues the same
-environment as row `r` of this one. `sync`, `multi_sync` and `async_batched` all
-honour that. `multi_async` yields rollouts in completion order and does not, so
+environment as row `r` of this one. `sync` and `multi_sync` both honour that.
+`multi_async` yields rollouts in completion order and does not, so
 `PPOTrainer` rejects that pairing at construction rather than silently scoring
 one matchup with another matchup's evidence.
 
@@ -356,11 +356,13 @@ The batched environments every other kind uses allocate one shared tensordict
 at startup and write into it in place, so they never map per step and never hit
 this. It is a property of that transport, not of asynchrony.
 
-The kind stays selectable so the result can be re-measured (raising
-`vm.max_map_count` may be enough to make it run), but the failure is now
-recognised and reported with its cause, and is deliberately *not* treated as
-worker death, so it fails immediately instead of spending the restart budget
-reproducing a deterministic error.
+**The kind was removed after this measurement.** `CollectorKind.ASYNC_BATCHED`,
+its stream assembler, its four `conf/collector/default.yaml` settings
+(`max_batch_size`, `min_batch_size`, `server_timeout`, `env_backend`) and the
+mmap-failure recognizer are gone, since a kind that cannot collect a batch is
+not a configuration anyone should be able to select. This section is the record
+of why. Raising `vm.max_map_count` may be enough to make `AsyncBatchedCollector`
+run; re-adding it means reverting that removal and re-measuring.
 
 ### 6.7 Worker count: measure it, do not carry a number over
 
@@ -436,8 +438,8 @@ path is used as given, so the league can be pre-populated.
 3. **Always `agent.device=cuda`** for the update, under every collector.
 4. **Leave the curriculum on** when wanted; it is free. It cannot be combined
    with `multi_async`, which is rejected at construction (§6.5).
-5. **Do not use `multi_async` or `async_batched`.** The first ties `multi_sync`
-   while costing on-policy batches; the second does not run (§6.6).
+5. **Do not use `multi_async`.** It ties `multi_sync` while costing on-policy
+   batches. `async_batched` does not run and has been removed (§6.6).
 6. If throughput is still binding, attack **the PPO update**, which is 56% of
    the loop after this change, and the **league opponent forward**, which
    section 3 measured at 46% of collection.

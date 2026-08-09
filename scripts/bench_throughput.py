@@ -117,12 +117,6 @@ DEFAULT_CASES: list[BenchCase] = [
         parallel=True,
         collector=CollectorKind.MULTI_ASYNC,
     ),
-    BenchCase(
-        "AsyncBatched(16)",
-        num_workers=16,
-        parallel=True,
-        collector=CollectorKind.ASYNC_BATCHED,
-    ),
 ]
 
 

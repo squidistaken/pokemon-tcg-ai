@@ -1,10 +1,9 @@
 """
 Collector construction and batch-layout normalization.
 
-TorchRL ships four collectors that differ along two independent axes (how many
-copies of the policy exist, and whether the learner waits for every environment
-at every step ) and they do not agree on the shape of the batch they hand
-back.
+The collectors used here differ along two independent axes (how many copies of
+the policy exist, and whether the learner waits for every environment at every
+step) and they do not agree on the shape of the batch they hand back.
 
 ======================  ==================  ==================  ================
 kind                    policy copies       learner waits?      raw batch shape
@@ -12,12 +11,17 @@ kind                    policy copies       learner waits?      raw batch shape
 ``sync``                1, in the parent    yes, for all envs   ``(N, T)``
 ``multi_sync``          one per worker      yes, for all envs   ``(N, T)``
 ``multi_async``         one per worker      no                  ``(T,)``
-``async_batched``       1, in the parent    no                  ``(F,)``
 ======================  ==================  ==================  ================
+
+TorchRL's ``AsyncBatchedCollector`` is deliberately absent: its transport maps a
+fresh shared-memory segment per leaf tensor per transition, and this
+environment's ~288-tensor observation exhausts Linux's ``vm.max_map_count``
+within a few hundred steps, so it cannot collect a batch at all
+(``docs/training-performance.md`` section 6.6).
 """
 
 import logging
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
@@ -28,14 +32,10 @@ from tensordict import (
     TensorDictBase,
 )
 from tensordict import (
-    cat as cat_tensordicts,
-)
-from tensordict import (
     stack as stack_tensordicts,
 )
 from torch import nn
 from torchrl.collectors import (
-    AsyncBatchedCollector,
     BaseCollector,
     Collector,
     MultiAsyncCollector,
@@ -44,12 +44,6 @@ from torchrl.collectors import (
 from torchrl.envs import EnvBase
 
 logger = logging.getLogger(__name__)
-
-_ENV_INDEX_KEY = "env_index"
-
-#: How far one environment's pending backlog may exceed the shortest before the
-#: imbalance is reported.
-_BACKLOG_IMBALANCE_FACTOR = 8
 
 
 class CollectorKind(StrEnum):
@@ -70,18 +64,11 @@ class CollectorKind(StrEnum):
         others keep collecting through the update. Data is stale by up to a few
         updates, which is what V-trace exists to correct (see
         ``agent.value_estimator``).
-    :cvar ASYNC_BATCHED: :class:`~torchrl.collectors.AsyncBatchedCollector`.
-        One policy copy, in the parent, behind an inference server that batches
-        whatever observations have arrived; no barrier. Measured far slower than
-        the alternatives on this environment (see
-        ``docs/training-performance.md``) because it adds a second IPC hop per
-        step, but wired up so that can be re-measured rather than assumed.
     """
 
     SYNC = "sync"
     MULTI_SYNC = "multi_sync"
     MULTI_ASYNC = "multi_async"
-    ASYNC_BATCHED = "async_batched"
 
 
 def parse_collector_kind(value: str | CollectorKind) -> CollectorKind:
@@ -90,7 +77,7 @@ def parse_collector_kind(value: str | CollectorKind) -> CollectorKind:
 
     :param value: Value of ``collector.type``.
     :return: The matching :class:`CollectorKind`.
-    :raises ValueError: If the name is not one of the four kinds. Raised rather
+    :raises ValueError: If the name is not one of the known kinds. Raised rather
         than defaulted, because falling back to ``sync`` would silently run a
         throughput experiment against the very baseline it is measuring.
     """
@@ -108,28 +95,11 @@ class AsyncCollectorOptions:
     """
     Knobs that only the asynchronous collectors read.
 
-    :param max_batch_size: ``async_batched`` only: the largest number of
-        observations the inference server folds into one forward pass. Below the
-        environment count the server can never batch every environment at once.
-    :param min_batch_size: ``async_batched`` only: observations the server
-        waits for before dispatching, bounded by ``server_timeout``. ``1``
-        dispatches immediately, trading GPU batching for latency.
-    :param server_timeout: ``async_batched`` only: seconds the inference
-        server waits for more work before running a partial batch.
-    :param env_backend: ``async_batched`` only: how the
-        :class:`~torchrl.envs.AsyncEnvPool` runs environments.
-        ``multiprocessing`` gives each its own process, as the other kinds do;
-        ``threading`` keeps them in this process, where the engine's Python-side
-        encoding contends for the GIL.
     :param workers_per_batch: ``multi_async`` only: how many single-worker
         rollouts are stacked into one learner batch. ``None`` uses the worker
         count, which reproduces the row count of a synchronous batch.
     """
 
-    max_batch_size: int = 64
-    min_batch_size: int = 1
-    server_timeout: float = 0.01
-    env_backend: str = "multiprocessing"
     workers_per_batch: int | None = None
 
 
@@ -167,60 +137,17 @@ def is_off_policy(kind: CollectorKind) -> bool:
     :param kind: Collector kind in use.
     :return: True if collection overlaps the update.
     """
-    return kind in (CollectorKind.MULTI_ASYNC, CollectorKind.ASYNC_BATCHED)
-
-
-#: Substring of the mmap failure ``async_batched`` dies with on this
-#: environment. See :func:`_explain_mapping_exhaustion`.
-_MAPPING_EXHAUSTION_MARKER = "unable to mmap"
-
-
-def _explain_mapping_exhaustion(error: BaseException) -> str | None:
-    """
-    Recognize the transport failure ``async_batched`` hits on this observation.
-
-    :class:`~torchrl.envs.AsyncEnvPool` ships every transition through a
-    ``multiprocessing.Queue``, and torch moves each leaf tensor by allocating a
-    fresh shared-memory segment that the receiver maps. This environment's
-    observation is ~288 leaf tensors, so one transition costs several hundred
-    mappings and the receiving process exhausts Linux's ``vm.max_map_count``
-    (65530 by default) within a few hundred steps. It surfaces as ``Cannot
-    allocate memory`` on an mmap of a few dozen bytes, with memory, shared
-    memory and file descriptors all far from exhausted, which reads as anything
-    but what it is.
-
-    The batched environments the other kinds use allocate one shared tensordict
-    at startup and write into it in place, so they never do per-step mapping and
-    never hit this.
-
-    :param error: Exception raised out of collection.
-    :return: An explanation to attach, or None if this is a different failure.
-    """
-    causes: list[BaseException] = []
-    seen = error
-    while seen is not None and seen not in causes:
-        causes.append(seen)
-        seen = seen.__cause__ or seen.__context__  # pyright: ignore[reportAssignmentType]
-    if not any(_MAPPING_EXHAUSTION_MARKER in str(cause) for cause in causes):
-        return None
-    return (
-        "collector.type=async_batched sends every transition through a queue as "
-        "individually shared tensors, and this environment's observation is ~288 "
-        "of them per step, which exhausts Linux's vm.max_map_count (65530) in the "
-        "receiving process. Use collector.type=multi_sync, which shares one "
-        "preallocated tensordict per worker and does no per-step mapping. See "
-        "docs/training-performance.md section 6."
-    )
+    return kind is CollectorKind.MULTI_ASYNC
 
 
 class _AssemblingCollector:
     """
     A collector whose batches are reshaped into ``(rows, time)`` on the way out.
 
-    Wraps rather than subclasses a TorchRL collector: the assemblers need to
-    buffer across yields (``multi_async`` stacks several rollouts into one
-    batch, ``async_batched`` carries a per-environment remainder into the next),
-    which a ``postproc`` -- applied to one batch in isolation -- cannot do.
+    Wraps rather than subclasses a TorchRL collector: the assembler needs to
+    buffer across yields (``multi_async`` stacks several single-worker rollouts
+    into one batch), which a ``postproc`` -- applied to one batch in isolation --
+    cannot do.
 
     :param collector: The underlying TorchRL collector.
     :param assemble: Maps one raw batch to a ``(rows, time)`` batch, or to None
@@ -238,19 +165,11 @@ class _AssemblingCollector:
     def __iter__(self) -> Iterator[TensorDictBase]:
         """
         :return: Iterator over assembled ``(rows, time)`` batches.
-        :raises RuntimeError: Re-raised from the wrapped collector, with the
-            shared-memory mapping limit named when that is what went wrong.
         """
-        try:
-            for data in self._collector:
-                batch = self._assemble(data)
-                if batch is not None:
-                    yield batch
-        except RuntimeError as error:
-            explanation = _explain_mapping_exhaustion(error)
-            if explanation is None:
-                raise
-            raise RuntimeError(explanation) from error
+        for data in self._collector:
+            batch = self._assemble(data)
+            if batch is not None:
+                yield batch
 
     def shutdown(self) -> None:
         """Tear down the wrapped collector; any buffered remainder is dropped."""
@@ -298,114 +217,6 @@ class _WorkerRolloutAssembler:
         return batch
 
 
-class _EnvStreamAssembler:
-    """
-    Regroup interleaved transitions back into one row per environment.
-
-    :class:`~torchrl.collectors.AsyncBatchedCollector` returns whatever arrived
-    in its result queue, so consecutive entries are typically from *different*
-    environments; only the per-environment subsequence is a trajectory. This
-    splits each batch on :data:`_ENV_INDEX_KEY`, appends to a per-environment
-    backlog, and emits a rectangular ``(num_envs, T)`` batch where ``T`` is what
-    every environment can currently supply. The remainder stays buffered and
-    leads the next batch, so a row continues exactly where the previous one
-    ended, with no frame dropped and no trajectory spliced.
-
-    ``T`` is set by the slowest environment, so an emitted batch can be smaller
-    than ``frames_per_batch``; the surplus is not lost, it is carried. What is
-    lost is whatever is still buffered when the collector shuts down, at most
-    one batch's worth over a run.
-
-    :param num_envs: Environments the collector is running.
-    """
-
-    def __init__(self, num_envs: int) -> None:
-        self._num_envs = num_envs
-        self._pending: list[list[TensorDictBase]] = [[] for _ in range(num_envs)]
-        self._warned_imbalance = False
-
-    def __call__(self, data: TensorDictBase) -> TensorDictBase | None:
-        """
-        :param data: One flat batch of interleaved transitions.
-        :return: A ``(num_envs, T)`` batch, or None while some environment has
-            contributed nothing yet.
-        """
-        self._append(data)
-        lengths = [sum(chunk.numel() for chunk in queue) for queue in self._pending]
-        width = min(lengths)
-        if width == 0:
-            return None
-        self._check_imbalance(lengths, width)
-
-        rows: list[TensorDictBase] = []
-        for env_index, (queue, length) in enumerate(
-            zip(self._pending, lengths, strict=True)
-        ):
-            merged = queue[0] if len(queue) == 1 else cat_tensordicts(queue, dim=0)
-            rows.append(merged[:width])
-            # Guarded rather than sliced unconditionally: an empty slice of a
-            # lazily stacked tensordict is not an empty tensordict, it raises.
-            self._pending[env_index] = [merged[width:]] if length > width else []
-        return stack_tensordicts(rows).exclude(_ENV_INDEX_KEY).to_tensordict()
-
-    def _append(self, data: TensorDictBase) -> None:
-        """
-        Split one raw batch by environment and queue each part in arrival order.
-
-        :param data: One flat batch of interleaved transitions.
-        :raises KeyError: If the collector stopped stamping the environment
-            index, without which the batch cannot be separated into
-            trajectories at all.
-        """
-        env_indices = data.get(_ENV_INDEX_KEY, default=None)
-        if env_indices is None:
-            raise KeyError(
-                f"AsyncBatchedCollector batch carries no '{_ENV_INDEX_KEY}' entry, so "
-                f"its interleaved transitions cannot be separated back into "
-                f"per-environment trajectories."
-            )
-        grouped: list[list[int]] = [[] for _ in range(self._num_envs)]
-        for position, env_index in enumerate(_as_int_list(env_indices)):
-            grouped[env_index].append(position)
-        for env_index, positions in enumerate(grouped):
-            if positions:
-                self._pending[env_index].append(data[positions])
-
-    def _check_imbalance(self, lengths: Sequence[int], width: int) -> None:
-        """
-        Warn once if one environment is holding the whole batch back.
-
-        :param lengths: Frames currently buffered per environment.
-        :param width: Frames every environment can supply, i.e. ``min(lengths)``.
-        """
-        if self._warned_imbalance or max(lengths) <= width * _BACKLOG_IMBALANCE_FACTOR:
-            return
-        self._warned_imbalance = True
-        logger.warning(
-            "Async collection is badly imbalanced: the slowest environment has "
-            "supplied %d frames while the fastest has %d buffered. Batches are "
-            "sized by the slowest, so memory grows with the gap.",
-            width,
-            max(lengths),
-        )
-
-
-def _as_int_list(env_indices: Any) -> list[int]:
-    """
-    Read the per-transition environment index out of whatever it is stored as.
-
-    The collector sets a plain Python int per transition, which stacking turns
-    into a non-tensor stack rather than a tensor, so neither ``.tolist()`` nor
-    tensor indexing can be assumed.
-
-    :param env_indices: The stacked ``env_index`` entry.
-    :return: One environment index per transition, in batch order.
-    """
-    if isinstance(env_indices, torch.Tensor):
-        return [int(value) for value in env_indices.reshape(-1).tolist()]
-    return [int(value) for value in env_indices.tolist()]
-
-
 def build_collector(
     kind: CollectorKind,
     *,
@@ -434,8 +245,7 @@ def build_collector(
         ``frames_per_batch`` is per worker.
     :param total_frames: Frames this collector should produce.
     :param collector_kwargs: Extra arguments from the trainer, e.g.
-        ``policy_device`` and ``compile_policy``. Silently ignored by
-        ``async_batched``, which takes neither.
+        ``policy_device`` and ``compile_policy``.
     :param options: Settings only the asynchronous kinds read.
     :param mp_start_method: Start method forced process-wide before any kind
         that starts its own workers is built. See :func:`_force_start_method`.
@@ -471,51 +281,29 @@ def build_collector(
             **collector_kwargs,
         )
 
-    if kind is CollectorKind.MULTI_ASYNC:
-        _check_per_worker_cuda(
-            kind, collector_kwargs, len(env_factories), mp_start_method
+    _check_per_worker_cuda(kind, collector_kwargs, len(env_factories), mp_start_method)
+    rows = options.workers_per_batch or len(env_factories)
+    per_worker = max(1, frames_per_batch // rows)
+    if per_worker * rows != frames_per_batch:
+        logger.warning(
+            "frames_per_batch %d is not divisible by %d rollouts per batch; "
+            "batches will hold %d frames.",
+            frames_per_batch,
+            rows,
+            per_worker * rows,
         )
-        rows = options.workers_per_batch or len(env_factories)
-        per_worker = max(1, frames_per_batch // rows)
-        if per_worker * rows != frames_per_batch:
-            logger.warning(
-                "frames_per_batch %d is not divisible by %d rollouts per batch; "
-                "batches will hold %d frames.",
-                frames_per_batch,
-                rows,
-                per_worker * rows,
-            )
-        return _AssemblingCollector(
-            MultiAsyncCollector(
-                create_env_fn=env_factories,
-                policy=policy,
-                # Per worker for this collector, not per batch: each worker
-                # collects this many frames and yields them on its own.
-                frames_per_batch=per_worker,
-                total_frames=total_frames,
-                auto_register_policy_transforms=False,
-                **collector_kwargs,
-            ),
-            _WorkerRolloutAssembler(rows),
-        )
-
-    # AsyncBatchedCollector runs the learner's own policy module inside an
-    # in-process inference server, so it takes neither policy_device (the server
-    # has its own `device`) nor the collector-level compile flag.
-    device = collector_kwargs.get("policy_device")
     return _AssemblingCollector(
-        AsyncBatchedCollector(
+        MultiAsyncCollector(
             create_env_fn=env_factories,
             policy=policy,
-            frames_per_batch=frames_per_batch,
+            # Per worker for this collector, not per batch: each worker collects
+            # this many frames and yields them on its own.
+            frames_per_batch=per_worker,
             total_frames=total_frames,
-            max_batch_size=options.max_batch_size,
-            min_batch_size=options.min_batch_size,
-            server_timeout=options.server_timeout,
-            env_backend=options.env_backend,  # pyright: ignore[reportArgumentType]
-            device=device,
+            auto_register_policy_transforms=False,
+            **collector_kwargs,
         ),
-        _EnvStreamAssembler(len(env_factories)),
+        _WorkerRolloutAssembler(rows),
     )
 
 

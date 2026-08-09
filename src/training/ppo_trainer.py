@@ -75,9 +75,8 @@ def _reject_unstable_curriculum_rows(
     :class:`~src.training.curriculum.Curriculum` accumulates a residual per
     *collector row* and commits it when that row reports ``done``, which assumes
     row ``r`` of the next batch continues the same environment's episode as row
-    ``r`` of this one. Three of the four collectors honour that: ``sync`` and
-    ``multi_sync`` stack workers in a fixed order, and ``async_batched``'s
-    assembler pins environment ``i`` to row ``i``.
+    ``r`` of this one. ``sync`` and ``multi_sync`` honour that, since both stack
+    workers in a fixed order.
 
     ``multi_async`` cannot. It yields whichever worker finished first, so rows
     are in completion order and their identity shuffles between batches; a
