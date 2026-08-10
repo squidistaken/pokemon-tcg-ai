@@ -213,11 +213,11 @@ EVAL_PANEL_SIZE=10
 
 GROUP="weighted-field-20260808"
 RUN_NAME="tf-ptr-weighted-15m-s42"
-# Extended from 15M: 20M more frames on top of the 8,749,056 already trained,
-# which the section 7 collector change makes affordable. The supervisor treats
-# this as an absolute target and subtracts what train_state.pt already records,
-# so it must be the final total rather than the increment.
-TOTAL_FRAMES=28749056
+# Extended from 15M to ~100M so the run keeps going unattended for days. The
+# supervisor treats this as an absolute target and subtracts what train_state.pt
+# already records, so it must be the final total rather than the increment. The
+# value is a multiple of the 16384-frame batch, which keeps the last batch whole.
+TOTAL_FRAMES="${TOTAL_FRAMES:-99991552}"
 SEED=42
 
 LR=2.0e-4
