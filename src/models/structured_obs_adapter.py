@@ -914,6 +914,23 @@ class StructuredObsAdapter(nn.Module):
             dim=-1,
         )
 
+    def _tool_repr(self, tool_ids: torch.Tensor) -> torch.Tensor:
+        """
+        Pool a Pokemon's attached tool identities into one card-width vector.
+
+        The first slot always counts, even when it holds the padding id 0.
+        That keeps an empty tool list mapped to the id-0 embedding, which is
+        what the single scalar ``tool_id`` produced before the cap was
+        widened to hold a stacked second tool, so widening it leaves an
+        already-trained network's inputs unchanged.
+
+        :param tool_ids: Tool card ids, shape ``(*batch, n_rows, tool_cap)``.
+        :return: Pooled representation of shape ``(*batch, n_rows, card_dim)``.
+        """
+        mask = tool_ids != 0
+        mask[..., 0] = True
+        return self._masked_mean(self._card_repr(tool_ids), mask)
+
     def _pokemon_rows(self, pokemon: TensorDictBase) -> torch.Tensor:
         """Raw per-Pokemon feature rows, shape ``(*batch, n_rows, row_width)``."""
         energy_ids = pokemon.get("energy_card_ids")
@@ -921,7 +938,7 @@ class StructuredObsAdapter(nn.Module):
         return torch.cat(
             [
                 self._card_repr(pokemon.get("card_id")),
-                self._card_repr(pokemon.get("tool_id")),
+                self._tool_repr(pokemon.get("tool_id")),
                 self._masked_mean(self._card_repr(energy_ids), energy_ids != 0),
                 self._masked_mean(
                     self._card_repr(pre_evolution_ids), pre_evolution_ids != 0

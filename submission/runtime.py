@@ -242,6 +242,7 @@ class StructuredObservationEncoder:
         looking_cap: int = 60,
         energy_cap: int = 60,
         evolution_cap: int = 2,
+        tool_cap: int = 2,
     ) -> None:
         self._max_options = max_options
         self._bench_cap = bench_cap
@@ -252,6 +253,7 @@ class StructuredObservationEncoder:
         self._looking_cap = looking_cap
         self._energy_cap = energy_cap
         self._evolution_cap = evolution_cap
+        self._tool_cap = tool_cap
         self._pokemon_rows = 2 * (1 + bench_cap)
 
     def encode(
@@ -451,7 +453,9 @@ class StructuredObservationEncoder:
     def _encode_pokemon(self, state: State, agent_seat: int) -> dict[str, torch.Tensor]:
         entries = {
             "card_id": torch.zeros(self._pokemon_rows, dtype=torch.int64),
-            "tool_id": torch.zeros(self._pokemon_rows, dtype=torch.int64),
+            "tool_id": torch.zeros(
+                (self._pokemon_rows, self._tool_cap), dtype=torch.int64
+            ),
             "energy_card_ids": torch.zeros(
                 (self._pokemon_rows, self._energy_cap), dtype=torch.int64
             ),
@@ -491,8 +495,8 @@ class StructuredObservationEncoder:
         if pokemon is None:
             return
         entries["card_id"][row] = pokemon.id
-        if pokemon.tools:
-            entries["tool_id"][row] = pokemon.tools[0].id
+        for column, card in enumerate(pokemon.tools[: self._tool_cap]):
+            entries["tool_id"][row, column] = card.id
         for column, card in enumerate(pokemon.energyCards[: self._energy_cap]):
             entries["energy_card_ids"][row, column] = card.id
         for column, card in enumerate(pokemon.preEvolution[: self._evolution_cap]):
@@ -960,13 +964,20 @@ class StructuredObsAdapter(nn.Module):
             dim=-1,
         )
 
+    def _tool_repr(self, tool_ids: torch.Tensor) -> torch.Tensor:
+        # The first slot always counts, so an empty tool list keeps the id-0
+        # embedding that the old scalar tool_id produced.
+        mask = tool_ids != 0
+        mask[..., 0] = True
+        return self._masked_mean(self._card_repr(tool_ids), mask)
+
     def _pokemon_rows(self, pokemon: Mapping[str, torch.Tensor]) -> torch.Tensor:
         energy_ids = pokemon["energy_card_ids"]
         evolution_ids = pokemon["pre_evolution_ids"]
         return torch.cat(
             [
                 self._card_repr(pokemon["card_id"]),
-                self._card_repr(pokemon["tool_id"]),
+                self._tool_repr(pokemon["tool_id"]),
                 self._masked_mean(self._card_repr(energy_ids), energy_ids != 0),
                 self._masked_mean(self._card_repr(evolution_ids), evolution_ids != 0),
                 pokemon["features"] / self._pokemon_feature_scales,
