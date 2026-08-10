@@ -134,6 +134,7 @@ class StructuredObservationEncoder(ObservationEncoder):
         looking_cap: int = 60,
         energy_cap: int = 60,
         evolution_cap: int = 2,
+        tool_cap: int = 2,
     ) -> None:
         """
         Most defaults trace to hard constants in the C++ engine
@@ -178,6 +179,13 @@ class StructuredObservationEncoder(ObservationEncoder):
         :param evolution_cap: Padded number of pre-evolution cards per
             Pokemon. Matches the fixed evolution chain depth: Basic ->
             Stage 1 -> Stage 2 is at most 2 pre-evolutions.
+        :param tool_cap: Padded number of attached tool cards per Pokemon.
+            One tool is the normal rule, but card effects can stack a
+            second, which self-play reached at 14M frames. Overflow costs
+            only the surplus identities, as with ``energy_cap``: the
+            attachment count in ``features`` comes from the untruncated
+            list and the model pools the identities, so this changes no
+            model dimension.
         """
         self._max_options = max_options
         self._bench_cap = bench_cap
@@ -188,6 +196,7 @@ class StructuredObservationEncoder(ObservationEncoder):
         self._looking_cap = looking_cap
         self._energy_cap = energy_cap
         self._evolution_cap = evolution_cap
+        self._tool_cap = tool_cap
         self._pokemon_rows = 2 * (1 + bench_cap)
         self._warned_zones: set[str] = set()
 
@@ -208,7 +217,9 @@ class StructuredObservationEncoder(ObservationEncoder):
         )
 
         self._np_pokemon_card_id = np.zeros(self._pokemon_rows, dtype=np.int64)
-        self._np_pokemon_tool_id = np.zeros(self._pokemon_rows, dtype=np.int64)
+        self._np_pokemon_tool_id = np.zeros(
+            (self._pokemon_rows, tool_cap), dtype=np.int64
+        )
         self._np_pokemon_energy_ids = np.zeros(
             (self._pokemon_rows, energy_cap), dtype=np.int64
         )
@@ -276,7 +287,9 @@ class StructuredObservationEncoder(ObservationEncoder):
             ),
             pokemon=Composite(
                 card_id=Unbounded(shape=(self._pokemon_rows,), dtype=torch.int64),
-                tool_id=Unbounded(shape=(self._pokemon_rows,), dtype=torch.int64),
+                tool_id=Unbounded(
+                    shape=(self._pokemon_rows, self._tool_cap), dtype=torch.int64
+                ),
                 energy_card_ids=Unbounded(
                     shape=(self._pokemon_rows, self._energy_cap), dtype=torch.int64
                 ),
@@ -668,10 +681,12 @@ class StructuredObservationEncoder(ObservationEncoder):
         energy_card_ids = self._np_pokemon_energy_ids
         pre_evolution_ids = self._np_pokemon_pre_evolution_ids
         card_id[row] = pokemon.id
-        if len(pokemon.tools) > 1:
-            self._warn_truncation("tool", len(pokemon.tools), 1)
-        if len(pokemon.tools) > 0:
-            tool_id[row] = pokemon.tools[0].id
+        tools = pokemon.tools
+        if len(tools) > self._tool_cap:
+            self._warn_truncation("tool", len(tools), self._tool_cap)
+            tools = tools[: self._tool_cap]
+        for column, card in enumerate(tools):
+            tool_id[row, column] = card.id
         energy_cards = pokemon.energyCards
         if len(energy_cards) > self._energy_cap:
             self._warn_truncation("energy_cards", len(energy_cards), self._energy_cap)
