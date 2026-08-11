@@ -94,7 +94,7 @@ def main() -> int:
 
     if dest.exists():
         shutil.rmtree(dest)
-    for stem, entry in chosen.items():
+    for entry in chosen.values():
         relative = Path(entry["file"])
         target = dest / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -106,7 +106,9 @@ def main() -> int:
 
     total = sum(observation_weight(entry) for entry in chosen.values())
     archetypes = sorted({entry["file"].split("/")[0] for entry in chosen.values()})
-    print(f"\n{dest.relative_to(REPO_ROOT)}: {len(chosen)} lists, {len(archetypes)} archetypes")
+    print(
+        f"\n{dest.relative_to(REPO_ROOT)}: {len(chosen)} lists, {len(archetypes)} archetypes"
+    )
     print(f"total observation weight {total:.0f}\n")
     print(f"{'list':34s} {'archetype':28s} {'wt':>5s} {'draw share':>11s}")
     for stem, entry in sorted(
