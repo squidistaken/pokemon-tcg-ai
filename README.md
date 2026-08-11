@@ -150,12 +150,8 @@ scripts/                     Standalone dev scripts (not part of the training en
   bench_throughput.py          Collection throughput benchmark (naive vs SerialEnv vs ParallelEnv)
   build_topk_corpus.py         Cuts a corpus down to the K most-observed lists, for concentrated training
   export_inference_checkpoint.py  Export assets for the repository-root inference entry point
-  habrok_pull_state.sh         Copies the training state Habrok produced back to the desktop
-  habrok_sync_state.sh         Copies code, decks and the resumable training state to Habrok scratch
-                               (--code-only skips the state, for a run already further along there)
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
   make_submission.py           Build a Kaggle .tar.gz and optionally submit it through the Kaggle CLI
-  publish_mini_corpus.sh       Publishes one narrow corpus as an additive release (does not replace decks/)
   train_supervised.sh          Runs a training job and restarts it from its own train_state.pt on any crash
   train_tf_weighted_field.sh   Launches conf/experiment/weighted_field.yaml under the supervisor; owns the run
                                directory and frame budget only, and forwards extra arguments as Hydra overrides
