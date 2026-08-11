@@ -97,6 +97,11 @@ agent_deck: null
 # cards the opponent plays. Evaluation always uses 0.0 so the eval curve
 # measures the deck that will be submitted.
 agent_deck_field_prob: 0.2
+# Draw exactly one opponent deck when the agent pin applies. False preserves
+# the historical pair draw (whose unused side still advances the pool RNG).
+# Fixed-deck fine-tuning enables this so weighted sampling consumes one draw per
+# episode and round-robin evaluation visits every field entry.
+agent_deck_single_field_draw: false
 # Deck the agent pilots during EVALUATION only, independent of agent_deck.
 #
 # Evaluation should hold the agent's deck fixed even when training does not: the

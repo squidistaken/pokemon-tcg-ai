@@ -120,6 +120,18 @@ def test_pool_sampler_round_robin_cycles_evenly() -> None:
     assert drawn[:4] == drawn[4:]
 
 
+def test_pool_sampler_single_draw_round_robin_visits_every_entry() -> None:
+    """One-field draws advance RR once, rather than skipping alternate decks."""
+    labels = [f"Deck {index}" for index in range(6)]
+    sampler = PoolDeckSampler(_fake_pool(6), mode="round_robin", labels=labels, seed=0)
+
+    drawn = [sampler.sample_one() for _ in range(12)]
+
+    first_pass = [(deck[0], label) for deck, label in drawn[:6]]
+    assert sorted(first_pass) == list(zip(range(6), labels, strict=True))
+    assert drawn[:6] == drawn[6:]
+
+
 def test_mirror_prob_endpoints_match_presets() -> None:
     """
     ``mirror_prob`` 1.0/0.0 reproduce the mirror/independent presets exactly.
@@ -839,6 +851,37 @@ def test_agent_deck_labels_are_seat_ordered(agent_seat: int) -> None:
         assert labels[1 - agent_seat] in ("Two", "Three")
 
 
+@pytest.mark.parametrize("agent_seat", [0, 1])
+def test_single_field_draw_keeps_pin_and_covers_complete_panel(
+    agent_seat: int,
+) -> None:
+    """The opt-in path fixes the real agent seat and consumes every RR entry."""
+    field = PoolDeckSampler(
+        _fake_pool(10),
+        matchup="independent",
+        mode="round_robin",
+        labels=[str(index) for index in range(10)],
+        seed=0,
+    )
+    sampler = AgentDeckSampler(
+        agent_deck=[99] * 60,
+        field_sampler=field,
+        agent_label="Alakazam",
+        single_field_draw=True,
+        seed=0,
+    )
+
+    opponents = []
+    for _ in range(10):
+        decks = sampler.sample_for_seat(agent_seat)
+        opponents.append(decks[1 - agent_seat][0])
+        assert decks[agent_seat] == [99] * 60
+        assert sampler.last_labels is not None
+        assert sampler.last_labels[agent_seat] == "Alakazam"
+
+    assert sorted(opponents) == list(range(10))
+
+
 def test_field_probability_governs_how_often_the_pin_applies() -> None:
     """
     Some episodes must keep drawing the agent's deck from the pool, or the
@@ -871,6 +914,29 @@ def test_build_deck_sampler_wraps_a_field_spec() -> None:
     )
     assert isinstance(sampler, AgentDeckSampler)
     assert sampler.sample_for_seat(1) == ([2] * 60, [1] * 60)
+
+
+def test_build_deck_sampler_enables_single_field_draw_explicitly() -> None:
+    """The worker-side spec exposes the one-draw path without changing defaults."""
+    sampler = build_deck_sampler(
+        {
+            "kind": "agent_fixed",
+            "agent_deck": [99] * 60,
+            "agent_label": "Alakazam",
+            "single_field_draw": True,
+            "field": {
+                "kind": "pool",
+                "decks": _fake_pool(4),
+                "mode": "round_robin",
+                "matchup": "independent",
+            },
+        },
+        seed=0,
+    )
+
+    assert isinstance(sampler, AgentDeckSampler)
+    opponents = [sampler.sample_for_seat(0)[1][0] for _ in range(4)]
+    assert sorted(opponents) == list(range(4))
 
 
 def test_agent_deck_without_a_deck_pool_is_rejected() -> None:

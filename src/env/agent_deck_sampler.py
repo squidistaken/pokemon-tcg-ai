@@ -36,6 +36,7 @@ class AgentDeckSampler:
         field_sampler: DeckSampler,
         agent_label: str | None = None,
         field_probability: float = 0.0,
+        single_field_draw: bool = False,
         seed: int | None = None,
     ) -> None:
         """
@@ -49,6 +50,10 @@ class AgentDeckSampler:
         :param field_probability: Share of episodes that ignore the pin and
             take both decks from ``field_sampler``, keeping the rest of the
             corpus in the gradient. 0 pins every episode.
+        :param single_field_draw: When the pin applies, ask a supporting field
+            sampler for exactly one opponent deck instead of drawing a pair
+            and discarding one side. False preserves the historical draw
+            sequence for existing configurations.
         :param seed: Seed for the field/pin coin flip.
         :raises ValueError: If ``agent_deck`` is empty or the probability is
             outside [0, 1].
@@ -63,6 +68,7 @@ class AgentDeckSampler:
         self._field_sampler = field_sampler
         self._agent_label = agent_label
         self._field_probability = float(field_probability)
+        self._single_field_draw = bool(single_field_draw)
         self._rng = random.Random(seed)
         self._last_labels: tuple[str, str] | None = None
 
@@ -107,6 +113,11 @@ class AgentDeckSampler:
         :param agent_seat: Seat index (0 or 1) the agent occupies this episode.
         :return: The ``(deck0, deck1)`` pair in engine seat order.
         """
+        if self._single_field_draw:
+            return self._sample_single_field(agent_seat)
+
+        # Compatibility path: retain the original order and number of RNG
+        # draws for every configuration that does not explicitly opt in.
         field_deck0, field_deck1 = sample_for_seat(self._field_sampler, agent_seat)
         field_labels = getattr(self._field_sampler, "last_labels", None)
         if self._rng.random() < self._field_probability:
@@ -122,6 +133,43 @@ class AgentDeckSampler:
             self._last_labels = (agent_label, opponent_label)
         else:
             self._last_labels = (opponent_label, agent_label)
+
+        if agent_seat == 0:
+            return list(self._agent_deck), opponent_deck
+        return opponent_deck, list(self._agent_deck)
+
+    def _sample_single_field(self, agent_seat: int) -> tuple[Deck, Deck]:
+        """
+        Draw one opponent deck when the pin applies.
+
+        ``field_probability`` still has its established meaning: on a field
+        episode both seats come from the wrapped sampler. Only pinned episodes
+        use the one-deck extension. A non-pool sampler without ``sample_one``
+        falls back to the legacy pair draw, keeping the wrapper protocol-safe.
+
+        :param agent_seat: Seat occupied by the learning policy.
+        :return: Engine-seat-ordered decks.
+        """
+        if self._rng.random() < self._field_probability:
+            field_deck0, field_deck1 = sample_for_seat(self._field_sampler, agent_seat)
+            self._last_labels = getattr(self._field_sampler, "last_labels", None)
+            return field_deck0, field_deck1
+
+        sample_one = getattr(self._field_sampler, "sample_one", None)
+        if sample_one is None:
+            field_deck0, field_deck1 = sample_for_seat(self._field_sampler, agent_seat)
+            field_labels = getattr(self._field_sampler, "last_labels", None)
+            opponent_deck = field_deck1
+            opponent_label = field_labels[1] if field_labels is not None else None
+        else:
+            opponent_deck, opponent_label = sample_one()
+
+        if self._agent_label is None or opponent_label is None:
+            self._last_labels = None
+        elif agent_seat == 0:
+            self._last_labels = (self._agent_label, opponent_label)
+        else:
+            self._last_labels = (opponent_label, self._agent_label)
 
         if agent_seat == 0:
             return list(self._agent_deck), opponent_deck

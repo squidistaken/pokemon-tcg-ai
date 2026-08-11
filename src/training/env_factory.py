@@ -531,6 +531,7 @@ def _pin_agent_deck(
         "agent_deck": load_deck(str(path)),
         "agent_label": _deck_labels([str(path)])[0],
         "field_probability": field_probability,
+        "single_field_draw": bool(cfg.env.get("agent_deck_single_field_draw", False)),
         "field": field_spec,
     }
 

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SUBMIT_PATH = PROJECT_ROOT / "slurm-conf" / "submit.py"
 RUN_JOB_PATH = PROJECT_ROOT / "slurm-conf" / "run_job.sh"
+FIXED_DECK_LAUNCHER = PROJECT_ROOT / "scripts" / "run_fixed_deck_finetune_slurm.sh"
 SPEC = importlib.util.spec_from_file_location("slurm_submit", SUBMIT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 submit = importlib.util.module_from_spec(SPEC)
@@ -146,3 +149,70 @@ def test_run_job_targets_repository_registry_without_shell_append() -> None:
     assert "checkpoint_keys.csv" not in "\n".join(
         line for line in script.splitlines() if ">>" in line
     )
+
+
+def test_fixed_deck_launcher_targets_both_rtx_modes() -> None:
+    """The paired launcher keeps resources shared and run identities distinct."""
+    script = FIXED_DECK_LAUNCHER.read_text(encoding="utf-8")
+
+    assert "--config ppo_fixed_deck_finetune" in script
+    assert "--slurm-config train_gpu_rtx" in script
+    assert "MODES=(frozen refresh)" in script
+    assert "train.opponent_pool_mode=$opponent_mode" in script
+    assert "wandb.group=$GROUP" in script
+    assert "wandb.name=fixed-deck-${opponent_mode}-30m-s42" in script
+    assert "paths.output_dir=${OUTPUT_ROOT}/${opponent_mode}" in script
+    assert "--dry-run" in script
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_modes"),
+    [("both", ["frozen", "refresh"]), ("refresh", ["refresh"])],
+)
+def test_fixed_deck_launcher_dry_run_and_forwarding(
+    tmp_path: Path, mode: str, expected_modes: list[str]
+) -> None:
+    """Dry-run emits the selected RTX jobs and preserves HPC path overrides."""
+    fake_slurm = tmp_path / "slurm-conf"
+    fake_slurm.mkdir()
+    calls = tmp_path / "calls.txt"
+    fake_train = fake_slurm / "train.sh"
+    fake_train.write_text(
+        '#!/bin/bash\nprintf "%s\\n" "$*" >> "$CALLS_FILE"\n', encoding="utf-8"
+    )
+    fake_train.chmod(0o755)
+    env = {**os.environ, "CALLS_FILE": str(calls)}
+
+    subprocess.run(
+        [
+            "bash",
+            str(FIXED_DECK_LAUNCHER),
+            "--dry-run",
+            "--mode",
+            mode,
+            "--storage-root",
+            "/scratch/s5862159/slopemon",
+            "train.eval_interval=0",
+        ],
+        cwd=tmp_path,
+        env=env,
+        check=True,
+    )
+
+    commands = calls.read_text(encoding="utf-8").splitlines()
+    assert len(commands) == len(expected_modes)
+    for command, expected_mode in zip(commands, expected_modes, strict=True):
+        assert "--config ppo_fixed_deck_finetune" in command
+        assert "--slurm-config train_gpu_rtx" in command
+        assert "--dry-run" in command
+        assert f"train.opponent_pool_mode={expected_mode}" in command
+        assert "paths.data_dir=/scratch/s5862159/slopemon/decks" in command
+        assert (
+            "finetune_checkpoint_dir=/scratch/s5862159/slopemon/"
+            "checkpoints/baseline-training-checkpoints" in command
+        )
+        assert (
+            "paths.output_dir=/scratch/s5862159/slopemon/outputs/"
+            f"fixed-deck-finetune-30m-s42/{expected_mode}" in command
+        )
+        assert "train.eval_interval=0" in command
