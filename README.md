@@ -141,14 +141,24 @@ conf/                        Hydra configs (config.yaml + env/, agent/, model/, 
   callbacks/
     wandb.yaml                  Default: Weights & Biases run (project/entity/group/tags/mode)
     none.yaml                    Console/Hydra log lines only; for throwaway runs
+  experiment/
+    weighted_field.yaml         Unpinned self-play over an observation-weighted field; launched by
+                                scripts/train_tf_weighted_field.sh
+    tf_*.yaml, ptr_*.yaml        One-change-at-a-time overlays from the transformer/pointer sweeps
 .env.example                 Template for untracked W&B, Kaggle, and submission defaults
 scripts/                     Standalone dev scripts (not part of the training entry point)
   bench_throughput.py          Collection throughput benchmark (naive vs SerialEnv vs ParallelEnv)
+  build_topk_corpus.py         Cuts a corpus down to the K most-observed lists, for concentrated training
   export_inference_checkpoint.py  Export assets for the repository-root inference entry point
+  habrok_pull_state.sh         Copies the training state Habrok produced back to the desktop
+  habrok_sync_state.sh         Copies code, decks and the resumable training state to Habrok scratch
+                               (--code-only skips the state, for a run already further along there)
   generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
   make_submission.py           Build a Kaggle .tar.gz and optionally submit it through the Kaggle CLI
+  publish_mini_corpus.sh       Publishes one narrow corpus as an additive release (does not replace decks/)
   train_supervised.sh          Runs a training job and restarts it from its own train_state.pt on any crash
-  train_tf_weighted_field.sh   15M-frame self-play run: transformer trunk, observation-weighted field, fixed eval panel
+  train_tf_weighted_field.sh   Launches conf/experiment/weighted_field.yaml under the supervisor; owns the run
+                               directory and frame budget only, and forwards extra arguments as Hydra overrides
 submission_analysis/          Kaggle submission tooling: `python -m submission_analysis <status|episodes|deck-report|scout>` (see its own README)
 submission/
   main.py                      Kaggle entryfile template; `agent` is deliberately its final callable
@@ -156,10 +166,11 @@ submission/
   runtime.py                   Torch-only structured encoder/model/greedy inference implementation
 checkpoint/                  Assets generated for the repository-root inference entry point
 decks/                       Deck collections
-docs/                        Design docs (torchrl_environment.md, game.md, research/curriculum-design.md)
+docs/                        Design docs (torchrl_environment.md, game.md, deck-field-probe.md, research/curriculum-design.md)
 tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
 main.py                      Alternate inference entry point; not used by make_submission.py
 slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts
+  train_weighted_field.sh      2-day GPU job that resumes the weighted-field arm through the supervisor
 ```
 
 The **backbone** and **head** are independent Hydra config groups, so any backbone can be paired
