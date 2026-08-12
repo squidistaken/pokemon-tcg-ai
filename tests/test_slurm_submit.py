@@ -191,7 +191,7 @@ def test_fixed_deck_launcher_dry_run_and_forwarding(
             "--mode",
             mode,
             "--storage-root",
-            "/scratch/s5862159/slopemon",
+            "/scratch/dummy",
             "train.eval_interval=0",
         ],
         cwd=tmp_path,
@@ -206,13 +206,13 @@ def test_fixed_deck_launcher_dry_run_and_forwarding(
         assert "--slurm-config train_gpu_rtx" in command
         assert "--dry-run" in command
         assert f"train.opponent_pool_mode={expected_mode}" in command
-        assert "paths.data_dir=/scratch/s5862159/slopemon/decks" in command
+        assert "paths.data_dir=/scratch/dummy/decks" in command
         assert (
-            "finetune_checkpoint_dir=/scratch/s5862159/slopemon/"
+            "finetune_checkpoint_dir=/scratch/dummy/"
             "checkpoints/baseline-training-checkpoints" in command
         )
         assert (
-            "paths.output_dir=/scratch/s5862159/slopemon/outputs/"
+            "paths.output_dir=/scratch/dummy/outputs/"
             f"fixed-deck-finetune-30m-s42/{expected_mode}" in command
         )
         assert "train.eval_interval=0" in command

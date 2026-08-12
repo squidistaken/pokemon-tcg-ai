@@ -47,7 +47,7 @@ def test_fixed_deck_finetune_config_resolves_requested_experiment() -> None:
 
     assert cfg.seed == 42
     assert cfg.collector.total_frames == 30_015_488
-    assert cfg.collector.max_restarts == 100
+    assert cfg.collector.max_restarts == 30
     assert cfg.agent.frames_per_batch == 16_384
     assert 85_688_320 + cfg.collector.total_frames == 115_703_808
     assert cfg.train.opponent_pool_mode == "frozen"
