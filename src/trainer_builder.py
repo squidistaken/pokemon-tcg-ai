@@ -259,6 +259,7 @@ def _build_ppo_trainer(
         vtrace_rho_thresh=float(cfg.agent.get("vtrace_rho_thresh", 1.0)),
         vtrace_c_thresh=float(cfg.agent.get("vtrace_c_thresh", 1.0)),
         lr=cfg.agent.lr,
+        weight_decay=float(cfg.agent.get("weight_decay", 0.0)),
         num_epochs=cfg.agent.num_epochs,
         sub_batch_size=cfg.agent.sub_batch_size,
         max_grad_norm=cfg.agent.max_grad_norm,
@@ -300,6 +301,53 @@ def _build_ppo_trainer(
     )
 
 
+def _load_warm_start_weights(
+    actor_critic: ActorCritic, state_dict: Mapping[str, torch.Tensor], key: str
+) -> None:
+    """
+    Load saved weights, tolerating LayerNorm parameters the model gained since.
+
+    Switching a transformer trunk from post-LN to pre-LN keeps every parameter
+    name and shape, so the saved weights still fit. Turning ``final_norm`` on at
+    the same time (the conventional pairing) adds one LayerNorm the checkpoint
+    predates. That single module initializes to the identity transform
+    (``weight=1``, ``bias=0``), so leaving it at its initial values is a defined
+    warm start rather than random noise, and it is the only kind of missing key
+    accepted here. Everything else, and any unexpected key, still fails.
+
+    :param actor_critic: Network to load into.
+    :param state_dict: Weights read from the checkpoint.
+    :param key: Config key that named the file, for the error message.
+    :raises ValueError: If keys are missing that are not newly added LayerNorm
+        parameters, or the checkpoint carries keys the model does not have.
+    """
+    layer_norm_params = {
+        f"{module_name}.{param_name}"
+        for module_name, module in actor_critic.named_modules()
+        if isinstance(module, torch.nn.LayerNorm)
+        for param_name, _ in module.named_parameters(recurse=False)
+    }
+    incompatible = actor_critic.load_state_dict(state_dict, strict=False)
+    unexpected = list(incompatible.unexpected_keys)
+    missing = list(incompatible.missing_keys)
+    disallowed = [name for name in missing if name not in layer_norm_params]
+    if unexpected or disallowed:
+        raise ValueError(
+            f"{key} does not fit this model. Missing: {sorted(disallowed)}. "
+            f"Unexpected: {sorted(unexpected)}. Only LayerNorm parameters the "
+            f"model gained since the checkpoint was written may be absent."
+        )
+    if missing:
+        logger.warning(
+            "Warm start left %d newly added LayerNorm parameter(s) at their "
+            "identity initialization (%s). The trunk's output scale changes "
+            "from what the heads were trained against, so expect an eval dip "
+            "before it recovers.",
+            len(missing),
+            ", ".join(sorted(missing)),
+        )
+
+
 def _warm_start(
     cfg: DictConfig, actor_critic: ActorCritic
 ) -> tuple[int, Mapping[str, Any] | None]:
@@ -337,7 +385,7 @@ def _warm_start(
     if not source.is_file():
         raise ValueError(f"{key} {source} does not exist.")
     payload = torch.load(source, map_location="cpu", weights_only=False)
-    actor_critic.load_state_dict(checkpoint_state_dict(payload), strict=True)
+    _load_warm_start_weights(actor_critic, checkpoint_state_dict(payload), key)
 
     override = cfg.train.get("start_frames")
     if override is not None:
