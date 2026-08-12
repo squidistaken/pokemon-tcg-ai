@@ -7,6 +7,12 @@
 # league member afterwards, so the agent keeps a fixed reference point instead
 # of drifting against copies of itself. "random" is the only implemented value.
 warmup_opponent: random
+# Opponent population source. `selfplay` is the historical/default behavior:
+# random warmup plus learner snapshots from checkpoint_dir. `frozen` and
+# `refresh` are opt-in fixed-deck fine-tuning modes backed by the external
+# checkpoint directory below; refresh also admits this run's learner snapshots.
+opponent_pool_mode: selfplay
+opponent_checkpoint_dir: null
 # Freeze the learner into the self-play pool every N collected frames
 # (0 disables periodic self-play snapshots -> train against the warmup
 # opponent only). Every PPO run still writes one final submission checkpoint.
@@ -95,6 +101,10 @@ eval_opponent: random
 # Snapshot path for eval_opponent=checkpoint; a relative path resolves
 # against the original working directory. Unused for eval_opponent=random.
 eval_opponent_checkpoint: null
+# External frozen population used by eval_opponent=checkpoint_pool. Null falls
+# back to opponent_checkpoint_dir. The evaluation pool never refreshes.
+eval_opponent_checkpoint_dir: null
+eval_opponent_pool_size: null
 # Score against several references at once (overrides eval_opponent when set).
 # Each entry is an eval_opponent value; metrics are namespaced per opponent
 # ("random/win_rate", "first_snapshot/win_rate"). Evaluation cost is the sum

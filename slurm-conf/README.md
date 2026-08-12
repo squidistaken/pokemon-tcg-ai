@@ -54,6 +54,87 @@ append their final checkpoint to the repository-local
 `logs/checkpoint_keys.csv`; `run_job.sh` exports and prints its absolute path,
 and the normal Python training callback performs the locked CSV append.
 
+## Fixed-deck fine-tuning on RTX
+
+The frozen and refreshed Alakazam-Dudunsparce experiments share
+`conf/ppo_fixed_deck_finetune.yaml`. Both warm-start from the 85,688,320-frame
+baseline with a fresh optimizer and collect 30,015,488 additional frames. The
+launcher selects the `train_gpu_rtx` profile, seed 42, separate output
+directories, and one shared W&B group.
+
+The deck fetcher and launcher both accept one scratch-storage root. On the HPC
+login node, download the released corpus directly to scratch and create the
+checkpoint destination:
+
+```bash
+SCRATCH_ROOT=/scratch/...
+./scripts/fetch_decks.sh --root "$SCRATCH_ROOT"
+mkdir -p "$SCRATCH_ROOT/checkpoints/baseline-training-checkpoints"
+```
+
+The baseline checkpoint directory is ignored by Git. Copy all ten `.pt` files
+and their `.json` sidecars into that directory. If the files are already in the
+repository checkout on the cluster:
+
+```bash
+rsync -av checkpoints/baseline-training-checkpoints/ \
+  "$SCRATCH_ROOT/checkpoints/baseline-training-checkpoints/"
+```
+
+From another machine, use the same destination after the HPC login hostname,
+for example `hpc-login:"$SCRATCH_ROOT/checkpoints/baseline-training-checkpoints/"`.
+The resulting layout is:
+
+```text
+/scratch/...
+├── decks/heuristic-resolved/...
+├── checkpoints/baseline-training-checkpoints/snapshot_*.pt
+└── outputs/                         # created by the training launcher
+```
+
+On the login node, prepare the RTX-specific environment and wait for its setup
+job to finish:
+
+```bash
+./slurm-conf/setup_uv.sh --use-rtx
+squeue --me
+```
+
+First inspect both submissions without starting jobs:
+
+```bash
+./scripts/run_fixed_deck_finetune_slurm.sh --dry-run \
+  --storage-root "$SCRATCH_ROOT"
+```
+
+Then run one short RTX smoke job. It writes to a separate location and exercises
+the real checkpoint population with one environment:
+
+```bash
+./scripts/run_fixed_deck_finetune_slurm.sh --mode frozen \
+  --storage-root "$SCRATCH_ROOT" \
+  paths.output_dir="$SCRATCH_ROOT/outputs/fixed-deck-smoke" \
+  env.num_workers=1 collector.type=sync collector.total_frames=16384 \
+  train.eval_interval=0 callbacks=none
+```
+
+After the smoke job succeeds, submit both production arms:
+
+```bash
+./scripts/run_fixed_deck_finetune_slurm.sh \
+  --storage-root "$SCRATCH_ROOT"
+```
+
+Use `--mode refresh` or `--mode frozen` to submit only one arm. Monitor with
+`squeue --me`, the files under `slurm-conf/logs/`, and W&B. Resumption is manual:
+submit the same mode and output path with
+`train.resume_state=/absolute/path/to/train_state.pt`, and set
+`collector.total_frames` to the still-uncollected additional-frame budget.
+`resume_state` restores the optimizer and absolute frame counter; do not point
+it at a league snapshot. `FINETUNE_STORAGE_ROOT` is the environment-variable
+equivalent of `--storage-root`; individual Hydra path overrides still take
+precedence because the launcher forwards them last.
+
 ## Deck scraping
 
 First submit the 6-hour fetch-only discovery job. It scans at most 15,000

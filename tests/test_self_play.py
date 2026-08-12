@@ -332,6 +332,103 @@ def test_disabled_snapshotting_yields_no_opponent_factory(
     assert factory is None
 
 
+def test_missing_opponent_pool_mode_keeps_legacy_selfplay_factory(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """Older configs still get the established random-anchored output pool."""
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    assert "opponent_pool_mode" not in cfg.train
+
+    factory = build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
+    assert factory is not None
+    pool = factory()
+
+    assert isinstance(pool, SnapshotOpponentPool)
+    assert isinstance(pool.opponents[0], RandomOpponent)
+    assert pool._checkpoint_dir.resolve() == tmp_path.resolve()  # noqa: SLF001
+
+
+def test_unknown_opponent_pool_mode_fails_during_factory_build(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """A mode typo cannot silently fall back to a different experiment."""
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    cfg.train.opponent_pool_mode = "frezen"
+
+    with pytest.raises(ValueError, match="unknown opponent_pool_mode"):
+        build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
+
+
+@pytest.mark.parametrize("mode", ["frozen", "refresh"])
+def test_external_modes_reject_pfsp_and_factories_are_picklable(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec, mode: str
+) -> None:
+    """New populations require literal uniform sampling and survive workers."""
+    baseline = tmp_path / "baseline"
+    learner = tmp_path / "learner"
+    write_snapshot_files(baseline, list(range(10)))
+    cfg = selfplay_cfg(learner, structured_model_cfg)
+    cfg.train.opponent_pool_mode = mode
+    cfg.train.opponent_checkpoint_dir = str(baseline)
+    cfg.train.pool_size = 10
+    cfg.train.opponent_sampling = "pfsp"
+
+    with pytest.raises(ValueError, match="requires opponent_sampling=uniform"):
+        build_opponent_factory(cfg, structured_obs_spec, action_spec, learner)
+
+    cfg.train.opponent_sampling = "uniform"
+    factory = build_opponent_factory(cfg, structured_obs_spec, action_spec, learner)
+    assert factory is not None
+    restored = pickle.loads(pickle.dumps(factory))
+    assert restored.keywords["refresh"] is (mode == "refresh")
+
+
+def test_external_modes_validate_checkpoint_sources(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """Missing, undersized, and aliased sources fail in the parent process."""
+    cfg = selfplay_cfg(tmp_path / "learner", structured_model_cfg)
+    cfg.train.opponent_pool_mode = "frozen"
+    cfg.train.opponent_sampling = "uniform"
+    cfg.train.pool_size = 10
+    cfg.train.opponent_checkpoint_dir = str(tmp_path / "missing")
+    with pytest.raises(ValueError, match="does not exist"):
+        build_opponent_factory(
+            cfg, structured_obs_spec, action_spec, tmp_path / "learner"
+        )
+
+    baseline = tmp_path / "baseline"
+    write_snapshot_files(baseline, list(range(9)))
+    cfg.train.opponent_checkpoint_dir = str(baseline)
+    with pytest.raises(ValueError, match="expected at least pool_size=10"):
+        build_opponent_factory(
+            cfg, structured_obs_spec, action_spec, tmp_path / "learner"
+        )
+
+    write_snapshot_files(baseline, [9])
+    cfg.train.opponent_pool_mode = "refresh"
+    with pytest.raises(ValueError, match="must be distinct"):
+        build_opponent_factory(cfg, structured_obs_spec, action_spec, baseline)
+
+
+def test_refresh_requires_periodic_learner_snapshots(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """Refresh cannot be selected while learner snapshot publication is off."""
+    baseline = tmp_path / "baseline"
+    write_snapshot_files(baseline, list(range(10)))
+    cfg = selfplay_cfg(tmp_path / "learner", structured_model_cfg, snapshot_interval=0)
+    cfg.train.opponent_pool_mode = "refresh"
+    cfg.train.opponent_checkpoint_dir = str(baseline)
+    cfg.train.opponent_sampling = "uniform"
+    cfg.train.pool_size = 10
+
+    with pytest.raises(ValueError, match="snapshot_interval > 0"):
+        build_opponent_factory(
+            cfg, structured_obs_spec, action_spec, tmp_path / "learner"
+        )
+
+
 def test_opponent_factory_survives_pickling(
     tmp_path, structured_model_cfg, structured_obs_spec, action_spec
 ) -> None:
@@ -481,6 +578,32 @@ def test_checkpoint_eval_opponent_rejects_missing_file(
     cfg.train.eval_opponent_checkpoint = str(tmp_path / "does_not_exist.pt")
     with pytest.raises(ValueError, match="does not exist"):
         build_eval_opponent_factory(cfg, structured_obs_spec, action_spec)
+
+
+def test_checkpoint_pool_eval_is_frozen_to_baseline_directory(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """Aggregate evaluation never adds the refreshed learner population."""
+    baseline = tmp_path / "baseline"
+    learner = tmp_path / "learner"
+    write_snapshot_files(baseline, list(range(10)))
+    write_snapshot_files(learner, [999])
+    cfg = selfplay_cfg(learner, structured_model_cfg)
+    cfg.train.opponent_pool_mode = "refresh"
+    cfg.train.opponent_checkpoint_dir = str(baseline)
+    cfg.train.eval_opponent_checkpoint_dir = str(baseline)
+    cfg.train.eval_opponent_pool_size = 10
+
+    factory = build_eval_opponent_factory(
+        cfg,
+        structured_obs_spec,
+        action_spec,
+        opponent="checkpoint_pool",
+    )
+
+    assert factory.keywords["checkpoint_dirs"] == (baseline.resolve(),)
+    assert factory.keywords["refresh"] is False
+    assert factory.keywords["pool_size"] == 10
 
 
 def test_best_response_opponent_loads_the_frozen_agent(

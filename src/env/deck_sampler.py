@@ -205,6 +205,21 @@ class PoolDeckSampler:
             self._last_labels = (self._labels[index0], self._labels[index1])
         return list(self._decks[index0]), list(self._decks[index1])
 
+    def sample_one(self) -> tuple[Deck, str | None]:
+        """
+        Draw one deck from the pool without manufacturing a two-seat matchup.
+
+        Seat-asymmetric wrappers use this when one side is already fixed.  It
+        deliberately advances the underlying draw strategy exactly once, so a
+        round-robin field visits every deck and a weighted field consumes one
+        weighted draw per episode.
+
+        :return: A fresh deck copy and its label, or None when unlabelled.
+        """
+        index = self._next_index()
+        label = self._labels[index] if self._labels is not None else None
+        return list(self._decks[index]), label
+
     def _next_index(self) -> int:
         """
         :return: Index of the next deck under the configured draw mode.
@@ -273,6 +288,7 @@ def build_deck_sampler(spec: dict[str, Any], seed: int | None = None) -> DeckSam
             field_sampler=build_deck_sampler(spec["field"], seed),
             agent_label=spec.get("agent_label"),
             field_probability=spec.get("field_probability", 0.0),
+            single_field_draw=spec.get("single_field_draw", False),
             seed=seed,
         )
     if kind == "pool":
