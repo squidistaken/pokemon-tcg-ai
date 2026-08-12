@@ -29,7 +29,7 @@ seed: 42
 
 paths:
   # Snapshots dominate the run's footprint (~110 files at the interval below).
-  # Home is quota-limited on Habrok; scratch is not.
+  # Home is quota-limited on the cluster; scratch is not.
   output_dir: /scratch/${oc.env:USER}/pokemon-tcg-ai/outputs
 
 collector:

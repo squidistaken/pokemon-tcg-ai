@@ -249,19 +249,11 @@ hyperparameter constructor** (no separate dependency-injection trainer class, no
 layer). Adopted features: `torch.compile` (loss + policy), `target_kl` early stopping,
 NaN/Inf-guarded minibatches, and LR / entropy annealing.
 
-> **AMP removed.** The trainer carried a `use_amp` flag with a `torch.amp.autocast` context and a
-> CUDA `GradScaler` branch in the minibatch loop. No config ever set it to `true`
-> (`conf/agent/ppo.yaml` and `conf/experiment/debug.yaml` both pinned `false`), so the autocast
-> context was always `nullcontext` and the scaler always `None`. Removed with its test. Reintroduce
-> it with a measurement if update-step precision becomes the bottleneck.
-
-> **TODO — RPO removed, revisit separately.** An earlier version of this trainer carried an RPO
-> (Robust Policy Optimization) perturbation path (`MaskedRPOCategorical` / `RPOTanhNormal`,
-> `rpo_alpha`). It has been removed: RPO is originally a continuous-control technique, the discrete
-> analogue used here was novel and empirically unvalidated, and it added process-global mutable
-> state (`rpo_enabled` toggled around the loss pass) for a benefit nobody had measured. If RPO (or a
-> validated discrete equivalent) turns out to be worth having, reintroduce it as its own scoped
-> task with a benchmark showing it helps, rather than carrying unvalidated inert code.
+> **TODO — RPO, revisit separately.** RPO (Robust Policy Optimization) is not implemented here.
+> It is originally a continuous-control technique, the discrete analogue is novel and empirically
+> unvalidated, and a perturbation path needs process-global mutable state around the loss pass. If
+> RPO (or a validated discrete equivalent) turns out to be worth having, add it as its own scoped
+> task with a benchmark showing it helps.
 
 **Documented behavioural changes & inferences** (each also flagged inline in code):
 
@@ -277,18 +269,13 @@ NaN/Inf-guarded minibatches, and LR / entropy annealing.
   stats; reserved for future magnitude logging.
 - **`compile_*` defaults off** (slow/fragile on the CPU dev box).
 
-#### NCL (`ncl_model`) — removed
+#### NCL — deferred
 
-The colleague's trainer exposed an `ncl_model` parameter for **Natural Continual Learning**: a
-Fisher-Information-Matrix estimate that anchors the weights important to previously-learned tasks
-and projects/clips gradients to resist **catastrophic forgetting**. It was carried here for a time
-as a guarded stub that accepted the parameter and raised `NotImplementedError`. That stub has since
-been **removed** — an always-raising parameter bought interface parity at the cost of implying a
-capability that never existed.
-
-The rationale is kept because the underlying question is still open, and is now *more* live than
-when it was written. Self-play **is** wired into the training entrypoint (`train=ppo_selfplay`), so
-the non-stationarity that motivates NCL can now actually manifest; the
+**Natural Continual Learning** uses a Fisher-Information-Matrix estimate that anchors the weights
+important to previously-learned tasks and projects/clips gradients to resist **catastrophic
+forgetting**. It is not implemented here, but the question it answers is live. Self-play **is**
+wired into the training entrypoint (`train=ppo_selfplay`), so the non-stationarity that motivates
+NCL can actually manifest; the
 [self-play exploitability review](self-play-exploitability-review.md) names catastrophic forgetting
 / cycling (best-responding only to the latest opponent) as the central risk, and FIM
 weight-anchoring is a *candidate* mitigation.

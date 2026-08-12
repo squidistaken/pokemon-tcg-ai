@@ -63,46 +63,6 @@ Every deck in a release comes from Limitless. The scraper also walks Bulbapedia,
 archetype pages are historical lists whose cards predate the engine's pool, so all of them drop
 as unresolved and none reach the corpus. See the card pool section of `scraper/README.md`.
 
-## Code structure
-
-```
-cg/                    ctypes bindings for the cabt battle engine
-ptcg_engine/           C++ source of that engine
-src/
-  env/                 TCGEnv and its battle handle
-    observation/         Encoders, option reference resolver, card database
-    decks/               Deck loading and the weighted/fixed/agent-pinned samplers
-    opponents/           Self-play pools: snapshot, PFSP, external, random
-  curriculum/          Level buffer, archetype index, shared-memory handles, callback
-  models/              Backbones (mlp, transformer), obs adapter, policy/value heads, ActorCritic
-  policies/            Random, greedy, and Kaggle inference policies + the PPO operator builder
-  training/            Trainer, PPO, collectors, env factory, self-play, evaluators, cross-play,
-                       loss/ and callbacks/ (snapshots, train state, W&B)
-  train.py             Hydra entry point (python -m src.train): main() only
-  trainer_builder.py   Builds the trainer, callbacks and run paths from the config
-  eval_deck_field.py   Per-archetype scoring across a deck field
-conf/                  Hydra configs: env/, agent/, model/ (backbone + head), train/,
-                       collector/, callbacks/, experiment/, paths/
-scripts/               Dev scripts: corpus building, benchmarks, Kaggle packaging, Slurm launchers
-slurm-conf/            Slurm profiles, uv setup, job scripts
-submission/            Kaggle entryfile, pure-Python obs parser, torch-only runtime
-submission_analysis/   `python -m submission_analysis <status|episodes|deck-report|scout>`
-checkpoint/            Exported inference assets
-decks/                 Deck collections
-docs/                  Design docs
-tests/                 Unit tests + committed fixtures
-```
-
-Backbone and head are independent Hydra groups, so any pair works:
-`python -m src.train model/backbone=mlp model/head=linear`.
-
-`pointer` is the default head. It scores each slot from `[state_repr, option_repr_i]`. `linear`
-scores slots from the pooled state alone, where the option table arrives as a masked mean. Mean
-pooling is permutation-invariant, so `linear` cannot condition on what an action does; at most it
-learns a prior over slot indices. No amount of tuning fixes that, which is why `pointer` is the
-default. `pointer_dot` replaces the shared MLP with a scaled dot product and is still in
-comparison. Keep `linear` as a control only.
-
 ## Usage
 
 Examples of what `src/train.py` accepts:
@@ -136,10 +96,6 @@ python -m src.train agent=ppo callbacks=none        # no metric backend
 Online W&B needs `WANDB_API_KEY` in an untracked `.env`, or `wandb login --verify`. Any
 authentication or logging failure stops training. The final checkpoint goes to W&B as a model
 artifact unless `wandb.log_checkpoints=false`; self-play snapshots always stay local.
-
-### Reproducing the submitted agent
-
-TODO: the exact config and command that produce the submitted checkpoint.
 
 ### Training modes
 
@@ -214,15 +170,54 @@ uv run python -m submission_analysis deck-report --deck decks/example.csv  # ref
 uv run python -m submission_analysis scout --deck decks/example.csv        # top teams' decks
 ```
 
-## Habrok (Slurm)
+## Slurm
 
-Habrok is the University of Groningen's high-performance compute cluster. It schedules jobs with
-Slurm, and [`slurm-conf/`](slurm-conf/README.md) holds the profiles and job scripts for it. A
-profile selects a normal Hydra config and adds scheduler overrides. It takes no part in local
-Hydra composition. The launch configs are `baseline`, `ppo`, `ppo_selfplay`, and
-`ppo_transformer`.
+[`slurm-conf/`](slurm-conf/README.md) holds the profiles and job scripts for running on a
+Slurm-scheduled cluster. A profile selects a normal Hydra config and adds scheduler overrides. It
+takes no part in local Hydra composition. The launch configs are `baseline`, `ppo`,
+`ppo_selfplay`, and `ppo_transformer`.
 
 ## CI
 
 GitHub Actions runs linting, type-checking, and tests for pull requests that are ready for review.
 Drafts skip CI to stay in the free-plan budget.
+
+## Code structure
+
+```
+cg/                    ctypes bindings for the cabt battle engine
+ptcg_engine/           C++ source of that engine
+src/
+  env/                 TCGEnv and its battle handle
+    observation/         Encoders, option reference resolver, card database
+    decks/               Deck loading and the weighted/fixed/agent-pinned samplers
+    opponents/           Self-play pools: snapshot, PFSP, external, random
+  curriculum/          Level buffer, archetype index, shared-memory handles, callback
+  models/              Backbones (mlp, transformer), obs adapter, policy/value heads, ActorCritic
+  policies/            Random, greedy, and Kaggle inference policies + the PPO operator builder
+  training/            Trainer, PPO, collectors, env factory, self-play, evaluators, cross-play,
+                       loss/ and callbacks/ (snapshots, train state, W&B)
+  train.py             Hydra entry point (python -m src.train): main() only
+  trainer_builder.py   Builds the trainer, callbacks and run paths from the config
+  eval_deck_field.py   Per-archetype scoring across a deck field
+conf/                  Hydra configs: env/, agent/, model/ (backbone + head), train/,
+                       collector/, callbacks/, experiment/, paths/
+scripts/               Dev scripts: corpus building, benchmarks, Kaggle packaging, Slurm launchers
+slurm-conf/            Slurm profiles, uv setup, job scripts
+submission/            Kaggle entryfile, pure-Python obs parser, torch-only runtime
+submission_analysis/   `python -m submission_analysis <status|episodes|deck-report|scout>`
+checkpoint/            Exported inference assets
+decks/                 Deck collections
+docs/                  Design docs
+tests/                 Unit tests + committed fixtures
+```
+
+Backbone and head are independent Hydra groups, so any pair works:
+`python -m src.train model/backbone=mlp model/head=linear`.
+
+`pointer` is the default head. It scores each slot from `[state_repr, option_repr_i]`. `linear`
+scores slots from the pooled state alone, where the option table arrives as a masked mean. Mean
+pooling is permutation-invariant, so `linear` cannot condition on what an action does; at most it
+learns a prior over slot indices. No amount of tuning fixes that, which is why `pointer` is the
+default. `pointer_dot` replaces the shared MLP with a scaled dot product and is still in
+comparison. Keep `linear` as a control only.
