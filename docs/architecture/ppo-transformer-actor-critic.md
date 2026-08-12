@@ -246,8 +246,14 @@ grad-clip → `Adam.step()`. Losses / grad-norm are logged in the outer loop.
 
 It absorbs the feature set of a colleague's `TorchRLTrainer` **while keeping the friendly
 hyperparameter constructor** (no separate dependency-injection trainer class, no extra inheritance
-layer). Adopted features: AMP (`torch.amp`), `torch.compile` (loss + policy),
-`target_kl` early stopping, NaN/Inf-guarded minibatches, and LR / entropy annealing.
+layer). Adopted features: `torch.compile` (loss + policy), `target_kl` early stopping,
+NaN/Inf-guarded minibatches, and LR / entropy annealing.
+
+> **AMP removed.** The trainer carried a `use_amp` flag with a `torch.amp.autocast` context and a
+> CUDA `GradScaler` branch in the minibatch loop. No config ever set it to `true`
+> (`conf/agent/ppo.yaml` and `conf/experiment/debug.yaml` both pinned `false`), so the autocast
+> context was always `nullcontext` and the scaler always `None`. Removed with its test. Reintroduce
+> it with a measurement if update-step precision becomes the bottleneck.
 
 > **TODO — RPO removed, revisit separately.** An earlier version of this trainer carried an RPO
 > (Robust Policy Optimization) perturbation path (`MaskedRPOCategorical` / `RPOTanhNormal`,
@@ -269,8 +275,7 @@ layer). Adopted features: AMP (`torch.amp`), `torch.compile` (loss + policy),
   linear anneal (LR → 0; entropy held for `ent_warm_frac` of training, then → 0).
 - **`reward_scaling`** is accepted for parity but has no effect on the current sign-based win/draw
   stats; reserved for future magnitude logging.
-- **AMP uses `torch.amp`** (not the deprecated `torch.cuda.amp`), required by the test suite's
-  `filterwarnings=error`. `compile_*` defaults **off** (slow/fragile on the CPU dev box).
+- **`compile_*` defaults off** (slow/fragile on the CPU dev box).
 
 #### NCL (`ncl_model`) — removed
 

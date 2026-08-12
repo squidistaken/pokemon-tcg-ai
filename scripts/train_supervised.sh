@@ -32,6 +32,18 @@
 # Everything after `--` is passed to `python -m src.train` untouched, except
 # that this script owns hydra.run.dir, collector.total_frames,
 # train.resume_state and env.curriculum.init_state -- do not set those yourself.
+#
+# STARTING FROM A NAMED SNAPSHOT INSTEAD
+#
+#   --init-checkpoint checkpoints/snapshot_000126959616.pt
+#
+# Use this when the rolling train_state.pt is suspect, for example when the
+# frames it covers were collected from a dying worker pool. The snapshot carries
+# weights and a frame count but no optimizer, so Adam's moments restart from
+# zero and the first rollouts are noisier than the ones that preceded them. The
+# existing train_state.pt is moved aside rather than deleted, and only the first
+# attempt uses the snapshot: once the run has written its own state, restarts
+# resume from that as usual.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -50,12 +62,14 @@ export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:Tr
 RUN_DIR=""
 TOTAL_FRAMES=""
 MAX_ATTEMPTS=10
+INIT_CHECKPOINT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --run-dir)      RUN_DIR="$2";      shift 2 ;;
     --total-frames) TOTAL_FRAMES="$2"; shift 2 ;;
     --attempts)     MAX_ATTEMPTS="$2"; shift 2 ;;
+    --init-checkpoint) INIT_CHECKPOINT="$2"; shift 2 ;;
     --) shift; break ;;
     *) echo "ERROR: unknown option '$1'; training overrides go after '--'." >&2; exit 2 ;;
   esac
@@ -78,15 +92,16 @@ mkdir -p "$RUN_DIR"
 RUN_DIR="$(cd "$RUN_DIR" && pwd)"
 STATE="$RUN_DIR/train_state.pt"
 
-# Frames recorded in a train_state.pt, or 0 when there is no usable state yet.
-# A resume that cannot read its own frame count would restart the run at zero
-# and silently overwrite the league, so an unreadable file counts as no state.
-state_frames() {
-  if [ ! -f "$STATE" ]; then
+# Frames recorded in a checkpoint, or 0 when there is no usable file. A resume
+# that cannot read its own frame count would restart the run at zero and
+# silently overwrite the league, so an unreadable file counts as no state.
+# Snapshots and train_state.pt both carry the count under the same key.
+checkpoint_frames() {
+  if [ ! -f "$1" ]; then
     echo 0
     return
   fi
-  uv run --frozen --no-sync python - "$STATE" <<'PY' 2>/dev/null || echo 0
+  uv run --frozen --no-sync python - "$1" <<'PY' 2>/dev/null || echo 0
 import sys
 
 import torch
@@ -95,6 +110,10 @@ payload = torch.load(sys.argv[1], map_location="cpu", weights_only=False)
 frames = payload.get("frames") if isinstance(payload, dict) else None
 print(int(frames) if frames else 0)
 PY
+}
+
+state_frames() {
+  checkpoint_frames "$STATE"
 }
 
 # Newest curriculum dump, so a restart keeps the matchup scores it paid for.
@@ -111,8 +130,35 @@ latest_curriculum() {
   find "$RUN_DIR/curriculum" -name 'curriculum_*.pt' 2>/dev/null | sort | tail -1
 }
 
+if [ -n "$INIT_CHECKPOINT" ]; then
+  if [ ! -f "$INIT_CHECKPOINT" ]; then
+    echo "ERROR: --init-checkpoint $INIT_CHECKPOINT does not exist." >&2
+    exit 2
+  fi
+  INIT_CHECKPOINT="$(cd "$(dirname "$INIT_CHECKPOINT")" && pwd)/$(basename "$INIT_CHECKPOINT")"
+
+  # Move the rolling state aside rather than delete it. The run overwrites
+  # train_state.pt on its first write, and those frames are the only way back if
+  # this warm start turns out worse than the state it replaced.
+  if [ -f "$STATE" ]; then
+    SUPERSEDED="$RUN_DIR/train_state.superseded-$(date +%Y%m%dT%H%M%S).pt"
+    mv "$STATE" "$SUPERSEDED"
+    echo "Moved the rolling state aside: $SUPERSEDED"
+  fi
+fi
+
 DONE_FRAMES="$(state_frames)"
-if [ "$DONE_FRAMES" -gt 0 ]; then
+if [ -n "$INIT_CHECKPOINT" ]; then
+  # Seed the frame count from the snapshot so --total-frames keeps meaning an
+  # absolute target rather than a number of additional frames.
+  DONE_FRAMES="$(checkpoint_frames "$INIT_CHECKPOINT")"
+  if [ "$DONE_FRAMES" -eq 0 ]; then
+    echo "ERROR: --init-checkpoint $INIT_CHECKPOINT records no frame count." >&2
+    exit 2
+  fi
+  echo "Warm start from $INIT_CHECKPOINT at $DONE_FRAMES frames."
+  echo "Weights only: Adam's moments restart from zero."
+elif [ "$DONE_FRAMES" -gt 0 ]; then
   echo "Found existing state at $DONE_FRAMES frames in $RUN_DIR; continuing it."
 fi
 
@@ -129,7 +175,9 @@ while [ "$DONE_FRAMES" -lt "$TOTAL_FRAMES" ]; do
     hydra.run.dir="$RUN_DIR"
     collector.total_frames="$remaining"
   )
-  if [ "$DONE_FRAMES" -gt 0 ]; then
+  if [ -n "$INIT_CHECKPOINT" ]; then
+    args+=(train.init_checkpoint="$INIT_CHECKPOINT")
+  elif [ "$DONE_FRAMES" -gt 0 ]; then
     args+=(train.resume_state="$STATE")
     curriculum="$(latest_curriculum)"
     if [ -n "$curriculum" ]; then
@@ -174,6 +222,9 @@ while [ "$DONE_FRAMES" -lt "$TOTAL_FRAMES" ]; do
     exit "$status"
   fi
   DONE_FRAMES="$progressed"
+  # The run now has a state of its own, carrying the optimizer the snapshot
+  # lacked, so later attempts resume from that instead of warm-starting again.
+  INIT_CHECKPOINT=""
 done
 
 echo "Reached $DONE_FRAMES/$TOTAL_FRAMES frames."

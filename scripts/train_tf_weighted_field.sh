@@ -28,6 +28,22 @@ RUN_NAME="${RUN_NAME:-tf-ptr-weighted-15m-s42}"
 TOTAL_FRAMES="${TOTAL_FRAMES:-99991552}"
 ATTEMPTS="${ATTEMPTS:-10}"
 
+# The config carries 16 workers, which fits this desktop. A Slurm profile that
+# allocates more cores exports NUM_WORKERS to match, so forward it as an
+# override only when it is set rather than hardcoding either number here.
+WORKER_OVERRIDE=()
+if [ -n "${NUM_WORKERS:-}" ]; then
+  WORKER_OVERRIDE=("env.num_workers=$NUM_WORKERS")
+fi
+
+# INIT_CHECKPOINT starts from a named league snapshot instead of the rolling
+# train_state.pt, for when the frames that state covers are suspect. Weights
+# only, so Adam restarts from zero. See scripts/train_supervised.sh.
+SUPERVISOR_ARGS=()
+if [ -n "${INIT_CHECKPOINT:-}" ]; then
+  SUPERVISOR_ARGS=(--init-checkpoint "$INIT_CHECKPOINT")
+fi
+
 RUN_DIR="outputs/$GROUP/$RUN_NAME"
 
 # Matched on the module rather than the interpreter: uv may exec python, python3
@@ -42,7 +58,7 @@ fi
 # The supervisor resumes from train_state.pt by design, which is right after a
 # crash and wrong on a deliberate relaunch, so a leftover state stops the run
 # instead of being picked up silently.
-if [ -f "$RUN_DIR/train_state.pt" ] && [ "${RESUME:-0}" != "1" ]; then
+if [ -f "$RUN_DIR/train_state.pt" ] && [ "${RESUME:-0}" != "1" ] && [ -z "${INIT_CHECKPOINT:-}" ]; then
   echo "ERROR: $RUN_DIR/train_state.pt exists, so this would CONTINUE a previous run." >&2
   echo "       To resume it:  RESUME=1 $0" >&2
   echo "       To start over: rm -rf $RUN_DIR" >&2
@@ -63,10 +79,12 @@ echo "Budget:  $TOTAL_FRAMES frames"
   --run-dir "$RUN_DIR" \
   --total-frames "$TOTAL_FRAMES" \
   --attempts "$ATTEMPTS" \
+  ${SUPERVISOR_ARGS[@]+"${SUPERVISOR_ARGS[@]}"} \
   -- --config-name "$CONFIG_NAME" \
   "+experiment=$EXPERIMENT" \
   "wandb.group=$GROUP" \
   "wandb.name=$RUN_NAME" \
+  ${WORKER_OVERRIDE[@]+"${WORKER_OVERRIDE[@]}"} \
   "$@" \
   2>&1 | tee "$LOG"
 

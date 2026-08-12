@@ -256,7 +256,6 @@ def _build_ppo_trainer(
         serial_for_single=cfg.env.serial_for_single,
         target_kl=cfg.agent.get("target_kl"),
         target_kl_multiplier=cfg.agent.get("target_kl_multiplier", 1.5),
-        use_amp=cfg.agent.get("use_amp", False),
         compile_loss=cfg.agent.get("compile_loss", False),
         compile_policy=cfg.agent.get("compile_policy", False),
         lr_anneal=cfg.agent.get("lr_anneal", False),

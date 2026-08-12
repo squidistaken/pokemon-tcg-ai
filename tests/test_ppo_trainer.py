@@ -42,7 +42,7 @@ def _make_trainer(
     :param action_spec: Environment action spec.
     :param opponent_factory: Optional self-play opponent factory.
     :param kwargs: Overrides forwarded to :class:`PPOTrainerForTests` (e.g.
-        ``target_kl``, ``use_amp``, annealing flags).
+        ``target_kl``, annealing flags).
     :return: A configured PPO trainer with tiny budgets.
     """
     params = {
@@ -351,21 +351,6 @@ def test_target_kl_early_stops_epoch_loop(
     )
     steps = trainer.count_optimizer_steps_for_update(_collect_one_batch(trainer))
     assert 0 < steps < 20
-
-
-def test_amp_update_is_finite_on_cpu(
-    structured_model_cfg, structured_obs_spec, action_spec
-) -> None:
-    """
-    AMP (bfloat16 autocast, no scaler on CPU) runs the update NaN-free.
-    """
-    actor_critic = build_actor_critic(
-        structured_model_cfg, structured_obs_spec, action_spec
-    )
-    trainer = _make_trainer(actor_critic, action_spec, use_amp=True)
-    stats = trainer.train()
-    assert stats["frames"] == 128
-    assert all(torch.isfinite(p).all() for p in actor_critic.parameters())
 
 
 def test_lr_and_entropy_anneal_decrease(

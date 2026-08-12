@@ -80,10 +80,14 @@ agent:
   # At 3e-4 the KL early stop fired on 269 of ~619 updates, cutting 43% of
   # batches short of their 4 epochs. Constant, not annealed.
   lr: 2.0e-4
-  # 0.005 left entropy flat at 0.6 nats (~1.8 effective options) with 84% of
-  # attacks from one card. Training exploration only: submissions stay greedy,
-  # which measured 45.0% against sampling's 28.0% on the same checkpoint.
-  entropy_coeff: 0.015
+  # 0.015 ran 86M to 128M and held entropy at 0.82 nats, |loss_entropy| /
+  # |loss_objective| at 1.25. Whether it beat 0.005 is unmeasured: deck_corpus
+  # and eval_agent_deck changed at the same restart, so the eval step from 0.641
+  # to 0.70 across that boundary is not attributable to this key.
+  # 0.005 holds 0.62 nats, ratio ~0.3, which is ~2.0 effective options of the
+  # 4.90 legal once the 14.5% forced decisions are taken out. Still exploration,
+  # and the sharper policy is what greedy submission deploys.
+  entropy_coeff: 0.005
   device: cuda
   # Required under multi_sync, not an optimisation: workers are forked and CUDA
   # cannot initialize in a forked child. The PPO update keeps the GPU.

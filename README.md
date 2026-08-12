@@ -1,8 +1,7 @@
 # Pokémon Trading Card Game
 
-Solution for the Kaggle [Pokémon TCG AI Battle](https://www.kaggle.com/competitions/pokemon-tcg-ai-battle) competition.
-
-See [this video](https://www.youtube.com/watch?v=eKC5PlYoboE) for an explanation of the game.
+Solution for the Kaggle [Pokémon TCG AI Battle](https://www.kaggle.com/competitions/pokemon-tcg-ai-battle)
+competition. [This video](https://www.youtube.com/watch?v=eKC5PlYoboE) explains the game.
 
 ## Setup
 
@@ -44,7 +43,7 @@ multi-deck training:
 
 ```bash
 ./scripts/fetch_decks.sh           # newest decks-* release: verify + unpack into decks/
-./scripts/fetch_decks.sh decks-v3  # or pin a specific version for reproducibility
+./scripts/fetch_decks.sh decks-v4  # or pin a specific version for reproducibility
 ./scripts/fetch_decks.sh --root /path/to/target # install to a specific filepath
 ```
 
@@ -62,382 +61,189 @@ low-level builder it wraps if you only want the local tarball.
 
 Every deck in a release comes from Limitless. The scraper also walks Bulbapedia, but its
 archetype pages are historical lists whose cards predate the engine's pool, so all of them drop
-as unresolved and none reach the corpus — see the card pool section of `scraper/README.md`.
+as unresolved and none reach the corpus. See the card pool section of `scraper/README.md`.
 
 ## Code structure
 
 ```
-cg/                        Python bindings for the bundled cabt C battle engine (ctypes)
-  sim.py                     Shared library loading and low-level ctypes structs
-  api.py                     Typed dataclasses for engine observations/options
-  game.py                    Thin procedural wrapper around a single global battle
-  utils.py                   dict <-> dataclass conversion helpers
-
-ptcg_engine/                C++ source of the cabt battle engine (compiled to the shared library cg/sim.py loads)
-
+cg/                    ctypes bindings for the cabt battle engine
+ptcg_engine/           C++ source of that engine
 src/
-  env/                        TorchRL environment
-    tcg_env.py                  TCGEnv: EnvBase wrapping the engine, masked action space, opponent-in-env
-    battle_handle.py            Per-instance battle pointer, decoupled from cg.game's global one
-    observation_encoder.py      ObservationEncoder: abstract base class for observation encoders
-    structured_observation_encoder.py  Structured observation contract: card-ID/option/board tensors (docs/torchrl_environment.md)
-    option_reference_resolver.py      OptionReferenceResolver: stateless option -> (card, target, attack) ID lookups
-    card_database.py            Static card-ID-indexed lookup tables (for model-side embeddings)
-    deck.py                     Deck CSV loading
-    deck_sampler.py             DeckSampler protocol, FixedDeckSampler/PoolDeckSampler, and the seat-aware draw helper
-    agent_deck_sampler.py       AgentDeckSampler: pins the agent to one deck, draws only its opponent from the pool
-    opponent_pool.py            Self-play opponent pool (samples/holds frozen policy snapshots)
-    snapshot_opponent_pool.py   OpponentPool that discovers new learner snapshots from disk (ParallelEnv-safe)
-    pfsp_opponent_pool.py       Prioritized Fictitious Self-Play: weights league members by the learner's win rate against them
-    archetype_index.py          Groups the deck corpus by archetype folder and numbers the resulting matchups
-    level_buffer.py             Prioritized Level Replay buffer over archetype matchups (scores, staleness, win/loss tallies)
-    curriculum_handles.py       Shared-memory channel carrying the level distribution from learner to env workers
-    curriculum_deck_sampler.py  DeckSampler drawing each episode's matchup from that channel
-    random_opponent.py          Uniform-random opponent baseline
-  models/                     Actor-critic network, independent of the policy/training wiring
-    backbone.py                  Backbone ABC + MLPBackbone (SetTransformer/TemporalTransformer/Recurrent planned)
-    structured_obs_adapter.py    StructuredObsAdapter: embeds card IDs, normalizes scalars, set-pools zones
-                                   (per seat for the board, see adapter.pokemon_seat_split), and emits the
-                                   per-option token table the pointer head scores
-    heads.py                     PointerHead (per-option scoring, the default) + LinearPolicyHead
-                                   (flat slot-indexed logits, the baseline) + ValueHead (scalar critic)
-    actor_critic.py              ActorCritic: shared trunk feeding both heads, tensordict-in/tensordict-out
-    transformer.py                TransformerBackbone: self-attention trunk with pooling modes, per-entity token groups, and pointer-head option tokens
-  policies/
-    random_masked_policy.py     Uniform random policy over the action mask (stand-in for the future PPO actor)
-    greedy_policy_opponent.py   Greedy opponent baseline built on a saved ActorCritic checkpoint
-    inference.py                 SamplingPolicyAgent: main.py's submission agent, specs/checkpoint loading for Kaggle
-    ppo_actor.py                 build_actor_critic / build_ppo_operator: assemble the ActorValueOperator from Hydra config
-  training/
-    trainer.py                  Trainer: parallel rollout collection through the configured collector
-    base_trainer.py             BaseTrainer interface
-    collectors.py                build_collector: the three TorchRL collector kinds, normalized to (rows, time) batches
-    ppo_trainer.py               PPOTrainer: Trainer subclass running GAE or V-trace + ClipPPOLoss optimization
-    env_factory.py               Builds TransformedEnv instances (deck + opponent + ActionMask) for the collector
-    self_play.py                 build_opponent_factory: the picklable self-play league factory handed to each env worker
-    evaluator.py                 Evaluator: scores the policy against a fixed opponent (readable curve under self-play)
-    multi_evaluator.py           MultiEvaluator: runs several Evaluators, namespacing metrics per reference opponent
-    curriculum.py                Curriculum: owns the level buffer, scores each collected batch, republishes the distribution
-    cuda_memory_guard.py         CudaMemoryGuard: caps the process's GPU reservation so pressure raises OutOfMemoryError instead of killing the CUDA context
-    cross_play.py                Round-robins frozen checkpoints into a win-rate matrix + Bradley-Terry Elo ranking
-    pipe_timeout.py              apply_pipe_timeout: how fast an unresponsive ParallelEnv worker is detected (torchrl defaults to 2h47m)
-    callbacks/                  Metric sinks; the trainer emits, these decide where it goes
-      base.py                     TrainingCallback hooks + CallbackList (fan-out, propagates failures)
-      snapshot_callback.py        SnapshotCallback: freezes the learner into the self-play league at a frame interval
-      curriculum_callback.py      CurriculumStateCallback: dumps the level buffer's win/loss tallies at a frame interval
-      cross_play_callback.py      CrossPlayCallback: scores the learner against its own snapshots, ranks them at run end
-      wandb_callback.py           WeightsAndBiases: the only module that imports wandb
-      wandb_fork_guard.py         WandbForkGuard: detaches W&B's blocking exit hooks in forked ParallelEnv workers
-  train.py                    Hydra entry point (python -m src.train)
-  eval_deck_field.py          Scores a saved agent per archetype across a deck field (python -m src.eval_deck_field)
-
-conf/                        Hydra configs (config.yaml + env/, agent/, model/, train/, collector/, callbacks/, experiment/ groups)
-  paths/default.yaml          Scheduler-independent input and output locations
-  model/
-    default.yaml                Composes one backbone + one head, holds shared dims (embed_dim, value_head)
-    backbone/mlp.yaml            MLP baseline trunk (more backbones added as separate config files as they land)
-    head/pointer.yaml            Per-option scoring head (default)
-    head/linear.yaml             Flat slot-indexed logits head (the baseline the pointer head replaced)
-  train/
-    default.yaml                Keys shared by every training variant; the variants below override only what differs
-    fixed_opponent.yaml          Default: fixed random opponent, no snapshotting; the control for self-play runs
-    ppo_selfplay.yaml            Self-play league: snapshot interval, pool size, periodic fixed-opponent evaluation
-  callbacks/
-    wandb.yaml                  Default: Weights & Biases run (project/entity/group/tags/mode)
-    none.yaml                    Console/Hydra log lines only; for throwaway runs
-  experiment/
-    weighted_field.yaml         Unpinned self-play over an observation-weighted field; launched by
-                                scripts/train_tf_weighted_field.sh
-    tf_*.yaml, ptr_*.yaml        One-change-at-a-time overlays from the transformer/pointer sweeps
-.env.example                 Template for untracked W&B, Kaggle, and submission defaults
-scripts/                     Standalone dev scripts (not part of the training entry point)
-  bench_throughput.py          Collection throughput benchmark (naive vs SerialEnv vs ParallelEnv)
-  build_topk_corpus.py         Cuts a corpus down to the K most-observed lists, for concentrated training
-  export_inference_checkpoint.py  Export assets for the repository-root inference entry point
-  generate_obs_fixtures.py     Regenerates the committed observation fixtures in tests/fixtures/
-  make_submission.py           Build a Kaggle .tar.gz and optionally submit it through the Kaggle CLI
-  train_supervised.sh          Runs a training job and restarts it from its own train_state.pt on any crash
-  train_tf_weighted_field.sh   Launches conf/experiment/weighted_field.yaml under the supervisor; owns the run
-                               directory and frame budget only, and forwards extra arguments as Hydra overrides
-submission_analysis/          Kaggle submission tooling: `python -m submission_analysis <status|episodes|deck-report|scout>` (see its own README)
-submission/
-  main.py                      Kaggle entryfile template; `agent` is deliberately its final callable
-  cg_api.py                    Pure-Python observation parser (no native simulator dependency)
-  runtime.py                   Torch-only structured encoder/model/greedy inference implementation
-checkpoint/                  Assets generated for the repository-root inference entry point
-decks/                       Deck collections
-docs/                        Design docs (torchrl_environment.md, game.md, deck-field-probe.md, research/curriculum-design.md)
-tests/                       Unit tests (+ fixtures/: committed sample observations and card tables)
-main.py                      Alternate inference entry point; not used by make_submission.py
-slurm-conf/                  Slurm profiles, uv setup, and generic submission/training scripts
-  train_weighted_field.sh      2-day GPU job that resumes the weighted-field arm through the supervisor
+  env/                 TorchRL environment: TCGEnv, observation encoding, weighted deck
+                       samplers, self-play opponent pools
+  models/              Backbones (mlp, transformer), obs adapter, policy/value heads, ActorCritic
+  policies/            Random, greedy, and Kaggle inference policies + the PPO operator builder
+  training/            Trainer, PPO, collectors, env factory, self-play, evaluators, cross-play,
+                       and callbacks/ (snapshots, train state, W&B)
+  train.py             Hydra entry point (python -m src.train)
+  eval_deck_field.py   Per-archetype scoring across a deck field
+conf/                  Hydra configs: env/, agent/, model/ (backbone + head), train/,
+                       collector/, callbacks/, experiment/, paths/
+scripts/               Dev scripts: corpus building, benchmarks, Kaggle packaging, Slurm launchers
+slurm-conf/            Slurm profiles, uv setup, job scripts
+submission/            Kaggle entryfile, pure-Python obs parser, torch-only runtime
+submission_analysis/   `python -m submission_analysis <status|episodes|deck-report|scout>`
+checkpoint/            Exported inference assets
+decks/                 Deck collections
+docs/                  Design docs
+tests/                 Unit tests + committed fixtures
 ```
 
-The **backbone** and **head** are independent Hydra config groups, so any backbone can be paired
-with any head from the CLI or a sweep, e.g. `python -m src.train model/backbone=mlp model/head=linear`.
+Backbone and head are independent Hydra groups, so any pair works:
+`python -m src.train model/backbone=mlp model/head=linear`.
 
-### Policy head: why `pointer` is the default
-
-`model/head=pointer` scores each action slot from `[state_repr, option_repr_i]` with weights shared
-across slots. `model/head=linear` — the original baseline — emits one logit per slot from the pooled
-state alone, and the adapter hands it the option table as a *masked mean*. Mean pooling is
-permutation-invariant, so under the flat head, shuffling the options leaves the logits bit-identical
-while the correct action moves: the policy is structurally unable to condition on what an action
-does, and the most it can represent is a prior over slot indices.
-
-`model/head=pointer_dot` is the same idea with a scaled dot product instead of a shared MLP: cheaper
-(one product per slot, no hidden widths to tune) and it scores the stop action as a real row of the
-option table rather than from a separate branch. `pointer` is the default because it is the arm with
-the measured win; `pointer_dot` is the transformer work's formulation, still being compared.
-
-That is not a tuning problem, it is a ceiling, and it was the binding constraint on training — see
-[`docs/architecture/pointer-head.md`](docs/architecture/pointer-head.md) for the measurements. `linear` is
-kept as the control for that comparison; use `pointer` for real runs.
+`pointer` is the default head. It scores each slot from `[state_repr, option_repr_i]`. `linear`
+scores slots from the pooled state alone, where the option table arrives as a masked mean. Mean
+pooling is permutation-invariant, so `linear` cannot condition on what an action does; at most it
+learns a prior over slot indices. No amount of tuning fixes that, which is why `pointer` is the
+default. `pointer_dot` replaces the shared MLP with a scaled dot product and is still in
+comparison. Keep `linear` as a control only.
 
 ## Usage
 
-Run training from the repo root:
+Examples of what `src/train.py` accepts:
+
 ```bash
-python -m src.train
-```
-Config is managed by [Hydra](https://hydra.cc/) (`conf/config.yaml`); override any field on the command line, e.g.:
-```bash
-python -m src.train collector.total_frames=100000 env.num_workers=4 set_seed=true
+python -m src.train                                                    # defaults
+python -m src.train collector.total_frames=100000 env.num_workers=4    # Hydra overrides
+python -m src.train +experiment=debug                                  # 512-frame smoke test
+./scripts/train_tf_weighted_field.sh                                   # long run, auto-restart
 ```
 
-Metric backends are selected by the `callbacks` group, and the W&B run is
-labelled from the top-level `wandb` block:
+`train_tf_weighted_field.sh` wraps `scripts/train_supervised.sh`, which restarts training after a
+crash and resumes from `train_state.pt`. It sets `hydra.run.dir`, `collector.total_frames` and
+`train.resume_state` itself, so do not pass those. Any other argument goes through to `src.train`
+as a Hydra override. To run the same experiment without the restart wrapper:
+
+```bash
+uv run python -m src.train --config-name ppo_selfplay_multideck \
+  +experiment=weighted_field collector.total_frames=100000
+```
+
+[Hydra](https://hydra.cc/) manages `conf/config.yaml`. The `callbacks` group selects the metric
+backend, and the top-level `wandb` block labels the run:
+
 ```bash
 python -m src.train agent=ppo wandb.group=ablation-lr wandb.tags=[baseline]
 python -m src.train agent=ppo wandb.mode=offline    # record now, `wandb sync` later
-python -m src.train agent=ppo callbacks=none        # no metric backend at all
+python -m src.train agent=ppo callbacks=none        # no metric backend
 ```
 
-For a quick smoke test of the whole loop there is a debug experiment: PPO
-self-play at 512 frames on a single in-process env, a small model, no metric
-backend and DEBUG logging, finishing in a few seconds:
-```bash
-python -m src.train +experiment=debug
-```
+Online W&B needs `WANDB_API_KEY` in an untracked `.env`, or `wandb login --verify`. Any
+authentication or logging failure stops training. The final checkpoint goes to W&B as a model
+artifact unless `wandb.log_checkpoints=false`; self-play snapshots always stay local.
 
-### Level curriculum
+### Reproducing the submitted agent
 
-`env=curriculum_v2` replaces uniform deck sampling with Prioritized Level Replay over
-deck-archetype matchups. The learner scores each matchup by how much systematic error the
-critic still carries on it, and republishes a sampling distribution to the environment
-workers after every batch, so training concentrates on the matchups it handles worst:
+TODO: the exact config and command that produce the submitted checkpoint.
 
-```bash
-python -m src.train agent=ppo env=curriculum_v2 train=ppo_selfplay
-```
+### Training modes
 
-Pair it with `train=ppo_selfplay`, which also enables PFSP over the self-play league. The
-two are complementary: a hard matchup played against an obsolete snapshot is still a
-trivial win, so prioritizing the deck axis while leaving the opponent axis uniform lets
-them cancel.
+| Config | What it does |
+| --- | --- |
+| `train=fixed_opponent` | Default. Trains against the built-in uniform-random opponent. |
+| `train=ppo_selfplay` | Self-play league plus PFSP over its members. |
+| `env.deck_weighting=observation` | Deals each list in proportion to how often it was played. |
+| `train.cross_play=true` | Ranks the run's own checkpoints at the end. |
+| `--config-name ppo_best_response` | Measures how exploitable a frozen agent is. |
 
-Requires `env.deck_pool` and `env.mp_start_method=fork` — the distribution reaches the
-workers through shared memory, which `spawn` would copy instead of share. Both are checked
-at startup rather than silently degrading. Curriculum statistics are logged under
-`curriculum/`, and the buffer's win/loss tallies are dumped periodically to the run
-directory for later deck selection.
+`env.deck_weighting=observation` (`conf/env/default.yaml`) weights the deck draw by each list's
+`observation_count` in `manifest.json`, so training plays the lists people play. Uniform draws
+spend most of a run on lists nobody plays: 76.7% of the corpus was observed once, and those lists
+hold 43.6% of the observation mass. The other weightings are `winrate` and `placing`, and `null`
+is uniform. The weighting applies to both seats, and to training only, because evaluation draws
+its own panel. Neither seat is pinned with `env.agent_deck`, because under self-play the opponent
+is a snapshot of the same network and a pin leaves it with decks it never practises. Pick the
+submission deck afterwards, by probing candidates in the engine with the finished agent.
 
-Design rationale is in [`docs/research/curriculum-design.md`](docs/research/curriculum-design.md).
+`train=ppo_selfplay` freezes the learner into `train.checkpoint_dir` every
+`train.snapshot_interval` frames. Each worker draws its opponent from the newest
+`train.pool_size` snapshots. The uniform-random opponent stays a permanent league member, so the
+policy keeps one fixed reference point. Because the league follows the learner, the collected
+`win_rate` stays near 0.5 at every strength. Read progress from `eval/` instead, which runs every
+`train.eval_interval` frames against `train.eval_opponents`. Evaluation is serial, so each round
+stops collection for its `train.eval_episodes` games. `train.eval_deterministic` (default `true`)
+scores the argmax. `env.eval_agent_deck` and `env.eval_panel_size` hold the agent's deck and the
+opponent panel fixed, so the curve reads like a submission.
 
-### Self-play
+`train.cross_play=true`, with self-play on, logs `crossplay/vs_latest_snapshot` during the run.
+At the end it plays the checkpoints round-robin and writes `crossplay_matrix.csv` and a
+Bradley-Terry Elo in `crossplay_elo.csv` (`src/training/cross_play.py`). Use that Elo to pick the
+checkpoint to submit.
 
-By default (`train=fixed_opponent`) the agent trains against the built-in
-uniform-random opponent. `train=ppo_selfplay` instead builds a self-play league:
-```bash
-python -m src.train agent=ppo train=ppo_selfplay
-```
-Every `train.snapshot_interval` frames the learner is frozen to disk, and each
-environment worker adds that snapshot to the pool it samples an opponent from
-per episode, keeping the newest `train.pool_size` of them. The random opponent
-stays a permanent league member, so the agent always retains a fixed reference
-point instead of drifting against copies of itself. Snapshots go to the Hydra
-run directory, so runs never inherit each other's opponents.
-
-Because the league tracks the learner, the collected `win_rate` sits near 0.5
-regardless of how strong the policy gets. The readable progress signal is
-instead the periodic evaluation against a *fixed* random opponent, logged under
-`eval/` every `train.eval_interval` frames:
-```bash
-python -m src.train agent=ppo train=ppo_selfplay train.eval_interval=100000 train.eval_episodes=200
-```
-Evaluation is serial and costs collection throughput, so it is a trade between
-curve resolution and speed. `train.eval_deterministic` (default `true`) scores
-the policy's argmax; set it to `false` to score the sampling behaviour used
-during collection.
-
-### Cross-play and checkpoint selection
-
-`train.cross_play=true` (with self-play on) scores the learner against its own
-frozen history through the greedy serving path. During training it logs
-`crossplay/vs_latest_snapshot` (am I still improving on my past self); at run end
-it round-robins the checkpoints into a win-rate matrix and an order-free
-Bradley-Terry **Elo** ranking, written as `crossplay_matrix.csv` /
-`crossplay_elo.csv` in the run directory and logged as `crossplay/elo/<ckpt>`.
-The Elo ranking is the tool for picking which checkpoint to submit.
-
-### Exploitability (best-response)
+`--config-name ppo_best_response` freezes an agent and trains a fresh learner against it. The
+learner's `eval/win_rate` is the exploitability of the frozen agent: 0.5 means the best-responder
+found no hole, and every point above 0.5 is a hole it found. A self-play `win_rate` near 0.5
+cannot show this, because the league moves with the learner.
 
 ```bash
 python -m src.train --config-name ppo_best_response \
   train.best_response_checkpoint=/path/to/agent.pt
 ```
-Freezes the given agent and trains a fresh learner to beat it across the corpus;
-the learner's `eval/win_rate` is that agent's **exploitability** — how beatable a
-dedicated best-responder finds it. A robust, Nash-like agent holds the
-best-responder near 0.5; a brittle one is driven far above. This is the read the
-ByteRL attack exposed that a self-play win-rate hides.
 
-### Deck-pool-width sweep
-
-`env.deck_pool_width=N` caps training to `N` archetypes while the held-out eval
-set stays fixed, so a sweep measures how generalization scales with training
-diversity:
-```bash
-python -m src.train --config-name ppo_selfplay_multideck --multirun \
-  env.deck_pool_width=4,8,16,32
-```
-Compare `eval/archetype_win_rate_{mean,worst_quartile}` across the runs (grouped
-by `env.deck_pool_width` in W&B).
-
-Online W&B logging is required when selected: configure `WANDB_API_KEY` in an
-untracked `.env` or run `wandb login --verify`. Authentication, connection, or
-logging failures stop training. Use `wandb.mode=offline` only when local
-recording for a later `wandb sync` is intentional. The final PPO checkpoint is
-logged as a run-specific W&B model artifact by default; periodic self-play
-snapshots stay local. Set
-`wandb.log_checkpoints=false` to keep them local only.
-
-### Kaggle submissions
-
-Every PPO run writes a final checkpoint, even when `train.snapshot_interval=0`.
-It appends that checkpoint to the ignored repository-local
-`logs/checkpoint_keys.csv` and prints both its path and a 12-character SHA-256
-key:
-
-```text
-checkpoint: .../checkpoints/snapshot_000000016384.pt
-checkpoint-key: 5ac45db92f3e
-```
-
-Run submission commands from the repository root. `uv sync` installs the
-official Kaggle CLI. Put `KAGGLE_API_TOKEN` in the untracked `.env`, run
-`uv run kaggle auth login`, or configure another credential method supported
-by the CLI.
-
-Build the newest completed checkpoint (the bottom registry row) without
-uploading it:
+`env.deck_pool_width=N` limits training to the `N` most-observed archetypes and leaves the eval
+set as it is, so a sweep measures how generalization scales with training diversity. Compare
+`eval/archetype_win_rate_{mean,worst_quartile}` across the arms.
 
 ```bash
-uv run python scripts/make_submission.py \
-  --checkpoint latest \
-  --label my-agent \
-  --yes
+python -m src.train --config-name ppo_selfplay_multideck --multirun env.deck_pool_width=4,8,16,32
 ```
 
-Sampling from the learned masked distribution is the default. To use
-deterministic highest-score selection instead, add `--action-selection greedy`.
+## Kaggle submissions
 
-To rebuild an existing label and upload it through the official CLI in one
-command, add `--force --submit`:
+Every PPO run appends its final checkpoint to the ignored `logs/checkpoint_keys.csv` and prints a
+12-character SHA-256 key. Build from the repo root, with `KAGGLE_API_TOKEN` in `.env` or after
+`uv run kaggle auth login`:
 
 ```bash
-uv run python scripts/make_submission.py \
-  --checkpoint 5ac45db92f3e \
-  --label my-agent \
-  --submit \
-  --yes \
-  --force
+uv run python scripts/make_submission.py --checkpoint latest --label my-agent --yes
+uv run python scripts/make_submission.py --checkpoint 5ac45db92f3e --label my-agent \
+  --submit --yes --force
 ```
 
-**[`submission_analysis/`](submission_analysis/README.md)** covers the rest
-of the Kaggle workflow: live submission status and leaderboard rank
-(`status`), episode outcomes and replay download (`episodes`), a
-replay-driven deck-refinement report with a prioritized "worth looking into"
-list (`deck-report`), and scouting the top leaderboard teams' decks
-(`scout`).
+`latest` is the bottom row of the registry. An explicit hash also resolves from the registry, with
+a path or name lookup under `CHECKPOINTS_DIR` for unregistered checkpoints. The builder verifies
+the recorded SHA-256 first. The deck defaults to the checkpoint's `env.deck0` and must hold
+exactly 60 integer entries; `--deck PATH` overrides it. Without `--submit` the builder only prints
+the `kaggle competitions submit ...` command. `--force` replaces the staging directory of that
+label. `--config path/to/.hydra/config.yaml` supplies the config for an old bare state-dict
+checkpoint.
+
+Inference samples each legal choice from the masked distribution, as in training, and re-encodes
+the partial selection before each next choice. `--action-selection greedy` takes the highest score
+instead. `submission/runtime.py` supports `MLPBackbone` or `TransformerBackbone` with
+`LinearPolicyHead` or `PointerPolicyHead`. Any other architecture fails before the builder writes
+an archive.
+
+The archive holds `main.py`, `cg_api.py`, `runtime.py`, `model.pt`, `model_config.json`,
+`deck.csv`, and `submission_manifest.json`. Kaggle runs the entryfile with empty globals and calls
+its last callable, so `agent` must stay last in `submission/main.py`. Kaggle supplies `torch` but
+not TorchRL or `cg`, so the bundle carries a pure-Python observation parser and a Torch-only
+runtime, with no TensorDict, Hydra, OmegaConf, or native simulator dependency.
+
+Every build runs a fail-closed preflight: it parses all bundled files as Python 3.11, rejects
+dynamic imports, allows only stdlib plus `torch` and bundled modules, reproduces Kaggle's loader,
+calls the agent for deck setup and a real selection in an isolated interpreter, then repeats the
+checks against the extracted archive. Any failure stops the build before the optional submit.
+
+[`submission_analysis/`](submission_analysis/README.md) covers the rest of the workflow:
 
 ```bash
-uv run python -m submission_analysis status --most-recent-n 2
-uv run python -m submission_analysis episodes --download-replays --most-recent-n 2
-uv run python -m submission_analysis deck-report --deck decks/example.csv
-uv run python -m submission_analysis scout --deck decks/example.csv
+uv run python -m submission_analysis status --most-recent-n 2              # rank and status
+uv run python -m submission_analysis episodes --download-replays           # outcomes, replays
+uv run python -m submission_analysis deck-report --deck decks/example.csv  # refinement report
+uv run python -m submission_analysis scout --deck decks/example.csv        # top teams' decks
 ```
 
-Building a submission reads `.env`, resolves `latest` from `CHECKPOINT_KEYS_FILE` (default
-`logs/checkpoint_keys.csv`), and verifies the recorded SHA-256 before building.
-An explicit hash is resolved from the registry first; path/name lookup under
-`CHECKPOINTS_DIR` remains available for legacy or unregistered checkpoints. It
-defaults the deck to the checkpoint's recorded `env.deck0`, requires exactly
-60 integer entries, and accepts `--deck PATH` for an explicit override. Without
-`--submit`, it prints the exact `kaggle competitions submit ...` command but
-does not contact Kaggle. `--force` replaces only the selected label's staging
-directory and archive.
+## Habrok (Slurm)
 
-The uploaded archive is deliberately small and self-contained:
-
-```text
-main.py
-cg_api.py
-runtime.py
-model.pt
-model_config.json
-deck.csv
-submission_manifest.json
-```
-
-The builder copies `submission/main.py`, not the repository-root TorchRL-based
-inference entrypoint. Kaggle executes the bundled entryfile with an empty
-globals mapping and selects its final callable, so `agent` must remain the last
-callable defined in the file. The validator supplies `torch`, but neither
-TorchRL nor the repository's `cg` Python package. The bundle therefore carries
-a pure-Python observation parser and Torch-only inference implementation; it
-contains no TensorDict, Hydra, OmegaConf, or native simulator dependency.
-
-Submission inference samples each legal choice from the learned masked
-distribution by default, matching training behavior. Pass
-`--action-selection greedy` for deterministic highest-score selection. Both
-modes re-encode the partial selection before each subsequent choice.
-
-The current portable runtime supports structured-observation checkpoints using
-`MLPBackbone` or `TransformerBackbone` (every pooling mode, per-entity token
-groups, learned segment embeddings, and the optional per-option tokens a
-pointer head needs) paired with `LinearPolicyHead` or `PointerPolicyHead`. The
-builder strictly reconstructs both the training model and portable model, so
-an unsupported architecture or mismatched config fails before an archive is
-produced. For an old bare state-dict checkpoint without embedded config, pass
-its Hydra config with `--config path/to/.hydra/config.yaml`.
-
-Every build performs a fail-closed Kaggle preflight before producing output. It
-checks all bundled Python as Python 3.11, rejects dynamic imports, permits only
-an explicit standard-library allowlist plus `torch` and bundled modules,
-prepends the resolved bundle path and verifies that local imports resolve
-there, reproduces Kaggle's empty-globals compile/execute/last-callable loader,
-and calls the agent for both deck setup and a real model selection in an
-isolated interpreter. It then extracts the finished archive, checks its exact
-root file set and checkpoint/deck hashes, and repeats the same preflight against
-the extracted upload bytes. Any failure aborts before the optional CLI submit.
-
-Slurm support is kept separately in [`slurm-conf/`](slurm-conf/README.md). The
-profiles select a normal Hydra config and add scheduler-specific overrides;
-they do not participate in local Hydra composition. Complete launch configs are
-available as `baseline`, `ppo`, `ppo_selfplay`, and `ppo_transformer` (the
-Issue-45 self-attention backbone).
-
-The first `ppo_transformer` run underperformed, so the candidate causes are
-split into one `conf/experiment/tf_*.yaml` overlay each — optimizer steps,
-trunk capacity, LR/entropy schedule, pre-LN, CLS readout, per-entity tokens,
-pointer head — plus `tf_combined` stacking them all.
-[`scripts/run_tf_diagnosis.sh`](scripts/run_tf_diagnosis.sh) submits the sweep,
-one A100 job per arm sharing a W&B group; `--dry-run` prints without
-submitting, and naming an arm submits just that one.
+Habrok is the University of Groningen's high-performance compute cluster. It schedules jobs with
+Slurm, and [`slurm-conf/`](slurm-conf/README.md) holds the profiles and job scripts for it. A
+profile selects a normal Hydra config and adds scheduler overrides. It takes no part in local
+Hydra composition. The launch configs are `baseline`, `ppo`, `ppo_selfplay`, and
+`ppo_transformer`.
 
 ## CI
 
-GitHub Actions runs linting, type-checking, and tests for pull requests that
-are ready for review. Draft pull requests intentionally skip CI to stay within
-the GitHub Actions free-plan budget.
+GitHub Actions runs linting, type-checking, and tests for pull requests that are ready for review.
+Drafts skip CI to stay in the free-plan budget.

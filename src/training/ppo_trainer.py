@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import logging
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
@@ -158,7 +157,6 @@ class PPOTrainer(Trainer):
         serial_for_single: bool = True,
         target_kl: float | None = None,
         target_kl_multiplier: float = 1.5,
-        use_amp: bool = False,
         compile_loss: bool = False,
         compile_policy: bool = False,
         lr_anneal: bool = False,
@@ -243,10 +241,6 @@ class PPOTrainer(Trainer):
             *between* epochs, so a single bad epoch still fully applies.
         :param target_kl_multiplier: Multiplier applied to ``target_kl`` for the
             early-stop threshold.
-        :param use_amp: Enable automatic mixed precision for the update step
-            (``float16`` + GradScaler on CUDA, ``bfloat16`` elsewhere). Uses the
-            modern ``torch.amp`` API (not the deprecated ``torch.cuda.amp``),
-            required because the test suite runs ``filterwarnings=error``.
         :param compile_loss: Wrap the loss module with ``torch.compile``.
         :param compile_policy: Enable ``torch.compile`` on the collection policy
             via the Collector. Defaults ``False`` (compile is slow/fragile on the
@@ -428,25 +422,10 @@ class PPOTrainer(Trainer):
         self._total_updates = max(1, total_frames // frames_per_batch)
         self._updates_done = 0
 
-        # AMP: modern ``torch.amp`` API (not the deprecated ``torch.cuda.amp``).
-        if use_amp:
-            amp_dtype = torch.float16 if self._device.type == "cuda" else torch.bfloat16
-            self._autocast_ctx: contextlib.AbstractContextManager = torch.amp.autocast(
-                device_type=self._device.type, dtype=amp_dtype
-            )
-            self._scaler = (
-                torch.amp.GradScaler(self._device.type)
-                if self._device.type == "cuda"
-                else None
-            )
-        else:
-            self._autocast_ctx = contextlib.nullcontext()
-            self._scaler = None
-
         logger.info(
             "PPOTrainer initialized: device=%s frames_per_batch=%d total_frames=%d "
             "num_epochs=%d sub_batch_size=%d lr=%g gamma=%g lmbda=%g clip_epsilon=%g "
-            "entropy_bonus=%s entropy_coeff=%g target_kl=%s use_amp=%s lr_anneal=%s "
+            "entropy_bonus=%s entropy_coeff=%g target_kl=%s lr_anneal=%s "
             "ent_anneal=%s collector=%s value_estimator=%s",
             self._device,
             frames_per_batch,
@@ -460,7 +439,6 @@ class PPOTrainer(Trainer):
             entropy_bonus,
             entropy_coeff,
             target_kl,
-            use_amp,
             lr_anneal,
             ent_anneal,
             self._collector_kind.value,
@@ -684,28 +662,18 @@ class PPOTrainer(Trainer):
                 # whole batch on the GPU once per epoch (docs/wsl-crash-diagnosis.md).
                 mb = data_flat[perm[start : start + self._sub_batch_size]]
 
-                with self._autocast_ctx:
-                    loss_vals = self._loss_fwd(mb)
-                    total_loss = _sum_loss_keys(loss_vals)
+                loss_vals = self._loss_fwd(mb)
+                total_loss = _sum_loss_keys(loss_vals)
 
                 if not torch.isfinite(total_loss):
                     skipped_minibatches += 1
                     continue
 
-                if self._scaler is not None:
-                    self._scaler.scale(total_loss).backward()
-                    self._scaler.unscale_(self._optim)
-                    grad_norm = nn.utils.clip_grad_norm_(
-                        self._clip_params, self._max_grad_norm
-                    )
-                    self._scaler.step(self._optim)
-                    self._scaler.update()
-                else:
-                    total_loss.backward()
-                    grad_norm = nn.utils.clip_grad_norm_(
-                        self._clip_params, self._max_grad_norm
-                    )
-                    self._optim.step()
+                total_loss.backward()
+                grad_norm = nn.utils.clip_grad_norm_(
+                    self._clip_params, self._max_grad_norm
+                )
+                self._optim.step()
                 self._optim.zero_grad(set_to_none=True)
 
                 # The optimizable ``loss_*`` terms, unconditionally: they are
