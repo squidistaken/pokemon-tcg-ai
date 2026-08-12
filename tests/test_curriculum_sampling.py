@@ -7,9 +7,9 @@ from torchrl.envs import ParallelEnv, TransformedEnv
 from torchrl.envs.transforms import ActionMask
 from torchrl.envs.utils import check_env_specs
 
-from src.env.archetype_index import ArchetypeIndex
-from src.env.curriculum_deck_sampler import NO_LEVEL, CurriculumDeckSampler
-from src.env.curriculum_handles import CurriculumHandles
+from src.curriculum.archetype_index import ArchetypeIndex
+from src.curriculum.deck_sampler import NO_LEVEL, CurriculumDeckSampler
+from src.curriculum.handles import CurriculumHandles
 from src.env.tcg_env import TCGEnv
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training.trainer import Trainer

@@ -34,8 +34,8 @@ import torch
 from tensordict import TensorDict
 
 from cg.api import OptionType, SelectType
-from src.env.card_database import CardDatabase
-from src.env.deck import load_deck
+from src.env.decks.deck import load_deck
+from src.env.observation.card_database import CardDatabase
 from src.env.tcg_env import TCGEnv
 
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures"

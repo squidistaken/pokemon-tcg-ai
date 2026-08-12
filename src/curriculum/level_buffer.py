@@ -10,7 +10,7 @@ class LevelEntry:
     One scored matchup in the level buffer.
 
     :param pair_id: Matchup identifier from
-        :meth:`~src.env.archetype_index.ArchetypeIndex.pair_id`.
+        :meth:`~src.curriculum.archetype_index.ArchetypeIndex.pair_id`.
     :param mean_residual: Running mean of the per-episode mean critic residual.
         Kept **signed**; the score takes its magnitude only after averaging.
     :param visits: Completed episodes folded into ``mean_residual``.
@@ -214,7 +214,7 @@ class LevelBuffer:
 
         A ``pair_id`` the buffer has never registered is only possible when the
         corpus is larger than ``capacity`` and levels are discovered lazily
-        rather than prefilled (see :class:`~src.training.curriculum.Curriculum`
+        rather than prefilled (see :class:`~src.curriculum.curriculum.Curriculum`
         and this class's docstring). Such a level accumulates in a probation
         table -- invisible to :meth:`distribution` -- until it reaches
         ``min_visits`` and is promoted into the scored buffer via

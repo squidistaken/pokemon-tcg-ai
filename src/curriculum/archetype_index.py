@@ -16,7 +16,7 @@ class ArchetypeIndex:
 
     An archetype is the folder its decks live in: the corpus ships as
     ``decks/<archetype>/*.csv`` and
-    :func:`~src.env.deck.resolve_deck_paths` already prefers those nested
+    :func:`~src.env.decks.deck.resolve_deck_paths` already prefers those nested
     files, so the grouping needs no clustering step. Decks sitting loose in the
     pool root fall back to :data:`UNGROUPED`.
 

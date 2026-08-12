@@ -14,11 +14,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.env.deck import load_deck
+from src.env.decks.deck import load_deck
 
 if TYPE_CHECKING:
     from scraper.card_index import CardIndex
-    from src.env.card_database import CardDatabase
+    from src.env.observation.card_database import CardDatabase
 
 
 def load_all_decks(deck_dir: Path) -> tuple[list[str], list[list[int]]]:
@@ -110,7 +110,7 @@ def load_card_database() -> CardDatabase | None:
     """
     console.print("[dim]Loading CardDatabase ...[/]")
     try:
-        from src.env.card_database import CardDatabase
+        from src.env.observation.card_database import CardDatabase
 
         return CardDatabase()
     except Exception as exc:  # noqa: BLE001 - engine may be unbuilt

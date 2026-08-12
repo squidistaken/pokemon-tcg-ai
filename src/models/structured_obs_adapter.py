@@ -14,7 +14,7 @@ from cg.api import (
     SelectType,
     SpecialConditionType,
 )
-from src.env.card_database import CardDatabase
+from src.env.observation.card_database import CardDatabase
 
 _CATEGORY_FIELD_ENUMS = {
     "select_cats": (SelectType, SelectContext),

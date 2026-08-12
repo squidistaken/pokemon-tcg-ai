@@ -2,8 +2,10 @@ import torch
 from torchrl.envs import TransformedEnv
 from torchrl.envs.transforms import ActionMask
 
-from src.env.deck import load_deck
-from src.env.structured_observation_encoder import StructuredObservationEncoder
+from src.env.decks.deck import load_deck
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
 from src.env.tcg_env import TCGEnv
 from src.policies.greedy_policy_opponent import (
     GreedyPolicyOpponent,

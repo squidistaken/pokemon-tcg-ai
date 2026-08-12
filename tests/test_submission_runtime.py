@@ -9,11 +9,11 @@ from omegaconf import DictConfig, OmegaConf
 
 from cg.api import Observation
 from src.env.battle_handle import BattleHandle
-from src.env.deck import load_deck
-from src.env.random_opponent import RandomOpponent
-from src.env.structured_observation_encoder import (
+from src.env.decks.deck import load_deck
+from src.env.observation.structured_observation_encoder import (
     StructuredObservationEncoder as TrainingEncoder,
 )
+from src.env.opponents.random_opponent import RandomOpponent
 from src.models.transformer import TransformerBackbone as TrainingTransformerBackbone
 from src.policies.ppo_actor import build_actor_critic
 from submission.cg_api import to_observation_class

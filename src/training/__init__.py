@@ -2,14 +2,12 @@ from .base_trainer import BaseTrainer
 from .callbacks import (
     CallbackList,
     CrossPlayCallback,
-    CurriculumStateCallback,
     SnapshotCallback,
     TrainingCallback,
     TrainStateCallback,
     WeightsAndBiases,
 )
 from .collectors import AsyncCollectorOptions, CollectorKind
-from .curriculum import Curriculum, build_curriculum
 from .env_factory import build_probe_specs, make_env, make_env_factories
 from .evaluator import Evaluator, build_evaluator
 from .multi_evaluator import MultiEvaluator
@@ -27,8 +25,6 @@ __all__ = [
     "CallbackList",
     "CollectorKind",
     "CrossPlayCallback",
-    "Curriculum",
-    "CurriculumStateCallback",
     "Evaluator",
     "MultiEvaluator",
     "PPOTrainer",
@@ -38,7 +34,6 @@ __all__ = [
     "TrainingCallback",
     "WeightsAndBiases",
     "build_best_response_opponent_factory",
-    "build_curriculum",
     "build_eval_opponent_factory",
     "build_evaluator",
     "build_opponent_factory",

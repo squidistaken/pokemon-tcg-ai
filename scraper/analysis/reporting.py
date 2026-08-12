@@ -29,7 +29,7 @@ from .prune import near_duplicate_clusters
 
 if TYPE_CHECKING:
     from scraper.card_index import CardIndex
-    from src.env.card_database import CardDatabase
+    from src.env.observation.card_database import CardDatabase
 
     from ..manifest import Manifest
 

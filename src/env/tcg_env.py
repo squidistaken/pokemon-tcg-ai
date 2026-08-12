@@ -7,13 +7,13 @@ from torchrl.data import Binary, Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
 from cg.api import Observation, SelectData, State
+from src.curriculum.deck_sampler import NO_LEVEL
 
 from .battle_handle import BattleHandle
-from .curriculum_deck_sampler import NO_LEVEL
-from .deck_sampler import DeckSampler, FixedDeckSampler, sample_for_seat
-from .observation_encoder import ObservationEncoder
-from .random_opponent import RandomOpponent
-from .structured_observation_encoder import StructuredObservationEncoder
+from .decks.deck_sampler import DeckSampler, FixedDeckSampler, sample_for_seat
+from .observation.observation_encoder import ObservationEncoder
+from .observation.structured_observation_encoder import StructuredObservationEncoder
+from .opponents.random_opponent import RandomOpponent
 
 
 class TCGEnv(EnvBase):
@@ -321,7 +321,7 @@ class TCGEnv(EnvBase):
         Tell the opponent policy how the finished battle went, if it cares.
 
         Leagues that weight their members by strength (e.g.
-        :class:`~src.env.pfsp_opponent_pool.PFSPOpponentPool`) need the result
+        :class:`~src.env.opponents.pfsp_opponent_pool.PFSPOpponentPool`) need the result
         of each episode, and the terminal reward is only available here. Other
         opponents do not expose the hook and are left untouched, exactly as
         with ``on_reset``.

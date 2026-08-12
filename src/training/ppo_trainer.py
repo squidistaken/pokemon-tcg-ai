@@ -15,6 +15,7 @@ from torchrl.modules import ActorValueOperator
 from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value import GAE, ValueEstimatorBase, VTrace
 
+from src.curriculum.curriculum import Curriculum
 from src.models.actor_critic import ActorCritic
 from src.policies.ppo_actor import build_ppo_operator
 from src.training.callbacks import TrainingCallback, TrainStateCallback
@@ -24,7 +25,6 @@ from src.training.collectors import (
     is_off_policy,
     parse_collector_kind,
 )
-from src.training.curriculum import Curriculum
 from src.training.evaluator import Evaluator
 from src.training.loss._helpers import _sum_loss_keys
 from src.training.multi_evaluator import MultiEvaluator
@@ -62,7 +62,7 @@ def _reject_unstable_curriculum_rows(
     """
     Refuse the one collector/curriculum pairing that silently misattributes scores.
 
-    :class:`~src.training.curriculum.Curriculum` accumulates a residual per
+    :class:`~src.curriculum.curriculum.Curriculum` accumulates a residual per
     *collector row*, which assumes row ``r`` of the next batch continues the
     same environment's episode as row ``r`` of this one. ``sync`` and
     ``multi_sync`` stack workers in a fixed order and honour that.

@@ -7,10 +7,10 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from tensordict import TensorDict
 
-from src.env.archetype_index import ArchetypeIndex
-from src.env.curriculum_handles import CurriculumHandles
-from src.env.level_buffer import LevelBuffer
-from src.training.curriculum import Curriculum, build_curriculum
+from src.curriculum.archetype_index import ArchetypeIndex
+from src.curriculum.curriculum import Curriculum, build_curriculum
+from src.curriculum.handles import CurriculumHandles
+from src.curriculum.level_buffer import LevelBuffer
 from src.training.env_factory import load_deck_pool
 from tests.conftest import DECK_PATH, structured_env_cfg
 

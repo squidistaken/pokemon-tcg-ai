@@ -25,7 +25,9 @@ from scripts.make_submission import (
     validate_deck,
 )
 from src.checkpoint_registry import append_checkpoint_record, sha256_file
-from src.env.structured_observation_encoder import StructuredObservationEncoder
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
 from src.policies.ppo_actor import build_actor_critic
 
 

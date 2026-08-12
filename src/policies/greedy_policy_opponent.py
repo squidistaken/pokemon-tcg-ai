@@ -8,7 +8,7 @@ from tensordict import TensorDict
 from torchrl.data import Composite, TensorSpec
 
 from cg.api import Observation
-from src.env.observation_encoder import ObservationEncoder
+from src.env.observation.observation_encoder import ObservationEncoder
 from src.models.actor_critic import ActorCritic
 from src.policies.ppo_actor import build_actor_critic
 
@@ -91,8 +91,8 @@ class GreedyPolicyOpponent:
 
     This is the self-play snapshot: a frozen network dropped into the opponent
     seat via the environment's ``opponent`` callable / an
-    :class:`~src.env.opponent_pool.OpponentPool`. Like
-    :class:`~src.env.random_opponent.RandomOpponent`, it answers a whole engine
+    :class:`~src.env.opponents.opponent_pool.OpponentPool`. Like
+    :class:`~src.env.opponents.random_opponent.RandomOpponent`, it answers a whole engine
     selection in one call (the environment does not decompose the opponent's
     multi-select), so it mirrors the Kaggle ``main.py`` inference path: encode
     the observation from the acting seat, score the option slots with the

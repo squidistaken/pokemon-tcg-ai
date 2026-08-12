@@ -4,7 +4,7 @@ from collections.abc import Sequence
 import torch
 
 from .archetype_index import ArchetypeIndex
-from .curriculum_handles import CurriculumHandles
+from .handles import CurriculumHandles
 
 Deck = list[int]
 
@@ -16,11 +16,11 @@ class CurriculumDeckSampler:
     """
     Deck sampler that draws each episode's matchup from the level curriculum.
 
-    Implements the :class:`~src.env.deck_sampler.DeckSampler` protocol, so it
+    Implements the :class:`~src.env.decks.deck_sampler.DeckSampler` protocol, so it
     drops into :class:`~src.env.tcg_env.TCGEnv` wherever
-    :class:`~src.env.deck_sampler.PoolDeckSampler` would go. It draws an
+    :class:`~src.env.decks.deck_sampler.PoolDeckSampler` would go. It draws an
     archetype pair from the distribution the learner publishes through
-    :class:`~src.env.curriculum_handles.CurriculumHandles`, then deals a list
+    :class:`~src.curriculum.handles.CurriculumHandles`, then deals a list
     from within each archetype, uniformly or by ``weights`` under
     ``env.deck_weighting``. Only the pairing is curated; list-level diversity is
     preserved.

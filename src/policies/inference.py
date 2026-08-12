@@ -6,7 +6,7 @@ from tensordict import TensorDict
 from torchrl.data import Categorical, Composite
 
 from cg.api import Observation
-from src.env.observation_encoder import ObservationEncoder
+from src.env.observation.observation_encoder import ObservationEncoder
 from src.models.actor_critic import ActorCritic
 from src.policies.ppo_actor import build_actor_critic
 from src.training.env_factory import make_encoder

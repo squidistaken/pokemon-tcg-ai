@@ -12,10 +12,12 @@ from torchrl.envs import EnvBase, TransformedEnv
 from torchrl.envs.transforms import ActionMask
 
 from cg.api import Observation
-from src.env.deck import load_deck, resolve_deck_paths
-from src.env.deck_sampler import build_deck_sampler
-from src.env.observation_encoder import ObservationEncoder
-from src.env.structured_observation_encoder import StructuredObservationEncoder
+from src.env.decks.deck import load_deck, resolve_deck_paths
+from src.env.decks.deck_sampler import build_deck_sampler
+from src.env.observation.observation_encoder import ObservationEncoder
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
 from src.env.tcg_env import TCGEnv
 
 OpponentFactory = Callable[[], Callable[[Observation], list[int]]]
@@ -31,7 +33,7 @@ def make_encoder(name: str, max_options: int) -> ObservationEncoder:
 
     :param name: Encoder name; ``structured`` is the only supported encoder.
     :param max_options: Padded option-space size of the environment.
-    :return: A matching :class:`~src.env.observation_encoder.ObservationEncoder`.
+    :return: A matching :class:`~src.env.observation.observation_encoder.ObservationEncoder`.
     :raises ValueError: If the name is unknown.
     """
     if name == "structured":
@@ -51,7 +53,7 @@ def make_env(
     Build a single masked TCG environment instance.
 
     :param sampler_spec: Picklable deck-sampler spec (see
-        :func:`~src.env.deck_sampler.build_deck_sampler`).
+        :func:`~src.env.decks.deck_sampler.build_deck_sampler`).
     :param max_options: Padded size of the option space.
     :param seed: Seed for this environment instance (and its deck sampler).
     :param opponent_factory: Builds the opponent for this instance (e.g. an
@@ -200,7 +202,7 @@ def archetype_observations(kept_paths: list[str]) -> dict[str, float]:
     over its lists. Used to decide which archetypes ``deck_pool_width`` keeps.
     The weights :func:`_deck_weights` builds stay per-list; the curriculum sums
     them separately, in
-    :meth:`~src.env.curriculum_deck_sampler.CurriculumDeckSampler._archetype_totals`,
+    :meth:`~src.curriculum.deck_sampler.CurriculumDeckSampler._archetype_totals`,
     for its matchup discovery draw.
 
     :param kept_paths: Deck CSV paths to aggregate over.
@@ -430,7 +432,7 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
     :param cfg: Hydra configuration with an ``env`` section and top-level seed.
     :param deck_split: ``"train"`` or ``"eval"`` — which subset the sampler draws
         from when a pool is configured.
-    :return: Spec dict consumed by :func:`~src.env.deck_sampler.build_deck_sampler`.
+    :return: Spec dict consumed by :func:`~src.env.decks.deck_sampler.build_deck_sampler`.
     :raises ValueError: If ``env.agent_deck`` is set without ``env.deck_pool``,
         which would otherwise drop the pin silently.
     """
@@ -550,7 +552,7 @@ def make_env_factories(
     :param deck_split: ``"train"`` (default) or ``"eval"``. Only affects runs
         with ``env.deck_pool`` set and a non-zero ``env.deck_holdout_frac``,
         where ``"eval"`` draws from the held-out, never-trained decks.
-    :param curriculum: A :class:`~src.training.curriculum.Curriculum` whose
+    :param curriculum: A :class:`~src.curriculum.curriculum.Curriculum` whose
         published distribution the environments draw matchups from. None keeps
         the configured deck sampler. Ignored for the ``"eval"`` split, which
         must stay an unbiased read across held-out decks rather than following

@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 from omegaconf import DictConfig, OmegaConf
 
-from src.env.agent_deck_sampler import AgentDeckSampler
-from src.env.deck import load_deck, load_decks, resolve_deck_paths
-from src.env.deck_sampler import (
+from src.env.decks.agent_deck_sampler import AgentDeckSampler
+from src.env.decks.deck import load_deck, load_decks, resolve_deck_paths
+from src.env.decks.deck_sampler import (
     FixedDeckSampler,
     PoolDeckSampler,
     build_deck_sampler,

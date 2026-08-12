@@ -8,8 +8,8 @@ from tensordict import TensorDictBase
 from torchrl.collectors import Collector
 from torchrl.envs import SerialEnv
 
-from src.env.opponent_pool import OpponentPool
-from src.env.random_opponent import RandomOpponent
+from src.env.opponents.opponent_pool import OpponentPool
+from src.env.opponents.random_opponent import RandomOpponent
 from src.policies.ppo_actor import build_actor_critic
 from src.training.env_factory import make_env_factories
 from tests.conftest import N_ACTIONS, PPOTrainerForTests, structured_env_cfg

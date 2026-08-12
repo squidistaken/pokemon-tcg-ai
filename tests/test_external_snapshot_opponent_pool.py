@@ -3,9 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from src.env.opponent_pool import OpponentPool
-from src.env.random_opponent import RandomOpponent
-from src.training.external_snapshot_opponent_pool import ExternalSnapshotOpponentPool
+from src.env.opponents.external_snapshot_opponent_pool import (
+    ExternalSnapshotOpponentPool,
+)
+from src.env.opponents.opponent_pool import OpponentPool
+from src.env.opponents.random_opponent import RandomOpponent
 
 
 def _fake_loader(path: Path) -> RandomOpponent:

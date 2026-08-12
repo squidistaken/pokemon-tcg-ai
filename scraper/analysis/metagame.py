@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from src.env.card_database import CardDatabase
+    from src.env.observation.card_database import CardDatabase
 
     from ..manifest import Manifest
 

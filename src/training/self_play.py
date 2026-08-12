@@ -9,18 +9,18 @@ from omegaconf import DictConfig
 from torchrl.data import Categorical, Composite
 
 from cg.api import Observation
-from src.env.observation_encoder import ObservationEncoder
-from src.env.pfsp_opponent_pool import PFSPOpponentPool
-from src.env.random_opponent import RandomOpponent
-from src.env.snapshot_opponent_pool import SnapshotOpponentPool
+from src.env.observation.observation_encoder import ObservationEncoder
+from src.env.opponents.external_snapshot_opponent_pool import (
+    ExternalSnapshotOpponentPool,
+    valid_snapshot_paths,
+)
+from src.env.opponents.pfsp_opponent_pool import PFSPOpponentPool
+from src.env.opponents.random_opponent import RandomOpponent
+from src.env.opponents.snapshot_opponent_pool import SnapshotOpponentPool
 from src.policies.greedy_policy_opponent import (
     load_greedy_opponent,
 )
 from src.training.env_factory import OpponentFactory, make_encoder
-from src.training.external_snapshot_opponent_pool import (
-    ExternalSnapshotOpponentPool,
-    valid_snapshot_paths,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ def build_eval_opponent_factory(
     Supported ``eval_opponent`` values:
 
     ``"random"``
-        :class:`~src.env.random_opponent.RandomOpponent`, the default and the
+        :class:`~src.env.opponents.random_opponent.RandomOpponent`, the default and the
         only one that does not re-read a checkpoint every evaluation.
 
     ``"first_snapshot"``
@@ -191,7 +191,7 @@ def _load_oldest_snapshot_opponent(
     fixed for the whole run. The config value keeps its name so metric series
     stay comparable with runs already logged.
 
-    Falls back to :class:`~src.env.random_opponent.RandomOpponent` when no
+    Falls back to :class:`~src.env.opponents.random_opponent.RandomOpponent` when no
     snapshot exists yet, so the first eval interval that fires before the
     league has been snapshotted still produces a readable win rate.
 
@@ -349,7 +349,7 @@ def build_opponent_factory(
     Build the self-play opponent factory described by ``cfg.train``.
 
     Returns None when snapshotting is disabled, which leaves the environments
-    on their built-in :class:`~src.env.random_opponent.RandomOpponent` — the
+    on their built-in :class:`~src.env.opponents.random_opponent.RandomOpponent` — the
     exact random-baseline path, with no self-play machinery in the way.
 
     The returned factory is a module-level :func:`~functools.partial` over

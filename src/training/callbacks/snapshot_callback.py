@@ -32,7 +32,7 @@ class SnapshotCallback(TrainingCallback):
     This is the writing half of the self-play loop: every ``interval``
     collected frames it snapshots the actor-critic into ``checkpoint_dir``,
     where the environment workers'
-    :class:`~src.env.snapshot_opponent_pool.SnapshotOpponentPool` instances
+    :class:`~src.env.opponents.snapshot_opponent_pool.SnapshotOpponentPool` instances
     discover it and start playing against it.
 
     Writes go to a temporary file that is then atomically renamed into place,

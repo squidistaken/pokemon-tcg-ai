@@ -13,8 +13,10 @@ from omegaconf import DictConfig, OmegaConf
 
 import main
 from src.env.battle_handle import BattleHandle
-from src.env.deck import load_deck
-from src.env.structured_observation_encoder import StructuredObservationEncoder
+from src.env.decks.deck import load_deck
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 from src.policies.ppo_actor import build_actor_critic
 from src.training.env_factory import load_deck_pool
@@ -468,7 +470,7 @@ def test_uniform_league_does_not_label_snapshot_games_as_anchor(tmp_path) -> Non
     """
     A league member that is a learner snapshot is not a fixed reference.
     """
-    from src.env.snapshot_opponent_pool import SnapshotOpponentPool
+    from src.env.opponents.snapshot_opponent_pool import SnapshotOpponentPool
 
     def warmup(_observation):
         return []
@@ -498,9 +500,9 @@ def test_curriculum_sampler_seed_controls_the_matchup_draw() -> None:
     """
     Two samplers seeded differently must not walk one matchup sequence.
     """
-    from src.env.archetype_index import ArchetypeIndex
-    from src.env.curriculum_deck_sampler import CurriculumDeckSampler
-    from src.env.curriculum_handles import CurriculumHandles
+    from src.curriculum.archetype_index import ArchetypeIndex
+    from src.curriculum.deck_sampler import CurriculumDeckSampler
+    from src.curriculum.handles import CurriculumHandles
 
     decks = [[index] for index in range(8)]
     archetypes = ArchetypeIndex(

@@ -99,7 +99,7 @@ class AgentDeckSampler:
         """
         Draw a matchup without knowing the agent's seat.
 
-        Present only to satisfy :class:`~src.env.deck_sampler.DeckSampler`;
+        Present only to satisfy :class:`~src.env.decks.deck_sampler.DeckSampler`;
         it assumes seat 0, which is what the protocol can express.
 
         :return: The ``(deck0, deck1)`` pair with the agent's deck on seat 0.

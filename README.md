@@ -69,12 +69,15 @@ as unresolved and none reach the corpus. See the card pool section of `scraper/R
 cg/                    ctypes bindings for the cabt battle engine
 ptcg_engine/           C++ source of that engine
 src/
-  env/                 TorchRL environment: TCGEnv, observation encoding, weighted deck
-                       samplers, self-play opponent pools
+  env/                 TCGEnv and its battle handle
+    observation/         Encoders, option reference resolver, card database
+    decks/               Deck loading and the weighted/fixed/agent-pinned samplers
+    opponents/           Self-play pools: snapshot, PFSP, external, random
+  curriculum/          Level buffer, archetype index, shared-memory handles, callback
   models/              Backbones (mlp, transformer), obs adapter, policy/value heads, ActorCritic
   policies/            Random, greedy, and Kaggle inference policies + the PPO operator builder
   training/            Trainer, PPO, collectors, env factory, self-play, evaluators, cross-play,
-                       and callbacks/ (snapshots, train state, W&B)
+                       loss/ and callbacks/ (snapshots, train state, W&B)
   train.py             Hydra entry point (python -m src.train): main() only
   trainer_builder.py   Builds the trainer, callbacks and run paths from the config
   eval_deck_field.py   Per-archetype scoring across a deck field
@@ -142,51 +145,30 @@ TODO: the exact config and command that produce the submitted checkpoint.
 
 | Config | What it does |
 | --- | --- |
-| `train=fixed_opponent` | Default. Trains against the built-in uniform-random opponent. |
+| `train=fixed_opponent` | Default. Trains against the uniform-random opponent. |
 | `train=ppo_selfplay` | Self-play league plus PFSP over its members. |
 | `env.deck_weighting=observation` | Deals each list in proportion to how often it was played. |
+| `env.deck_pool_width=N` | Limits training to the `N` most-observed archetypes. |
 | `train.cross_play=true` | Ranks the run's own checkpoints at the end. |
 | `--config-name ppo_best_response` | Measures how exploitable a frozen agent is. |
 
-`env.deck_weighting=observation` (`conf/env/default.yaml`) weights the deck draw by each list's
-`observation_count` in `manifest.json`, so training plays the lists people play. Uniform draws
-spend most of a run on lists nobody plays: 76.7% of the corpus was observed once, and those lists
-hold 43.6% of the observation mass. The other weightings are `winrate` and `placing`, and `null`
-is uniform. The weighting applies to both seats, and to training only, because evaluation draws
-its own panel. Neither seat is pinned with `env.agent_deck`, because under self-play the opponent
-is a snapshot of the same network and a pin leaves it with decks it never practises. Pick the
-submission deck afterwards, by probing candidates in the engine with the finished agent.
+Keys worth knowing when reading a run:
 
-`train=ppo_selfplay` freezes the learner into `train.checkpoint_dir` every
-`train.snapshot_interval` frames. Each worker draws its opponent from the newest
-`train.pool_size` snapshots. The uniform-random opponent stays a permanent league member, so the
-policy keeps one fixed reference point. Because the league follows the learner, the collected
-`win_rate` stays near 0.5 at every strength. Read progress from `eval/` instead, which runs every
-`train.eval_interval` frames against `train.eval_opponents`. Evaluation is serial, so each round
-stops collection for its `train.eval_episodes` games. `train.eval_deterministic` (default `true`)
-scores the argmax. `env.eval_agent_deck` and `env.eval_panel_size` hold the agent's deck and the
-opponent panel fixed, so the curve reads like a submission.
-
-`train.cross_play=true`, with self-play on, logs `crossplay/vs_latest_snapshot` during the run.
-At the end it plays the checkpoints round-robin and writes `crossplay_matrix.csv` and a
-Bradley-Terry Elo in `crossplay_elo.csv` (`src/training/cross_play.py`). Use that Elo to pick the
-checkpoint to submit.
-
-`--config-name ppo_best_response` freezes an agent and trains a fresh learner against it. The
-learner's `eval/win_rate` is the exploitability of the frozen agent: 0.5 means the best-responder
-found no hole, and every point above 0.5 is a hole it found. A self-play `win_rate` near 0.5
-cannot show this, because the league moves with the learner.
+- Self-play freezes the learner every `train.snapshot_interval` frames into
+  `train.checkpoint_dir`, and each worker draws from the newest `train.pool_size` snapshots. The
+  league follows the learner, so the collected `win_rate` sits near 0.5 whatever the strength.
+- Read progress from `eval/` instead. It runs every `train.eval_interval` frames against
+  `train.eval_opponents`, is serial, and scores the argmax under `train.eval_deterministic`.
+  `env.eval_agent_deck` and `env.eval_panel_size` hold the deck and opponent panel fixed.
+- Cross-play writes `crossplay_matrix.csv` and a Bradley-Terry Elo in `crossplay_elo.csv`. Use
+  that Elo to pick the checkpoint to submit.
+- Best-response reports the frozen agent's exploitability as the new learner's `eval/win_rate`:
+  0.5 means no hole found, higher means more exploitable.
+- Deck-pool sweeps compare `eval/archetype_win_rate_{mean,worst_quartile}` across arms.
 
 ```bash
 python -m src.train --config-name ppo_best_response \
   train.best_response_checkpoint=/path/to/agent.pt
-```
-
-`env.deck_pool_width=N` limits training to the `N` most-observed archetypes and leaves the eval
-set as it is, so a sweep measures how generalization scales with training diversity. Compare
-`eval/archetype_win_rate_{mean,worst_quartile}` across the arms.
-
-```bash
 python -m src.train --config-name ppo_selfplay_multideck --multirun env.deck_pool_width=4,8,16,32
 ```
 
@@ -202,30 +184,26 @@ uv run python scripts/make_submission.py --checkpoint 5ac45db92f3e --label my-ag
   --submit --yes --force
 ```
 
-`latest` is the bottom row of the registry. An explicit hash also resolves from the registry, with
-a path or name lookup under `CHECKPOINTS_DIR` for unregistered checkpoints. The builder verifies
-the recorded SHA-256 first. The deck defaults to the checkpoint's `env.deck0` and must hold
-exactly 60 integer entries; `--deck PATH` overrides it. Without `--submit` the builder only prints
-the `kaggle competitions submit ...` command. `--force` replaces the staging directory of that
-label. `--config path/to/.hydra/config.yaml` supplies the config for an old bare state-dict
-checkpoint.
+Flags:
 
-Inference samples each legal choice from the masked distribution, as in training, and re-encodes
-the partial selection before each next choice. `--action-selection greedy` takes the highest score
-instead. `submission/runtime.py` supports `MLPBackbone` or `TransformerBackbone` with
-`LinearPolicyHead` or `PointerPolicyHead`. Any other architecture fails before the builder writes
-an archive.
+| Flag | Meaning |
+| --- | --- |
+| `--checkpoint latest` | The bottom registry row. A 12-char hash or a path also works. |
+| `--label NAME` | Names the staging directory and the archive. |
+| `--submit` | Upload through the Kaggle CLI. Without it, the command is only printed. |
+| `--force` | Rebuild over that label's existing staging directory. |
+| `--deck PATH` | Override the deck; defaults to the checkpoint's `env.deck0`, 60 entries. |
+| `--action-selection greedy` | Take the highest score instead of sampling the masked distribution. |
+| `--config PATH/.hydra/config.yaml` | Supply the config for an old bare state-dict checkpoint. |
+
+`submission/runtime.py` supports `MLPBackbone` or `TransformerBackbone` with `LinearPolicyHead` or
+`PointerPolicyHead`. Any other architecture fails before an archive is written, as does the
+fail-closed Kaggle preflight every build runs.
 
 The archive holds `main.py`, `cg_api.py`, `runtime.py`, `model.pt`, `model_config.json`,
 `deck.csv`, and `submission_manifest.json`. Kaggle runs the entryfile with empty globals and calls
 its last callable, so `agent` must stay last in `submission/main.py`. Kaggle supplies `torch` but
-not TorchRL or `cg`, so the bundle carries a pure-Python observation parser and a Torch-only
-runtime, with no TensorDict, Hydra, OmegaConf, or native simulator dependency.
-
-Every build runs a fail-closed preflight: it parses all bundled files as Python 3.11, rejects
-dynamic imports, allows only stdlib plus `torch` and bundled modules, reproduces Kaggle's loader,
-calls the agent for deck setup and a real selection in an isolated interpreter, then repeats the
-checks against the extracted archive. Any failure stops the build before the optional submit.
+not TorchRL or `cg`, which is why the bundle carries its own observation parser and runtime.
 
 [`submission_analysis/`](submission_analysis/README.md) covers the rest of the workflow:
 

@@ -25,7 +25,7 @@ from scraper.manifest import DeckEntry, Manifest, ManifestError, Observation
 from scraper.models import CardSwap, RawCard, RawDeck, ResolvedDeck
 from scraper.pipeline import RunSummary, process_deck
 from scraper.writer import DeckWriter, deck_hash, read_deck_ids
-from src.env.deck import load_deck
+from src.env.decks.deck import load_deck
 
 EXAMPLE_DECK = Path(__file__).parents[1] / "decks" / "example.csv"
 

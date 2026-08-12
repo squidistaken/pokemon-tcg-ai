@@ -3,9 +3,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from src.training.curriculum import Curriculum
-
-from .base import TrainingCallback
+from src.curriculum.curriculum import Curriculum
+from src.training.callbacks.base import TrainingCallback
 
 logger = logging.getLogger(__name__)
 

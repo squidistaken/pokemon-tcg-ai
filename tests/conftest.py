@@ -5,7 +5,9 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from torchrl.data import Binary, Categorical, Composite
 
-from src.env.structured_observation_encoder import StructuredObservationEncoder
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
 from src.training.ppo_trainer import PPOTrainer
 
 DECK_PATH = str(Path(__file__).parents[1] / "decks" / "example.csv")

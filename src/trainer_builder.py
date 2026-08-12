@@ -21,13 +21,14 @@ from omegaconf import DictConfig, OmegaConf
 from torchrl.data import Categorical, Composite
 from torchrl.envs import EnvBase
 
+from src.curriculum import build_curriculum
+from src.curriculum.callback import CurriculumStateCallback
 from src.models.actor_critic import ActorCritic
 from src.policies.greedy_policy_opponent import checkpoint_state_dict
 from src.policies.ppo_actor import build_actor_critic
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training import (
     CrossPlayCallback,
-    CurriculumStateCallback,
     Evaluator,
     MultiEvaluator,
     PPOTrainer,
@@ -36,7 +37,6 @@ from src.training import (
     TrainingCallback,
     WeightsAndBiases,
     build_best_response_opponent_factory,
-    build_curriculum,
     build_evaluator,
     build_opponent_factory,
     build_probe_specs,
