@@ -32,22 +32,14 @@ from src.training.trainer import Trainer
 
 logger = logging.getLogger(__name__)
 
-#: Non-optimizable diagnostics averaged over the applied minibatches and
-#: reported alongside the ``loss_*`` terms. These are the standard reads on
-#: whether PPO is healthy, and none of them can be inferred from the losses:
-#: ``entropy`` is the unweighted policy entropy (``loss_entropy`` is it already
-#: scaled by a coefficient that anneals), ``clip_fraction`` says how much of the
-#: batch the surrogate is clipping, ``ESS`` how degenerate the importance
-#: weights have become, ``kl_approx`` how far the epochs drift off-policy, and
-#: ``explained_variance`` whether the critic predicts returns at all.
+#: Non-optimizable diagnostics reported alongside the ``loss_*`` terms, none of
+#: them inferable from the losses: unweighted policy ``entropy``, how much of
+#: the batch the surrogate clips, how degenerate the importance weights are,
+#: how far the epochs drift off-policy, and whether the critic predicts returns.
 #:
-#: Each is accumulated only on the minibatches where it came back finite, and
-#: is simply absent from the update's metrics when no minibatch produced one --
-#: ``entropy`` never exists without an entropy bonus, and
-#: ``explained_variance`` is the one that genuinely can be non-finite, on a
-#: tiny or near-constant-target batch. That guard is why they are kept out of
-#: the ``loss_``-prefixed terms :func:`_sum_loss_keys` puts in the backward
-#: pass and out of the finite-loss check.
+#: Each is averaged over the minibatches where it came back finite, and is
+#: absent from the metrics when none did. That per-key guard is why they stay
+#: out of the ``loss_``-prefixed terms and the finite-loss check.
 _LOGGED_DIAGNOSTICS = (
     "entropy",
     "clip_fraction",
@@ -56,12 +48,11 @@ _LOGGED_DIAGNOSTICS = (
     "explained_variance",
 )
 
-#: Advantage estimators the trainer can be configured with.
-#: ``gae`` assumes the batch came from a single behaviour policy, which is what
-#: ``collector.type=sync`` guarantees. ``vtrace`` does not: it recomputes the
-#: log-probs of the collected actions under the *current* policy and clips the
-#: resulting importance ratios, so a batch collected while the weights moved
-#: underneath it is corrected rather than trusted.
+#: Advantage estimators the trainer can be configured with. ``gae`` assumes the
+#: batch came from one behaviour policy, which ``collector.type=sync``
+#: guarantees. ``vtrace`` does not: it re-scores the collected actions under the
+#: current policy and clips the importance ratios, correcting a batch collected
+#: while the weights moved underneath it.
 _VALUE_ESTIMATORS = ("gae", "vtrace")
 
 
@@ -72,22 +63,15 @@ def _reject_unstable_curriculum_rows(
     Refuse the one collector/curriculum pairing that silently misattributes scores.
 
     :class:`~src.training.curriculum.Curriculum` accumulates a residual per
-    *collector row* and commits it when that row reports ``done``, which assumes
-    row ``r`` of the next batch continues the same environment's episode as row
-    ``r`` of this one. ``sync`` and ``multi_sync`` honour that, since both stack
-    workers in a fixed order.
+    *collector row*, which assumes row ``r`` of the next batch continues the
+    same environment's episode as row ``r`` of this one. ``sync`` and
+    ``multi_sync`` stack workers in a fixed order and honour that.
 
-    ``multi_async`` cannot. It yields whichever worker finished first, so rows
-    are in completion order and their identity shuffles between batches; a
-    half-finished episode's residuals would be committed under whichever *other*
-    environment's episode landed in that row next, scoring one matchup with
-    another matchup's evidence. TorchRL's ``traj_ids`` cannot repair this either
-    -- it identifies a trajectory, not a worker, and changes as soon as an
-    episode ends.
-
-    That is a silent scientific error rather than a crash, and the combination
-    buys nothing (``multi_sync`` measured faster anyway), so it is rejected
-    outright instead of warned about.
+    ``multi_async`` yields whichever worker finished first, so row identity
+    shuffles between batches and one matchup's residuals land on another's
+    score. ``traj_ids`` cannot repair it: they identify a trajectory, not a
+    worker. That is a silent scientific error rather than a crash, and
+    ``multi_sync`` measured faster anyway, so the pairing is rejected outright.
 
     :param collector_type: Configured collector kind.
     :param curriculum: The curriculum, if one is active.
@@ -110,23 +94,18 @@ class PPOTrainer(Trainer):
     """
     Clipped-PPO trainer with invalid-action masking over the TCG environment.
 
-    Extends :class:`~src.training.trainer.Trainer` by implementing the
-    :meth:`_update` hook with the canonical on-policy PPO loop: estimate
-    advantages with :class:`~torchrl.objectives.value.GAE`, then run a
-    minibatch loop over :class:`~torchrl.objectives.ClipPPOLoss`
+    Implements :class:`~src.training.trainer.Trainer`'s :meth:`_update` hook
+    with the on-policy PPO loop: estimate advantages once per collected batch,
+    then run a minibatch loop over :class:`~torchrl.objectives.ClipPPOLoss`
     (``loss_objective + loss_critic + loss_entropy``) with gradient clipping.
+    Minibatching is a shuffled permutation with contiguous slicing, so the final
+    smaller minibatch is used.
 
     The collection policy and both loss networks are views of a single
     shared-trunk :class:`~torchrl.modules.ActorValueOperator`, so the backbone
-    runs once per step and its parameters are optimized once despite feeding
-    both heads. The wrapped :class:`~src.models.actor_critic.ActorCritic` is
-    kept for snapshotting into a self-play pool.
-
-    * GAE is computed once per collected batch (before the epoch loop),
-      not re-estimated every epoch as before. This is the more common PPO
-      formulation but is a real learning-dynamics change.
-    * Minibatching uses a shuffled permutation with contiguous slicing, so
-      the final (smaller) minibatch is used;
+    runs once per step and is optimized once despite feeding both heads. The
+    wrapped :class:`~src.models.actor_critic.ActorCritic` is kept for
+    snapshotting into a self-play pool.
     """
 
     def __init__(
@@ -186,38 +165,33 @@ class PPOTrainer(Trainer):
         :param frames_per_batch: Frames collected per collector iteration.
         :param total_frames: Total frames to collect over the run.
         :param clip_epsilon: PPO surrogate clipping range.
-        :param entropy_bonus: Add the entropy term to the loss, rewarding
-            higher-entropy policies as a regularizer against premature collapse
-            onto a single action. On by default. When ``False`` the term is
-            dropped entirely and ``entropy_coeff`` has no effect.
+        :param entropy_bonus: Add the entropy term to the loss, as a regularizer
+            against collapse onto a single action. When ``False`` the term is
+            dropped and ``entropy_coeff`` has no effect.
         :param entropy_coeff: Entropy-bonus weight (the annealing start value).
             Ignored unless ``entropy_bonus`` is set.
         :param gamma: Discount factor for GAE.
         :param lmbda: GAE trace-decay factor.
-        :param average_gae: Standardize the advantages (subtract the mean,
-            divide by the std) over each collected batch. On by default: this is
-            the standard PPO formulation and it keeps the surrogate objective's
-            scale independent of the reward magnitude.
+        :param average_gae: Standardize the advantages over each collected batch,
+            which keeps the surrogate's scale independent of the reward
+            magnitude.
         :param gae_num_chunks: Split the GAE critic pass into this many chunks
-            along the worker dimension. ``None`` runs the whole collected batch
-            through the critic in one ``vmap`` over a stacked current/next pair,
-            which peaks at roughly twice the batch and is what exhausts VRAM at
-            ``frames_per_batch`` 16384. Chunking is exact: worker rows are
-            independent trajectories and GAE reduces along time, so the values
-            are concatenated back unchanged.
+            along the worker dimension. ``None`` runs the batch in one ``vmap``
+            over a stacked current/next pair, peaking at ~2x the batch, which
+            exhausts VRAM at ``frames_per_batch`` 16384. Chunking is exact:
+            worker rows are independent trajectories and GAE reduces along
+            time.
         :param value_estimator: Advantage estimator, one of
-            :data:`_VALUE_ESTIMATORS`. ``gae`` is the on-policy default and is
-            correct only when the whole batch came from one behaviour policy.
-            ``vtrace`` recomputes the collected actions' log-probs under the
-            current policy and clips the resulting importance ratios, which is
-            what makes an asynchronously collected -- and therefore stale --
-            batch usable. It costs one extra actor pass per batch and ignores
-            ``lmbda``, which V-trace has no equivalent of.
-        :param vtrace_rho_thresh: V-trace's rho-bar, the ceiling on the
-            importance ratio in the temporal-difference term. It sets which
-            policy's value function the critic converges to: at ``1.0`` (the
-            IMPALA default) that is the behaviour policy's, and raising it moves
-            the target toward the current policy at the cost of variance.
+            :data:`_VALUE_ESTIMATORS`. ``gae`` is correct only when the whole
+            batch came from one behaviour policy. ``vtrace`` re-scores the
+            collected actions under the current policy and clips the importance
+            ratios, which is what makes a stale asynchronous batch usable, at
+            one extra actor pass per batch. It ignores ``lmbda``.
+        :param vtrace_rho_thresh: V-trace's rho-bar, bounding the importance
+            ratio in the TD term. It sets which policy's value function the
+            critic converges to: ``1.0`` (the IMPALA default) is the behaviour
+            policy's, and raising it trades variance for a target nearer the
+            current policy.
         :param vtrace_c_thresh: V-trace's c-bar, the ceiling on the ratio inside
             the trace. It controls how far a correction propagates back in time,
             and so the variance of the estimate, without moving the fixed point.
@@ -226,12 +200,11 @@ class PPOTrainer(Trainer):
         :param sub_batch_size: Minibatch size for the inner epoch loop.
         :param max_grad_norm: Global gradient-norm clipping threshold.
         :param device: Device for optimization tensors.
-        :param collector_device: Device the *collection* policy runs on.
-            ``None`` follows ``device``, which is the historical behaviour and
-            right for ``collector.type=sync``. Set it to ``cpu`` alongside
-            ``device=cuda`` under the multiprocess collectors, which would
-            otherwise put a CUDA context in every worker process to run
-            batch-size-1 forwards.
+        :param collector_device: Device the *collection* policy runs on. ``None``
+            follows ``device``, which is right for ``collector.type=sync``. Set
+            it to ``cpu`` alongside ``device=cuda`` under the multiprocess
+            collectors, which would otherwise put a CUDA context in every worker
+            for batch-size-1 forwards.
         :param use_parallel_env: Use ParallelEnv instead of SerialEnv.
         :param mp_start_method: Multiprocessing start method for ParallelEnv.
         :param serial_for_single: Fall back to a single-process env for one worker.
@@ -242,17 +215,15 @@ class PPOTrainer(Trainer):
             early-stop threshold.
         :param compile_loss: Wrap the loss module with ``torch.compile``.
         :param compile_policy: Enable ``torch.compile`` on the collection policy
-            via the Collector. Defaults ``False`` (compile is slow/fragile on the
-            CPU dev box); the colleague's original defaulted it on.
+            via the Collector. Off by default: compile is slow and fragile on
+            the CPU dev box.
         :param lr_anneal: Linearly anneal the learning rate to 0 over training.
         :param ent_anneal: Anneal the entropy coefficient (see ``ent_warm_frac``).
         :param ent_warm_frac: Fraction of training for which the entropy
-            coefficient is held at its initial value before it linearly decays
-            to 0. **Inferred schedule** — the flag comes from the colleague's
-            file but the schedule lived in an unseen base class.
+            coefficient is held at its initial value before it decays linearly
+            to 0.
         :param callbacks: Metric observers, forwarded to
-            :class:`~src.training.trainer.Trainer`. The PPO losses returned by
-            :meth:`_update` reach them without any extra wiring here.
+            :class:`~src.training.trainer.Trainer`.
         :param run_config: Opaque run metadata forwarded to
             :class:`~src.training.trainer.Trainer`.
         :param evaluator: Fixed-opponent evaluator forwarded to
@@ -296,23 +267,13 @@ class PPOTrainer(Trainer):
             build_ppo_operator(actor_critic, action_spec).to(device),
         )
         # Nothing downstream reads `hidden`, `option_repr` or `logits` back
-        # from the collected batch -- `state_value` is written by GAE, not by
-        # the policy -- yet `option_repr` alone is ~64.5 KiB/frame at
-        # production sizes (~258 MiB per 4096-frame batch collected), and
-        # `_update`'s `data_shuffled = data_flat[perm]` copies whatever
-        # survives once again per epoch. Trimming it here at the policy
-        # boundary, rather than via a Collector `postproc=ExcludeTransform`,
-        # also avoids the Collector's own preallocation for these keys; a
-        # postproc would only discard them after they were already written
-        # into the carrier.
-        #
-        # This is safe because `get_policy_operator()` builds a fresh wrapper
-        # over the shared backbone/policy-head submodules on every call: the
-        # GAE and `ClipPPOLoss` below each call it (or `get_value_operator()`)
-        # again for their own separate instances, so pruning *this* instance's
-        # out_keys does not touch theirs, and the pointer head still consumes
-        # `option_repr` *within this same forward*, before collection ever
-        # sees it -- it just never leaves the policy's output tensordict.
+        # from the collected batch, yet `option_repr` alone is ~64.5 KiB/frame
+        # (~258 MiB per 4096-frame batch), which `_update` then copies again
+        # per epoch. Trimming at the policy boundary also skips the Collector's
+        # preallocation, which a `postproc=ExcludeTransform` would not.
+        # Safe because `get_policy_operator()` returns a fresh wrapper over the
+        # shared submodules: GAE and ClipPPOLoss build their own, and the
+        # pointer head reads `option_repr` within this same forward.
         collection_policy = self._operator.get_policy_operator().select_out_keys(
             "action", "action_log_prob"
         )

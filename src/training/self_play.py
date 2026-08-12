@@ -36,39 +36,33 @@ def build_eval_opponent_factory(
     Build the fixed reference opponent the evaluator scores against.
 
     The reference must not move with the learner, or the ``eval/`` win-rate
-    stops being comparable across the run — that comparability is the whole
-    point of evaluating separately from collection.
+    stops being comparable across the run.
 
     Supported ``eval_opponent`` values:
 
     ``"random"``
-        :class:`~src.env.random_opponent.RandomOpponent` — the default and the
-        only option that does not re-read a checkpoint from disk every
-        evaluation.
+        :class:`~src.env.random_opponent.RandomOpponent`, the default and the
+        only one that does not re-read a checkpoint every evaluation.
 
     ``"first_snapshot"``
-        Load the oldest (lowest-frame) snapshot from ``checkpoint_dir`` as a
+        The oldest snapshot in ``checkpoint_dir``, as a
         :class:`~src.policies.greedy_policy_opponent.GreedyPolicyOpponent`.
-        Falls back to ``RandomOpponent`` when no snapshot exists yet, so the
-        first eval interval that fires before the league has been snapshotted
-        still produces a readable number.
+        Falls back to ``RandomOpponent`` before the league has one, so an early
+        eval still produces a readable number.
 
     ``"checkpoint"``
-        The ``save_actor_critic`` snapshot named by
-        ``train.eval_opponent_checkpoint``, e.g. a previous run's
-        best-submitted agent. A relative path resolves against the original
-        working directory, and must exist on disk at startup.
+        The snapshot named by ``train.eval_opponent_checkpoint``. A relative
+        path resolves against the original working directory and must exist at
+        startup.
 
     ``"checkpoint_pool"``
-        Uniformly sample a frozen population from the newest checkpoints in
-        ``train.eval_opponent_checkpoint_dir``. The directory is scanned only
-        when the evaluator is constructed, so learner snapshots can never
-        drift this aggregate reference during a run.
+        A frozen population sampled uniformly from the newest checkpoints in
+        ``train.eval_opponent_checkpoint_dir``, scanned once at construction so
+        learner snapshots cannot drift it.
 
     ``/path/to/snapshot.pt``
-        The same frozen-checkpoint reference named inline rather than through
-        ``eval_opponent_checkpoint``, which is what lets a run score itself
-        against several distinct checkpoints at once.
+        The same frozen reference named inline, which is what lets one run score
+        itself against several checkpoints at once.
 
     :param cfg: Hydra config with a ``train`` section and a top-level ``seed``.
     :param obs_spec: Environment observation spec, needed to rebuild the

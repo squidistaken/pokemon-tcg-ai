@@ -21,61 +21,34 @@ class TransformerBackbone(Backbone):
     """
     Self-attention trunk over the structured observation.
 
-    Where :class:`~src.models.mlp.MLPBackbone` flattens and concatenates every
-    group into one vector, this backbone keeps each group (``globals``,
-    ``options``, ``pokemon``, the zone tables, ...) as its own token, so
-    self-attention can learn cross-group interactions (e.g. weighting
-    ``options`` against the current ``pokemon`` board state) that a single
-    linear layer over the concatenation cannot represent directly. Per Issue
-    #45 this attends over the *features within one observation*, not over
-    time — a temporal/history transformer is a separate, later backbone.
+    Where :class:`~src.models.mlp.MLPBackbone` concatenates every group into
+    one vector, this backbone gives each group its own token, so attention can
+    relate them. It attends over the features within one observation, not over
+    time.
 
-    **Two token granularities.** By default every group contributes exactly
-    one token, built from the adapter's masked-mean-pooled group vector. That
-    is cheap but means the trunk never sees individual entities: the pooling
-    has already averaged the option rows together before attention runs. Set
-    ``token_groups`` to additionally expand named groups into *per-entity*
-    tokens via
-    :meth:`~src.models.structured_obs_adapter.StructuredObsAdapter.encode_entity_tokens`,
-    so attention relates one Pokemon (or one option) to another. This is
-    deliberately opt-in and per-group: the padded slot counts are large
-    (``options`` alone is ``max_options + 1``), attention is quadratic in the
-    token count, and the league opponent forward runs on CPU inside every
-    environment worker — see ``docs/training-performance.md``, where that
-    forward is already 46% of throughput.
+    Four options change what the trunk sees:
 
-    **Feeding a pointer head.** ``option_tokens=True`` additionally emits the
-    per-option tokens as ``option_repr``, which
-    :class:`~src.models.heads.PointerPolicyHead` scores individually. By
-    default (``encoded_option_repr=False``) that costs one projection per
-    option rather than quadratic attention, so it is much cheaper than
-    putting ``options`` in ``token_groups`` — and it is what lets the policy
-    distinguish *which* option is which, rather than choosing among action
-    slots from a pooled state alone. Set ``encoded_option_repr=True`` (with
-    ``options`` also in ``token_groups``) to score the *attended* option rows
-    instead, once the extra attention cost is one you want to pay for.
+    * ``token_groups`` expands named groups into per-entity tokens instead of
+      one pooled token each. Opt-in per group, because the padded slot counts
+      are large and attention is quadratic in them. The league opponent forward
+      runs on CPU in every worker and is already 46% of throughput, see
+      ``docs/training-performance.md``.
+    * ``option_tokens=True`` emits the per-option rows as ``option_repr`` for
+      :class:`~src.models.heads.PointerPolicyHead` to score. One projection per
+      option, far cheaper than putting ``options`` in ``token_groups``.
+      ``encoded_option_repr=True`` scores the attended rows instead, at that
+      higher cost.
+    * ``replace_pooled=True`` drops the pooled token of every expanded group,
+      so per-entity tokens are that group's only route into the trunk.
 
-    **Entity identity.** Every per-entity token also gets a learned
-    embedding for its
-    :attr:`~src.models.structured_obs_adapter.StructuredObsAdapter.group_segment_ids`
-    — which seat a Pokemon belongs to, which zone a card sits in, whether an
-    option slot is the synthetic stop action — added on top of the group's
-    type embedding. Without it, attention and pooling over per-entity tokens
-    are permutation-*equivariant*/-*invariant* to that identity, so e.g.
-    swapping the two players' boards would leave ``state_repr`` unchanged.
+    Per-entity tokens carry a learned embedding of their
+    ``group_segment_ids`` (seat, zone, stop-action) on top of the group's type
+    embedding. Without it, attention over those tokens is invariant to that
+    identity, so swapping the two players' boards would leave ``state_repr``
+    unchanged.
 
-    **Replacing pooled tokens.** ``replace_pooled=True`` drops, for every
-    name in ``token_groups``, that group's single pooled ``encode_groups``
-    token (and its ``token_projections`` entry / ``token_type_embedding``
-    row) from the sequence, so the per-entity tokens are the *only* route by
-    which that group reaches the trunk rather than an addition to a pooled
-    summary that already saw it.
-
-    Requires a :class:`~src.models.structured_obs_adapter.StructuredObsAdapter`
-    (built by :func:`~src.policies.ppo_actor.build_actor_critic` whenever the
-    backbone's ``in_keys`` name structured groups): its
-    :attr:`~src.models.structured_obs_adapter.StructuredObsAdapter.group_feature_widths`
-    sizes the per-group input projections below.
+    Requires a :class:`~src.models.structured_obs_adapter.StructuredObsAdapter`,
+    whose ``group_feature_widths`` size the input projections.
     """
 
     def __init__(
@@ -98,20 +71,17 @@ class TransformerBackbone(Backbone):
         in_keys: list[str] | None = None,
     ) -> None:
         """
-        :param input_dim: Summed width of the adapter's per-group vectors;
-            must equal ``adapter.out_features``. Unused beyond that check,
-            which only bites on direct construction:
-            :func:`~src.policies.ppo_actor.build_actor_critic` derives the
-            argument from the adapter it just built, so the two agree by
-            construction on the configured path. Kept because a hand-built
-            backbone paired with the wrong adapter is worth catching here
-            rather than as a shape error inside the first forward.
+        :param input_dim: Summed width of the adapter's per-group vectors; must
+            equal ``adapter.out_features``. Checked, not used:
+            :func:`~src.policies.ppo_actor.build_actor_critic` derives it from
+            the adapter, so only a hand-built pairing can disagree, and this
+            catches it before the first forward's shape error.
         :param out_features: Width of the produced ``state_repr``; also the
             attention ``d_model``, so it must be divisible by ``num_heads``.
         :param adapter: :class:`~src.models.structured_obs_adapter.
-            StructuredObsAdapter` handling the structured groups; required
-            because its per-group widths size the token projections; there is
-            no naive-flatten fallback.
+            StructuredObsAdapter` handling the structured groups. Required: its
+            per-group widths size the token projections, and there is no
+            flatten fallback.
         :param num_heads: Attention heads per encoder layer.
         :param num_layers: Stacked :class:`nn.TransformerEncoderLayer` count.
         :param ff_dim: Width of each layer's feed-forward sublayer. The
@@ -119,19 +89,17 @@ class TransformerBackbone(Backbone):
         :param dropout: Dropout used in attention and the feed-forward block.
         :param activation: Feed-forward activation; ``"relu"`` or ``"gelu"``
             (the two :class:`nn.TransformerEncoderLayer` supports natively).
-        :param norm_first: Pre-LN (True) rather than post-LN (False). Post-LN
-            is torch's default but is the variant that needs learning-rate
-            warmup to train stably; pre-LN trains without it, which matters
-            here because the PPO config has no warmup schedule.
+        :param norm_first: Pre-LN (True) rather than post-LN (False). Post-LN is
+            torch's default but needs learning-rate warmup, which the PPO config
+            has no schedule for.
         :param final_norm: Apply a :class:`nn.LayerNorm` to the encoder
             output. Conventional with pre-LN, where the last sublayer's
             residual branch is otherwise unnormalized.
-        :param pooling: Readout over the token sequence. ``"mean"`` is a
-            masked mean; ``"cls"`` prepends a learned token and reads it back;
+        :param pooling: Readout over the token sequence. ``"mean"`` is a masked
+            mean, ``"cls"`` prepends a learned token and reads it back,
             ``"attention"`` scores tokens against a learned query. Mean is
-            permutation-invariant over groups and cannot preferentially read
-            one group out, which is a real limitation once tokens carry
-            heterogeneous content.
+            permutation-invariant over groups, so it cannot read one group out
+            preferentially.
         :param token_groups: Group names to additionally expand into
             per-entity tokens (e.g. ``["pokemon"]``). Costs
             ``adapter.group_slot_counts[name]`` extra tokens each. Must be
@@ -139,12 +107,10 @@ class TransformerBackbone(Backbone):
             ``globals``/``select_cats``).
         :param option_tokens: Emit per-option tokens as ``option_repr`` for a
             pointer head. Sets :attr:`produces_option_repr`.
-        :param replace_pooled: If True, drop the pooled ``encode_groups``
-            token (and its ``token_projections``/``token_type_embedding``
-            entry) for every name in ``token_groups``, so the per-entity
-            tokens replace rather than duplicate that group's pooled summary.
-            False (the default) keeps every existing checkpoint's
-            ``token_projections``/``token_type_embedding`` indices unchanged.
+        :param replace_pooled: Drop the pooled ``encode_groups`` token of every
+            name in ``token_groups``, so per-entity tokens replace rather than
+            duplicate that group's summary. False (the default) keeps existing
+            checkpoints' projection and embedding indices unchanged.
         :param encoded_option_repr: If True, read ``option_repr`` from the
             encoder's *output* rows at the ``options`` tokens' offsets
             instead of the cheap pre-attention projection. Requires
@@ -256,14 +222,10 @@ class TransformerBackbone(Backbone):
                 "'options' in token_groups to put those tokens there."
             )
 
-        # `replace_pooled` drops, for each name in token_groups, the pooled
-        # encode_groups() token (and its token_projections entry /
-        # token_type_embedding row) from the sequence -- see the class
-        # docstring. With replace_pooled=False (the default) dropped_pooled is
-        # empty, so pooled_group_names/token_projections/token_type_embedding
-        # are byte-identical to before this flag existed: an existing
-        # checkpoint's backbone.token_projections.0..9 indices keep meaning
-        # what they meant, because only the *shorter*-list arms are new.
+        # With replace_pooled=False (the default) dropped_pooled is empty, so
+        # the projection and embedding lists keep the order they had before the
+        # flag existed: an old checkpoint's backbone.token_projections.0..9
+        # indices still mean what they meant. Only the shorter lists are new.
         dropped_pooled = (
             frozenset(self.token_groups) if self.replace_pooled else frozenset()
         )
@@ -289,17 +251,12 @@ class TransformerBackbone(Backbone):
         )
         nn.init.normal_(self.token_type_embedding, std=0.02)
 
-        # A row with zero valid tokens makes nn.TransformerEncoder itself
-        # emit NaN (verified directly against torch): mean pooling's
-        # clamp(min=1.0) cannot rescue it because the encoder's output is
-        # already NaN by then, and attention pooling's softmax over all -inf
-        # NaNs too. Without replace_pooled this cannot happen, because every
-        # pooled token is unconditionally valid (see _group_tokens). Once
-        # replace_pooled can drop every pooled token, the only remaining
-        # backstop is the 'options' entity group's always-valid stop slot
-        # (StructuredObsAdapter._option_validity) -- if neither is present,
-        # reject the configuration now rather than NaN on some future batch
-        # that happens to pad out every requested entity group at once.
+        # A row with zero valid tokens makes nn.TransformerEncoder emit NaN,
+        # which no pooling mode can rescue: its input is already NaN. Pooled
+        # tokens are always valid, so only replace_pooled can empty a row, and
+        # then the sole backstop is the 'options' group's always-valid stop
+        # slot. Reject that configuration here rather than NaN on the first
+        # batch that pads out every requested entity group at once.
         if not self.pooled_group_names and "options" not in self.token_groups:
             raise ValueError(
                 "This configuration can leave a row with zero valid tokens: replace_pooled "
@@ -494,16 +451,11 @@ class TransformerBackbone(Backbone):
         batch_shape = tokens.shape[:-2]
         flat_tokens = tokens.reshape(-1, tokens.shape[-2], tokens.shape[-1])
         flat_valid = valid.reshape(-1, valid.shape[-1])
-        # Only the per-entity path introduces padding; without it every token
-        # is real, and passing an all-False mask would push the encoder down
-        # the masked attention path for nothing. Decided from config rather
-        # than from `flat_valid.all()`, which would force a device sync.
-        # A fully padded row would make the encoder itself emit NaN (mean/
-        # attention pooling cannot rescue it, since its input is already
-        # NaN); __init__ asserts that some group's token is unconditionally
-        # valid whenever the mask is in play (a surviving pooled token, or
-        # 'options' with its always-valid stop slot), so that cannot happen
-        # here regardless of what the current batch's entities look like.
+        # Only the per-entity path introduces padding; an all-False mask would
+        # take the encoder down the masked path for nothing. Read from config,
+        # not from `flat_valid.all()`, which would force a device sync.
+        # __init__ has already rejected any configuration where a row could end
+        # up fully padded, which is the case that would NaN here.
         padding_mask = ~flat_valid if self.token_groups else None
         encoded = self.encoder(flat_tokens, src_key_padding_mask=padding_mask)
 

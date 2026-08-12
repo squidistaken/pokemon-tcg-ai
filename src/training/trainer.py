@@ -41,12 +41,10 @@ _CORE_METRICS = (
 )
 
 #: Lowercase substrings identifying torchrl's report that a ParallelEnv worker
-#: process is gone. The engine aborts the process outright rather than raising
-#: (a C++ exception thrown inside the engine unwinds through cabt's `Select`
-#: entry point, which has no handler, into ctypes frames that carry no unwind
-#: tables, so it reaches std::terminate), so the parent only ever learns about
-#: it as a dead pipe. That surfaces as a bare RuntimeError, hence the string
-#: match: torchrl raises no dedicated exception type for it.
+#: process is gone. A C++ exception inside the engine reaches std::terminate
+#: instead of unwinding, so the worker aborts and the parent sees only a dead
+#: pipe, raised as a bare RuntimeError. Hence the string match: torchrl has no
+#: dedicated exception type for it.
 _WORKER_DEATH_MARKERS = (
     "at least one process failed",
     "cannot proceed, worker",

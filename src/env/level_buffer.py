@@ -64,30 +64,25 @@ class LevelBuffer:
     Two things differ from the reference implementation, both forced by this
     environment:
 
-    * **The score is** ``|mean residual|``, **not** ``mean |residual|``. Reward
-      here is terminal-only ±1 over long episodes, so the residual is dominated
-      by shuffle and coin-flip variance. Taking the magnitude per step and then
-      averaging would score a genuine coin-flip matchup highly forever, since
-      the critic correctly predicts 0 and the outcome is ±1 every time.
-      Averaging the *signed* residual first cancels that zero-mean noise and
-      leaves systematic critic bias, which does decay as the critic learns.
-    * **Entries below** ``min_visits`` **are exempt from eviction** and score at
-      the maximum. A handful of ±1 outcomes says almost nothing, so evicting on
-      such a score would churn levels out before they were ever measured, and
-      the optimistic score makes unvisited levels get picked up early without
-      needing a separate explore/replay branch.
+    * The score is ``|mean residual|``, not ``mean |residual|``. Reward is
+      terminal-only ±1 over long episodes, so per-step magnitudes are dominated
+      by shuffle and coin-flip variance: a genuine coin flip would score highly
+      forever, the critic correctly predicting 0 against a ±1 outcome. Averaging
+      the signed residual first cancels that zero-mean noise and leaves the
+      systematic bias, which decays as the critic learns.
+    * Entries below ``min_visits`` are exempt from eviction and score at the
+      maximum. A handful of ±1 outcomes says almost nothing, so evicting on one
+      would churn levels out before they were measured, and the optimistic score
+      picks unvisited levels up without a separate explore branch.
 
-    That optimistic-score trick is what :meth:`prefill` relies on for a corpus
-    that fits entirely within ``capacity``: every level starts unmeasured
-    together, so the buffer sweeps the whole space once and then prioritizes.
-    It does not work for a corpus *larger* than ``capacity`` (see
-    :meth:`commit`): a level discovered lazily after that initial sweep would
-    sit at ``score() == inf`` next to an already-prioritizing buffer and pull
-    :meth:`distribution` back into full-coverage mode -- for as long as
-    discovery keeps running, i.e. permanently. Levels discovered after
-    construction instead mature in a side table (:meth:`commit`'s "probation"),
-    invisible to :meth:`distribution`, and only enter the scored buffer once
-    trustworthy, evicting the weakest entry already there.
+    :meth:`prefill` relies on that optimistic score when the corpus fits in
+    ``capacity``: every level starts unmeasured, so the buffer sweeps the space
+    once and then prioritizes. A larger corpus cannot work that way, because a
+    level discovered later would sit at ``score() == inf`` beside an
+    already-prioritizing buffer and hold :meth:`distribution` in full-coverage
+    mode permanently. Those levels mature in :meth:`commit`'s probation table
+    instead, invisible to :meth:`distribution`, and enter the buffer only once
+    trustworthy, evicting the weakest entry there.
 
     The buffer also tallies win/loss on episodes played against a fixed anchor
     opponent. Those counters take no part in the curriculum; they accumulate

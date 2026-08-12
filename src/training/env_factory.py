@@ -462,13 +462,11 @@ def _build_sampler_spec(cfg: DictConfig, deck_split: str) -> dict[str, Any]:
         "mode": cfg.env.get("deck_sampling", "uniform"),
     }
     if deck_split == "eval":
-        # Evaluation can/should use a different matchup than training.
-        # ex. Training on `independent` (asymmetric) matchups is good for
-        # robustness, but it makes the eval win-rate conflate piloting skill with deck luck.
-        # Eval stays unweighted: with eval_panel_size the panel already fixes
-        # which opponents appear, and weighting them on top would only vary how
-        # often each is drawn -- round_robin gives every panel entry the same
-        # count, which is what makes the rounds comparable.
+        # Eval can use a different matchup than training: `independent` is good
+        # for robustness but makes the eval win-rate conflate piloting skill
+        # with deck luck. Eval also stays unweighted, since eval_panel_size
+        # already fixes which opponents appear and round_robin gives each the
+        # same count, which is what makes rounds comparable.
         spec["matchup"] = cfg.env.get("eval_deck_matchup") or matchup
         # Draw strategy for eval, independent of training's. round_robin gives
         # deterministic even coverage of the held-out pool, so the per-archetype

@@ -24,82 +24,25 @@ class StructuredObservationEncoder(ObservationEncoder):
     """
     Encoder mapping an engine observation to a structured, padded TensorDict.
 
-    Observation contract for model construction (see
-    ``docs/torchrl_environment.md``): card identities as raw integer IDs (for
-    model-side embedding lookup), per-option features aligned index-for-index
-    with the action mask, a per-Pokemon feature table for both boards, and
-    padded/masked ID tables for every visible zone. No modelling decisions
-    (normalization, embeddings, aggregation) are made here.
+    Card identities stay raw integer IDs for model-side embedding lookup,
+    per-option features are aligned index-for-index with the action mask, and
+    every visible zone becomes a padded ID table with a companion ``*_mask``.
+    No modelling decision (normalization, embeddings, aggregation) is made
+    here. The full schema and its conventions are in
+    ``docs/environment/torchrl_environment.md``.
 
-    Every zone below (hand, discard, bench, ...) varies in length across
-    game states but is padded to a fixed ``*_cap`` so every observation has
-    the same tensor shape; a companion ``*_mask`` marks real vs. padding
-    slots. The ``*_cap`` values are ``__init__`` parameters; see their
-    docstrings there for defaults and *why* each value is what it is (most
-    trace to engine constants like deck size or prize count, not guesses).
-    Shape of the returned TensorDict
-    (agent-relative throughout; ``n_slots = max_options + 1``,
-    ``rows = 2 * (1 + bench_cap)`` covers both players' active + bench)::
+    Each zone is padded to a fixed ``*_cap``, so every observation has the same
+    shape. Most caps trace to engine constants rather than to taste; see the
+    ``__init__`` docstring. Zones over their cap truncate with a one-time
+    warning, except the option list, which raises: it must stay in sync with
+    the action mask. An out-of-range option reference raises too, rather than
+    mapping to "unknown" and contaminating training data.
 
-        globals                          (GLOBAL_FEATURE_COUNT,)  float32  turn / selection / zone-count scalars
-        select_cats                      (2,)                     int64    [type+1, context+1]
-        context_card_ids                 (2,)                     int64    [contextCard.id, effect.id]
-        stadium_id                       (1,)                     int64
-
-        options                                                            n_slots = max_options+1, row i == action i
-          ├─ card_id                     (n_slots,)               int64
-          ├─ target_id                   (n_slots,)               int64
-          ├─ attack_id                   (n_slots,)               int64
-          ├─ owner                       (n_slots,)               int64    1 = agent, 2 = opponent
-          ├─ cats                        (n_slots, 4)             int64    type / area / inPlayArea / condition
-          └─ scalars                     (n_slots, 6)             float32  number / count / index / toolIdx / ...
-
-        pokemon                                                            rows = 2*(1+bench_cap): agent active+bench, then opp
-          ├─ card_id                     (rows,)                  int64
-          ├─ tool_id                     (rows,)                  int64
-          ├─ energy_card_ids             (rows, energy_cap)       int64
-          ├─ pre_evolution_ids           (rows, evolution_cap)    int64
-          ├─ features                    (rows, 20)               float32  HP / is-active / attachments / energy hist
-          └─ mask                        (rows,)                  bool     occupied slot
-
-        my                                                                 agent's zones
-          ├─ hand_ids                    (hand_cap,)              int64
-          ├─ hand_mask                   (hand_cap,)              bool
-          ├─ discard_ids                 (discard_cap,)           int64
-          ├─ discard_mask                (discard_cap,)           bool
-          ├─ prize_ids                   (prize_cap,)             int64
-          └─ prize_mask                  (prize_cap,)             bool
-
-        opp                                                                opponent's public zones
-          ├─ discard_ids                 (discard_cap,)           int64
-          ├─ discard_mask                (discard_cap,)           bool
-          ├─ prize_ids                   (prize_cap,)             int64
-          └─ prize_mask                  (prize_cap,)             bool
-
-        select_deck                                                       deck-search reveal, if any
-          ├─ ids                         (deck_cap,)              int64
-          └─ mask                        (deck_cap,)              bool
-
-        looking                                                           "looking" reveal, if any
-          ├─ ids                         (looking_cap,)           int64
-          └─ mask                        (looking_cap,)           bool
-
-    Conventions:
-
-    - ``0`` means none/padding/face-down/unknown for any ID field.
-    - Categorical fields store ``enum value + 1`` (0 = absent); for
-      embedding lookup, not arithmetic.
-    - ``-1.0`` marks an absent float scalar where ``0`` is a valid value.
-    - Zones over their cap truncate with a one-time warning, except the
-      option list, which raises: it must stay in sync with the action mask.
-    - An out-of-range option reference raises rather than mapping to
-      "unknown", since that would silently contaminate training data.
-
-    Per-element writes are staged into preallocated NumPy buffers (reused
-    across calls) and copied out with ``torch.from_numpy(...).clone()`` per
-    field; the clone is required because TorchRL keeps references to past
-    tensordicts (e.g. in a rollout). This makes an encoder instance
-    non-thread-safe: one per environment, called serially.
+    Writes are staged into preallocated NumPy buffers and copied out per field
+    with ``torch.from_numpy(...).clone()``. The clone is required because
+    TorchRL keeps references to past tensordicts, e.g. in a rollout. An encoder
+    instance is therefore not thread-safe: one per environment, called
+    serially.
     """
 
     GLOBAL_FEATURE_COUNT = 41
@@ -108,15 +51,11 @@ class StructuredObservationEncoder(ObservationEncoder):
     #: Live state of the in-play Pokemon an option acts on, written onto the
     #: option's own row: ``[resolved, hp, maxHp, hp fraction, energy count,
     #: tool count, is-active]``. All zero when the option targets no Pokemon,
-    #: with column 0 the flag that separates "no target" from "a target whose
-    #: values happen to be zero".
-    #:
-    #: ``target_id`` already carries *which card* is targeted, but a card ID is
-    #: shared by every copy of that card. Without this block two "attach
-    #: energy" options over two copies of the same Pokemon differ only in a raw
-    #: index scalar, so the policy can tell them apart but cannot rank them --
-    #: and no feedforward network can recover the difference by indexing the
-    #: ``pokemon`` table with that scalar.
+    #: with column 0 separating "no target" from "a target whose values are
+    #: zero". ``target_id`` names the card but is shared by every copy of it,
+    #: so without this block two "attach energy" options over two copies of one
+    #: Pokemon differ only in a raw index scalar: rankable by no feedforward
+    #: network, which cannot index the ``pokemon`` table with it.
     OPTION_TARGET_FEATURE_COUNT = 7
     POKEMON_FEATURE_COUNT = 20
     ENERGY_TYPE_COUNT = 12
