@@ -1,3 +1,4 @@
+import random
 import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -6,7 +7,6 @@ from cg.api import Observation
 from src.env.opponent_pool import OpponentPool
 
 _SNAPSHOT_PATTERN = re.compile(r"^snapshot_(\d+)\.pt$")
-_POLICY_SEED_OFFSET = 1_000_003
 
 
 class ExternalSnapshotOpponentPool(OpponentPool):
@@ -79,8 +79,8 @@ class ExternalSnapshotOpponentPool(OpponentPool):
         self._paths = keep
         # Keep policy-member draws on a deterministic stream distinct from the
         # deck sampler's stream. TCGEnv deliberately reseeds both components
-        # with its worker seed, so the offset must also be applied in seed().
-        pool_seed = None if seed is None else seed + _POLICY_SEED_OFFSET
+        # with its worker seed, so seed() applies the same derivation.
+        pool_seed = _derive_policy_seed(seed)
         super().__init__([self._loaded[path] for path in keep], seed=pool_seed)
         self._active_path = keep[0]
 
@@ -116,7 +116,9 @@ class ExternalSnapshotOpponentPool(OpponentPool):
 
     def seed(self, seed: int) -> None:
         """Reseed policy sampling independently of the episode's deck draw."""
-        super().seed(seed + _POLICY_SEED_OFFSET)
+        derived_seed = _derive_policy_seed(seed)
+        assert derived_seed is not None
+        super().seed(derived_seed)
 
     def _refresh(self) -> None:
         """Replace membership with the globally newest available snapshots."""
@@ -181,3 +183,10 @@ def _snapshot_sort_key(path: Path) -> tuple[int, str]:
     frames = _snapshot_frame(path)
     assert frames is not None
     return frames, str(path)
+
+
+def _derive_policy_seed(seed: int | None) -> int | None:
+    """Derive a reproducible policy-selection stream from a worker seed."""
+    if seed is None:
+        return None
+    return random.Random(seed).getrandbits(64)

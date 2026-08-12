@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from src.env.opponent_pool import OpponentPool
 from src.env.random_opponent import RandomOpponent
 from src.training.external_snapshot_opponent_pool import ExternalSnapshotOpponentPool
 
@@ -87,3 +88,36 @@ def test_external_pool_is_picklable(tmp_path) -> None:
     restored = pickle.loads(pickle.dumps(pool))
     assert restored.snapshot_paths == pool.snapshot_paths
     restored.on_reset()
+
+
+def test_policy_sampling_uses_a_reproducible_independent_seed_stream(tmp_path) -> None:
+    """Policy draws are deterministic without sharing the deck seed stream."""
+    baseline = tmp_path / "baseline"
+    _write_snapshots(baseline, list(range(10)))
+    first = ExternalSnapshotOpponentPool(
+        [baseline], _fake_loader, pool_size=10, seed=42
+    )
+    second = ExternalSnapshotOpponentPool(
+        [baseline], _fake_loader, pool_size=10, seed=42
+    )
+    unseparated = OpponentPool(list(first.opponents), seed=42)
+
+    def draws(pool: OpponentPool) -> list[int]:
+        indices = []
+        for _ in range(20):
+            pool.on_reset()
+            indices.append(
+                next(
+                    i
+                    for i, member in enumerate(pool.opponents)
+                    if member is pool.active
+                )
+            )
+        return indices
+
+    first_draws = draws(first)
+    assert first_draws == draws(second)
+    assert first_draws != draws(unseparated)
+
+    first.seed(42)
+    assert first_draws == draws(first)
