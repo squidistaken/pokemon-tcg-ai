@@ -69,7 +69,7 @@ collector:
   # optimizer state. A 30M-frame run can plausibly exceed the generic budget of
   # 20; the separate three-consecutive-barren-restart guard still stops a
   # deterministic startup/configuration failure from looping indefinitely.
-  max_restarts: 100
+  max_restarts: 30
   # Exactly 1,832 PPO batches of 16,384 frames. Added to the checkpoint's
   # 85,688,320 frames, the final absolute counter is 115,703,808.
   total_frames: 30015488
