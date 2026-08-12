@@ -34,10 +34,9 @@ agent:
   sub_batch_size: 64
   # Two epochs still exercises the multi-epoch path; more is wasted time.
   num_epochs: 2
-  # Compilation and AMP hide errors behind graph breaks and cast failures.
+  # Compilation hides errors behind graph breaks.
   compile_loss: false
   compile_policy: false
-  use_amp: false
   device: cpu
 
 model:

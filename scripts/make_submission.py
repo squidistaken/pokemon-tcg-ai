@@ -41,7 +41,9 @@ from src.checkpoint_registry import (
     validate_checkpoint_record,
 )
 from src.env.battle_handle import BattleHandle
-from src.env.structured_observation_encoder import StructuredObservationEncoder
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
 from src.policies.greedy_policy_opponent import checkpoint_state_dict
 from src.policies.ppo_actor import build_actor_critic
 from submission.runtime import Policy as PortablePolicy

@@ -1,7 +1,7 @@
 import os
 
 from cg.api import Observation, to_observation_class
-from src.env.deck import load_deck
+from src.env.decks.deck import load_deck
 from src.policies.inference import InferenceAgent, load_inference_agent
 
 # Overridable via env var rather than hardcoded: main.py has no CLI args or

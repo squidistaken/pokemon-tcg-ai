@@ -268,7 +268,7 @@ def build_deck_sampler(spec: dict[str, Any], seed: int | None = None) -> DeckSam
     if kind == "curriculum":
         # Imported here rather than at module scope: the curriculum sampler
         # pulls in torch, and this module is otherwise dependency-free.
-        from .curriculum_deck_sampler import CurriculumDeckSampler
+        from src.curriculum.deck_sampler import CurriculumDeckSampler
 
         return CurriculumDeckSampler(
             decks=spec["decks"],

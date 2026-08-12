@@ -91,7 +91,7 @@ class AgentDeckSampler:
         """
         # Imported here rather than at module scope: the curriculum sampler
         # pulls in torch, which this module otherwise does not need.
-        from .curriculum_deck_sampler import NO_LEVEL
+        from src.curriculum.deck_sampler import NO_LEVEL
 
         return int(getattr(self._field_sampler, "level_id", NO_LEVEL))
 
@@ -99,7 +99,7 @@ class AgentDeckSampler:
         """
         Draw a matchup without knowing the agent's seat.
 
-        Present only to satisfy :class:`~src.env.deck_sampler.DeckSampler`;
+        Present only to satisfy :class:`~src.env.decks.deck_sampler.DeckSampler`;
         it assumes seat 0, which is what the protocol can express.
 
         :return: The ``(deck0, deck1)`` pair with the agent's deck on seat 0.

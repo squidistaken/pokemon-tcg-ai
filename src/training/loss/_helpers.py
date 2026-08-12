@@ -8,15 +8,13 @@ def _sum_loss_keys(loss_vals: TensorDictBase) -> torch.Tensor:
     """
     Sum the scalar entries whose key starts with ``loss_``.
 
-    TorchRL loss modules (:class:`~torchrl.objectives.ClipPPOLoss`,
-    :class:`~src.training.loss.disco_ppo_loss.DiscoPPOLoss`, …) return a
+    TorchRL loss modules (:class:`~torchrl.objectives.ClipPPOLoss`) return a
     tensordict that mixes the optimizable ``loss_*`` terms (``loss_objective``,
     ``loss_critic``, ``loss_entropy``) with non-differentiable diagnostics
     (``ESS``, ``kl_approx``, ``clip_fraction``, ``entropy``,
     ``explained_variance``). Only the former belong in the backward pass; this
-    helper selects them by the ``loss_`` prefix so the same optimization loop
-    drives any such loss module unchanged (this prefix-generality is what lets
-    the loop later swap in ``DiscoPPOLoss`` without edits).
+    helper selects them by the ``loss_`` prefix, so the same optimization loop
+    drives any such loss module unchanged.
 
     :param loss_vals: TensorDict returned by a loss module's ``forward``.
     :return: Scalar tensor: the sum of every ``loss_``-prefixed entry.

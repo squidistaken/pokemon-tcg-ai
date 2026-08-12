@@ -2,7 +2,7 @@ from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.env.deck import load_deck
+from src.env.decks.deck import load_deck
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training.env_factory import make_env
 from src.training.evaluator import Evaluator, _archetype_metrics, _episode_archetype

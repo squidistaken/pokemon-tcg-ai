@@ -5,7 +5,7 @@ from omegaconf import OmegaConf
 
 import main
 from src.env.battle_handle import BattleHandle
-from src.env.deck import load_deck
+from src.env.decks.deck import load_deck
 from src.policies.greedy_policy_opponent import save_actor_critic
 from src.policies.inference import build_inference_specs
 from src.policies.ppo_actor import build_actor_critic

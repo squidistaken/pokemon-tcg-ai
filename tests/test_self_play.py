@@ -7,8 +7,8 @@ import torch
 from omegaconf import OmegaConf
 
 from src.checkpoint_registry import read_checkpoint_records
-from src.env.random_opponent import RandomOpponent
-from src.env.snapshot_opponent_pool import SnapshotOpponentPool
+from src.env.opponents.random_opponent import RandomOpponent
+from src.env.opponents.snapshot_opponent_pool import SnapshotOpponentPool
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent, save_actor_critic
 from src.policies.ppo_actor import build_actor_critic, build_ppo_actor_critic
 from src.training.callbacks import SnapshotCallback

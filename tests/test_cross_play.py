@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 
 from src.env.battle_handle import BattleHandle
-from src.env.deck import load_deck
-from src.env.deck_sampler import FixedDeckSampler
-from src.env.random_opponent import RandomOpponent
+from src.env.decks.deck import load_deck
+from src.env.decks.deck_sampler import FixedDeckSampler
+from src.env.opponents.random_opponent import RandomOpponent
 from src.training.cross_play import (
     MatchResult,
     bradley_terry_elo,

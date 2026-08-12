@@ -67,7 +67,7 @@ class OpponentPool:
         Replace the pool's members wholesale.
 
         Used by leagues that rotate their membership rather than only growing
-        it (see :class:`~src.env.snapshot_opponent_pool.SnapshotOpponentPool`,
+        it (see :class:`~src.env.opponents.snapshot_opponent_pool.SnapshotOpponentPool`,
         which evicts the oldest snapshots as newer ones appear). The member
         currently playing is preserved if it survives the replacement, so a
         rotation mid-episode cannot swap the opponent out from under the

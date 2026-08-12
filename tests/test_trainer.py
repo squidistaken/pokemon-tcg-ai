@@ -10,8 +10,8 @@ from omegaconf import DictConfig, OmegaConf
 from tensordict import TensorDict
 from torchrl import _utils as torchrl_utils
 
-from src.env.opponent_pool import OpponentPool
-from src.env.random_opponent import RandomOpponent
+from src.env.opponents.opponent_pool import OpponentPool
+from src.env.opponents.random_opponent import RandomOpponent
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training.env_factory import make_env_factories
 from src.training.pipe_timeout import apply_pipe_timeout

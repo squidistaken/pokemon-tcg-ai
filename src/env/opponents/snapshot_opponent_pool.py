@@ -25,7 +25,7 @@ class SnapshotOpponentPool(OpponentPool):
     has not seen before.
 
     The warmup opponents (in practice a
-    :class:`~src.env.random_opponent.RandomOpponent`) are permanent members, so
+    :class:`~src.env.opponents.random_opponent.RandomOpponent`) are permanent members, so
     the league always retains a fixed reference point and never degenerates
     into training purely against near-copies of itself. Beyond them only the
     ``pool_size`` newest snapshots are kept; older ones are evicted.
@@ -147,7 +147,7 @@ class SnapshotOpponentPool(OpponentPool):
         Sampling weight for each league member, aligned with ``keys``.
 
         Returns None in this class, which leaves the pool sampling uniformly.
-        :class:`~src.env.pfsp_opponent_pool.PFSPOpponentPool` overrides it to
+        :class:`~src.env.opponents.pfsp_opponent_pool.PFSPOpponentPool` overrides it to
         weight members by the learner's win rate against them.
 
         :param keys: Stable identifier per member, in member order: the warmup

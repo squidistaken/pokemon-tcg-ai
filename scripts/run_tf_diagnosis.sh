@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Submit the Issue-45 transformer diagnosis sweep to Habrok.
+# Submit the Issue-45 transformer diagnosis sweep to Slurm.
 #
 # One SLURM job per arm, each an A100 job launched exactly the way the first
 # transformer run was (slurm-conf/train.sh --config ppo_transformer

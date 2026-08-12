@@ -70,6 +70,10 @@ original nine arms (mapped 1:1 in that list) didn't close: `pooling:
 attention` (`ptr_tf_poolattn`) and a matched MLP control past 4M
 (`ptr_mlp_long`, alongside `ptr_tf_long`). See that list for the full mapping.
 
+The sweep is finished. `scripts/run_ptr_sweep.sh` and the `conf/experiment/ptr_*.yaml` arms were
+removed from the tree, so the names below are a record of what ran. Recover a config with
+`git log --diff-filter=D -- conf/experiment/ptr_tf_pointer.yaml`.
+
 ---
 
 ## Setup

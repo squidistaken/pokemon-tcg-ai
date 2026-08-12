@@ -78,7 +78,7 @@ class Evaluator:
     league tracks the learner, so it hovers near 0.5 no matter how strong the
     policy becomes. This evaluator restores a readable learning curve by
     periodically playing the current policy against a *frozen* reference (in
-    practice :class:`~src.env.random_opponent.RandomOpponent`), on its own
+    practice :class:`~src.env.opponents.random_opponent.RandomOpponent`), on its own
     environment that is never used for collection.
 
     Episodes are played one at a time on a single-process environment that is
