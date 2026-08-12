@@ -91,7 +91,7 @@ class AgentDeckSampler:
         """
         # Imported here rather than at module scope: the curriculum sampler
         # pulls in torch, which this module otherwise does not need.
-        from .curriculum_deck_sampler import NO_LEVEL
+        from src.curriculum.deck_sampler import NO_LEVEL
 
         return int(getattr(self._field_sampler, "level_id", NO_LEVEL))
 
