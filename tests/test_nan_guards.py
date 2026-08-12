@@ -1,6 +1,7 @@
 """Contracts for the guards that keep a non-finite gradient from ending a run."""
 
 import logging
+from typing import cast
 
 import pytest
 import torch
@@ -131,7 +132,7 @@ def test_warm_start_accepts_a_newly_added_final_layer_norm(
         _load_warm_start_weights(target, saved, "train.init_checkpoint")
 
     assert "identity initialization" in caplog.text
-    encoder_norm = target.backbone.encoder.norm
+    encoder_norm = cast(nn.LayerNorm, target.backbone.encoder.norm)
     assert torch.equal(encoder_norm.weight, torch.ones_like(encoder_norm.weight))
     assert torch.equal(encoder_norm.bias, torch.zeros_like(encoder_norm.bias))
 
