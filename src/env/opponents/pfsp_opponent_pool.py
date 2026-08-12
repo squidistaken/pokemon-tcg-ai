@@ -110,7 +110,7 @@ class PFSPOpponentPool(SnapshotOpponentPool):
     def member_keys(self) -> tuple[str, ...]:
         """
         Stable identifier of each current member, aligned with
-        :attr:`~src.env.opponent_pool.OpponentPool.opponents`.
+        :attr:`~src.env.opponents.opponent_pool.OpponentPool.opponents`.
 
         :return: The keys as an immutable view.
         """
@@ -233,7 +233,7 @@ class PFSPOpponentPool(SnapshotOpponentPool):
 
         Matching is by identity rather than equality because opponents are
         unhashable callables, mirroring
-        :meth:`~src.env.opponent_pool.OpponentPool.set_opponents`.
+        :meth:`~src.env.opponents.opponent_pool.OpponentPool.set_opponents`.
 
         :return: The active member's key, or None if it cannot be resolved.
         """

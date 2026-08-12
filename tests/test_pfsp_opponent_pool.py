@@ -6,9 +6,9 @@ from omegaconf import OmegaConf
 from torchrl.envs import TransformedEnv
 from torchrl.envs.transforms import ActionMask
 
-from src.env.pfsp_opponent_pool import PFSPOpponentPool
-from src.env.random_opponent import RandomOpponent
-from src.env.snapshot_opponent_pool import SnapshotOpponentPool
+from src.env.opponents.pfsp_opponent_pool import PFSPOpponentPool
+from src.env.opponents.random_opponent import RandomOpponent
+from src.env.opponents.snapshot_opponent_pool import SnapshotOpponentPool
 from src.env.tcg_env import TCGEnv
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training.env_factory import make_env_factories

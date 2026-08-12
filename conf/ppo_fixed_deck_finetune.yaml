@@ -60,7 +60,6 @@ agent:
   entropy_coeff: 0.015
   device: cuda
   collector_device: cpu
-  cuda_memory_fraction: null
 
 collector:
   type: multi_sync

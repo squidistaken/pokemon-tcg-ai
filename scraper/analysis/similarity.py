@@ -9,7 +9,7 @@ import numpy as np
 from .matrices import build_count_matrix
 
 if TYPE_CHECKING:
-    from src.env.card_database import CardDatabase
+    from src.env.observation.card_database import CardDatabase
 
 ENERGY_TYPE_NAMES = [
     "colorless",

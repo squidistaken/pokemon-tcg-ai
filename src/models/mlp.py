@@ -10,39 +10,26 @@ from src.models.backbone import Backbone, activation_class
 
 class MLPBackbone(Backbone):
     """
-    Flat multi-layer-perceptron trunk — the literature's proven PPO baseline.
+    Flat multi-layer-perceptron trunk, the PPO baseline every richer backbone
+    has to beat. Concatenates the per-sample feature vectors along the last
+    dimension and runs a fully-connected stack over the result.
 
-    Turns every input into a per-sample feature vector, concatenates them
-    along the last dimension, and runs the result through a fully-connected
-    stack. This is the honest control every richer (per-option-token)
-    backbone must beat.
-
-    **Option tokens.** There are two ways this trunk can come to emit
-    ``option_repr`` for a pointer head, and it never does both:
-
-    - the attached adapter was built with ``emit_option_tokens``, in which case
-      its per-option encodings pass through untouched at ``adapter.
-      option_token_dim`` — no extra parameters, and the configuration the
-      pointer head's win was measured in (``docs/architecture/pointer-head.md``);
-    - ``option_tokens=True`` here, which projects them to :attr:`out_features`
-      and adds a stop-slot segment embedding, matching what
-      :class:`~src.models.transformer.TransformerBackbone` does.
-
-    With neither, it emits no tokens (:attr:`produces_option_repr` is False)
-    and pairs with :class:`~src.models.heads.LinearPolicyHead`. Either token
-    path pairs with either pointer head;
+    Two mutually exclusive routes emit ``option_repr`` for a pointer head. An
+    adapter built with ``emit_option_tokens`` passes its per-option encodings
+    through untouched at ``adapter.option_token_dim``, adding no parameters;
+    ``option_tokens=True`` here instead projects them to :attr:`out_features`
+    and adds a stop-slot segment embedding, as
+    :class:`~src.models.transformer.TransformerBackbone` does. With neither,
+    :attr:`produces_option_repr` is False and the trunk pairs with
+    :class:`~src.models.heads.LinearPolicyHead`.
     :func:`~src.policies.ppo_actor.build_actor_critic` sizes the head from
-    :attr:`option_repr_dim` so the widths cannot drift apart.
+    :attr:`option_repr_dim`, so the widths cannot drift apart.
 
-    With a :class:`~src.models.structured_obs_adapter.StructuredObsAdapter`
-    attached (the standard pairing, wired by
-    :func:`~src.policies.ppo_actor.build_actor_critic`), the adapter performs
-    the model-side half of the observation contract — embedding card/attack
-    IDs, normalizing scalars, pooling unordered zones — before the MLP.
-    Without one, each input is naively flattened and cast to float: plain
-    tensors past their last dimension, nested
-    :class:`~tensordict.TensorDictBase` groups leaf by leaf past their own
-    ``batch_size``.
+    The standard pairing is a
+    :class:`~src.models.structured_obs_adapter.StructuredObsAdapter`, which
+    embeds IDs, normalizes scalars and pools zones before the MLP. Without one,
+    each input is flattened and cast to float: plain tensors past their last
+    dimension, nested groups leaf by leaf past their own ``batch_size``.
     """
 
     def __init__(

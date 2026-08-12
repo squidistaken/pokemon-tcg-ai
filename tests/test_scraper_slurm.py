@@ -1,4 +1,4 @@
-"""Contracts for the two CPU-only Habrok scraper jobs."""
+"""Contracts for the two CPU-only Slurm scraper jobs."""
 
 from pathlib import Path
 

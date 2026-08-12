@@ -9,10 +9,12 @@ from torchrl.data import Composite
 
 from cg.api import AreaType, OptionType
 from src.env.battle_handle import BattleHandle
-from src.env.card_database import CardDatabase
-from src.env.deck import load_deck
-from src.env.option_reference_resolver import OptionReferenceResolver
-from src.env.structured_observation_encoder import StructuredObservationEncoder
+from src.env.decks.deck import load_deck
+from src.env.observation.card_database import CardDatabase
+from src.env.observation.option_reference_resolver import OptionReferenceResolver
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
 from src.env.tcg_env import TCGEnv
 
 DECK = load_deck(str(Path(__file__).parents[1] / "decks" / "example.csv"))

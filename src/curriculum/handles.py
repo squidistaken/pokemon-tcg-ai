@@ -29,7 +29,7 @@ class CurriculumHandles:
         ``(capacity,)``. Only the first ``size`` entries are meaningful.
     :param pair_ids: Matchup identifier occupying each slot, shape
         ``(capacity,)``. Decoded with
-        :meth:`~src.env.archetype_index.ArchetypeIndex.unpair`.
+        :meth:`~src.curriculum.archetype_index.ArchetypeIndex.unpair`.
     :param size: Number of populated slots, shape ``(1,)``.
     """
 

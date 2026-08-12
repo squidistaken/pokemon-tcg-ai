@@ -91,7 +91,7 @@ past the core count.
 The 7800X3D's 96 MB L3 likely flatters these numbers relative to a
 cluster CPU: the engine's per-battle state and the card tables are small, so many
 concurrent workers can stay resident in cache where a conventional CPU would be
-going to DRAM. Expect the scaling curve to flatten earlier on Habrok.
+going to DRAM. Expect the scaling curve to flatten earlier on a cluster node.
 
 Memory is not the constraint at these worker counts: 9 GB in use at 64 workers.
 The ceiling to watch is WSL2's ~23 GB cap, not the host's 32 GB — a forked worker
@@ -464,5 +464,4 @@ path is used as given, so the league can be pre-populated.
   cluster will differ, though the relative ordering should hold. The worker
   scaling curve in particular is the least portable result — it depends on core
   count and on the unusually large L3, so the optimal `num_workers` should be
-  re-measured on Habrok rather than carried over (see
-  [`habrok_guide.md`](habrok_guide.md)).
+  re-measured on the cluster rather than carried over.

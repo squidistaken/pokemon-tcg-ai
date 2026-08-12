@@ -4,7 +4,7 @@ from collections.abc import Sequence
 import torch
 
 from .archetype_index import ArchetypeIndex
-from .curriculum_handles import CurriculumHandles
+from .handles import CurriculumHandles
 
 Deck = list[int]
 
@@ -16,34 +16,26 @@ class CurriculumDeckSampler:
     """
     Deck sampler that draws each episode's matchup from the level curriculum.
 
-    Implements the :class:`~src.env.deck_sampler.DeckSampler` protocol, so it
+    Implements the :class:`~src.env.decks.deck_sampler.DeckSampler` protocol, so it
     drops into :class:`~src.env.tcg_env.TCGEnv` wherever
-    :class:`~src.env.deck_sampler.PoolDeckSampler` would go. The difference is
-    where the matchup comes from: instead of drawing two decks uniformly, it
-    draws an *archetype pair* from the distribution the learner publishes
-    through :class:`~src.env.curriculum_handles.CurriculumHandles`, then deals
-    a concrete list from within each archetype -- uniformly, or by ``weights``
-    when the run configures ``env.deck_weighting``. List-level diversity is
-    preserved; only the archetype pairing is curated.
+    :class:`~src.env.decks.deck_sampler.PoolDeckSampler` would go. It draws an
+    archetype pair from the distribution the learner publishes through
+    :class:`~src.curriculum.handles.CurriculumHandles`, then deals a list
+    from within each archetype, uniformly or by ``weights`` under
+    ``env.deck_weighting``. Only the pairing is curated; list-level diversity is
+    preserved.
 
-    The identifier of the drawn matchup is exposed as :attr:`level_id` so the
-    environment can stamp it into every observation of the episode, which is
-    what lets the learner attribute critic residuals back to the matchup that
-    produced them.
+    :attr:`level_id` exposes the drawn matchup so the environment can stamp it
+    into every observation, which is what lets the learner attribute critic
+    residuals to the matchup that produced them.
 
-    Before the learner has published anything the channel is empty, and the
-    sampler falls back to a uniformly random archetype pair. That is the
-    correct behaviour rather than an error: collection starts before the first
-    update, so the first batch is necessarily uncurated.
-
-    ``explore_prob`` extends that same fallback into an ongoing mechanism: with
-    that probability, every episode (not just ones before the first publish)
-    draws a uniformly random pair instead of one from the published
-    distribution. This is what lets the learner-side buffer discover matchups
-    lazily (:meth:`~src.env.level_buffer.LevelBuffer.commit`) when the corpus
-    is larger than the buffer's capacity -- without it, only whatever handful
-    of pairs happened to be drawn before the very first publish would ever be
-    scored, and the buffer would never grow past that.
+    An empty channel falls back to a uniformly random pair. Collection starts
+    before the first update, so the first batch is necessarily uncurated.
+    ``explore_prob`` keeps that fallback running afterwards: with that
+    probability an episode draws a random pair instead of a published one,
+    which is how the buffer discovers matchups lazily when the corpus exceeds
+    its capacity. Without it, only the pairs drawn before the first publish
+    would ever be scored.
     """
 
     def __init__(

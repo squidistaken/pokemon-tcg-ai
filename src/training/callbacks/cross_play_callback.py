@@ -10,8 +10,8 @@ from omegaconf import DictConfig
 from torchrl.data import Categorical, Composite
 
 from src.env.battle_handle import BattleHandle
-from src.env.deck_sampler import DeckSampler, build_deck_sampler
-from src.env.snapshot_opponent_pool import SNAPSHOT_SUFFIX
+from src.env.decks.deck_sampler import DeckSampler, build_deck_sampler
+from src.env.opponents.snapshot_opponent_pool import SNAPSHOT_SUFFIX
 from src.models.actor_critic import ActorCritic
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 from src.policies.ppo_actor import build_actor_critic

@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from cg.api import Observation
-from src.env.opponent_pool import OpponentPool
+from src.env.opponents.opponent_pool import OpponentPool
 
 _SNAPSHOT_PATTERN = re.compile(r"^snapshot_(\d+)\.pt$")
 

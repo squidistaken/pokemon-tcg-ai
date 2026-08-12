@@ -4,8 +4,10 @@ from torchrl.data import Composite
 from torchrl.envs import EnvBase, TransformedEnv
 from torchrl.envs.transforms import ActionMask
 
-from src.env.deck import load_deck
-from src.env.structured_observation_encoder import StructuredObservationEncoder
+from src.env.decks.deck import load_deck
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
 from src.env.tcg_env import TCGEnv
 from src.policies.ppo_actor import build_ppo_actor_critic
 from tests.conftest import DECK_PATH, MAX_OPTIONS

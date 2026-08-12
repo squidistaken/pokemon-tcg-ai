@@ -8,10 +8,10 @@ from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
 from tensordict import TensorDict
 
-from src.env.archetype_index import ArchetypeIndex
-from src.env.curriculum_deck_sampler import NO_LEVEL
-from src.env.curriculum_handles import CurriculumHandles
-from src.env.level_buffer import LevelBuffer
+from src.curriculum.archetype_index import ArchetypeIndex
+from src.curriculum.deck_sampler import NO_LEVEL
+from src.curriculum.handles import CurriculumHandles
+from src.curriculum.level_buffer import LevelBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +48,14 @@ class Curriculum:
     """
     Learner-side owner of the level curriculum.
 
-    Holds the :class:`~src.env.level_buffer.LevelBuffer`, consumes each
+    Holds the :class:`~src.curriculum.level_buffer.LevelBuffer`, consumes each
     collected batch after advantage estimation, and republishes the resulting
     sampling distribution to the environment workers.
 
     Scoring lives here rather than in the workers because the signal is a
     critic residual, which the environments cannot compute. The workers only
     need the conclusion, which reaches them through
-    :class:`~src.env.curriculum_handles.CurriculumHandles`. That asymmetry is
+    :class:`~src.curriculum.handles.CurriculumHandles`. That asymmetry is
     specific to the level curriculum: opponent selection is driven by terminal
     rewards the environment already sees, so it stays worker-local and needs no
     channel at all.
@@ -83,7 +83,7 @@ class Curriculum:
         :param explore_prob: Forwarded to the workers' deck samplers, which
             read it off :attr:`explore_prob`; kept here only so it travels with
             the rest of the curriculum's construction. See
-            :class:`~src.env.curriculum_deck_sampler.CurriculumDeckSampler`.
+            :class:`~src.curriculum.deck_sampler.CurriculumDeckSampler`.
         """
         self._archetypes = archetypes
         self._handles = handles

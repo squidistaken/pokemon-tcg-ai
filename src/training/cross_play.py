@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from cg.api import Observation
 from src.env.battle_handle import BattleHandle
-from src.env.deck_sampler import DeckSampler
+from src.env.decks.deck_sampler import DeckSampler
 
 logger = logging.getLogger(__name__)
 

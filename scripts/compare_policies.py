@@ -24,7 +24,7 @@ from torchrl.envs import TransformedEnv
 from torchrl.envs.transforms import ActionMask
 from torchrl.envs.utils import ExplorationType, set_exploration_type, step_mdp
 
-from src.env.deck import load_deck, resolve_deck_paths
+from src.env.decks.deck import load_deck, resolve_deck_paths
 from src.env.tcg_env import TCGEnv
 from src.policies.greedy_policy_opponent import load_greedy_opponent
 from tests.conftest import MAX_OPTIONS
