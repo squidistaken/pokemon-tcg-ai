@@ -162,7 +162,6 @@ class PPOTrainer(Trainer):
         lr_anneal: bool = False,
         ent_anneal: bool = False,
         ent_warm_frac: float = 0.5,
-        reward_scaling: float = 1.0,
         callbacks: Iterable[TrainingCallback] | None = None,
         run_config: Mapping[str, Any] | None = None,
         evaluator: Evaluator | MultiEvaluator | None = None,
@@ -251,10 +250,6 @@ class PPOTrainer(Trainer):
             coefficient is held at its initial value before it linearly decays
             to 0. **Inferred schedule** — the flag comes from the colleague's
             file but the schedule lived in an unseen base class.
-        :param reward_scaling: Accepted for interface parity. **No effect on the
-            current stats**: win/draw rates in :meth:`Trainer.train` are computed
-            from the reward *sign*, not its magnitude; this would only matter for
-            future magnitude logging.
         :param callbacks: Metric observers, forwarded to
             :class:`~src.training.trainer.Trainer`. The PPO losses returned by
             :meth:`_update` reach them without any extra wiring here.
@@ -349,7 +344,6 @@ class PPOTrainer(Trainer):
         self._max_grad_norm = max_grad_norm
         self._target_kl = target_kl
         self._target_kl_multiplier = target_kl_multiplier
-        self._reward_scaling = reward_scaling
         self._compile_policy = compile_policy
 
         self._value_estimator_name = value_estimator

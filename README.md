@@ -75,7 +75,8 @@ src/
   policies/            Random, greedy, and Kaggle inference policies + the PPO operator builder
   training/            Trainer, PPO, collectors, env factory, self-play, evaluators, cross-play,
                        and callbacks/ (snapshots, train state, W&B)
-  train.py             Hydra entry point (python -m src.train)
+  train.py             Hydra entry point (python -m src.train): main() only
+  trainer_builder.py   Builds the trainer, callbacks and run paths from the config
   eval_deck_field.py   Per-archetype scoring across a deck field
 conf/                  Hydra configs: env/, agent/, model/ (backbone + head), train/,
                        collector/, callbacks/, experiment/, paths/

@@ -9,7 +9,6 @@ from .callbacks import (
     WeightsAndBiases,
 )
 from .collectors import AsyncCollectorOptions, CollectorKind
-from .cuda_memory_guard import CudaMemoryGuard
 from .curriculum import Curriculum, build_curriculum
 from .env_factory import build_probe_specs, make_env, make_env_factories
 from .evaluator import Evaluator, build_evaluator
@@ -28,7 +27,6 @@ __all__ = [
     "CallbackList",
     "CollectorKind",
     "CrossPlayCallback",
-    "CudaMemoryGuard",
     "Curriculum",
     "CurriculumStateCallback",
     "Evaluator",

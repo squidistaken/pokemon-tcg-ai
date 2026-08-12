@@ -92,10 +92,6 @@ agent:
   # Required under multi_sync, not an optimisation: workers are forked and CUDA
   # cannot initialize in a forked child. The PPO update keeps the GPU.
   collector_device: cpu
-  # Off deliberately. An uncapped allocator on WSL can fail in the driver and
-  # kill the CUDA context, but the supervisor restarts from train_state.pt, so
-  # that costs at most train.train_state_interval frames.
-  cuda_memory_fraction: null
 
 collector:
   # Each worker gets its own policy copy, so the forward that sync serialized

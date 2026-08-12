@@ -11,12 +11,9 @@
 # gone nothing in the process can be salvaged -- the model, the optimizer and
 # the collector all live on that device. The only recovery is a new process.
 #
-# agent.cuda_memory_fraction makes that particular failure far less likely by
-# capping what the allocator may reserve, so memory pressure raises a catchable
-# OutOfMemoryError instead of reaching the driver. This script covers the rest:
-# any crash at all costs at most train.train_state_interval frames, because the
-# next attempt resumes from the rolling train_state.pt with Adam's moments and
-# the curriculum intact.
+# This script is the recovery: any crash at all costs at most
+# train.train_state_interval frames, because the next attempt resumes from the
+# rolling train_state.pt with Adam's moments and the curriculum intact.
 #
 # WHAT A RESUME CARRIES
 #

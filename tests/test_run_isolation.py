@@ -19,7 +19,7 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
 from src.hydra_resolvers import run_uid
-from src.train import _resolve_checkpoint_dir
+from src.trainer_builder import _resolve_checkpoint_dir
 
 CONF_ROOT = Path(__file__).parents[1] / "conf"
 
