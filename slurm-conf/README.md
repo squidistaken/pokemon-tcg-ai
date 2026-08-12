@@ -67,7 +67,7 @@ login node, download the released corpus directly to scratch and create the
 checkpoint destination:
 
 ```bash
-SCRATCH_ROOT=/scratch/s5862159/slopemon
+SCRATCH_ROOT=/scratch/...
 ./scripts/fetch_decks.sh --root "$SCRATCH_ROOT"
 mkdir -p "$SCRATCH_ROOT/checkpoints/baseline-training-checkpoints"
 ```
@@ -86,7 +86,7 @@ for example `hpc-login:"$SCRATCH_ROOT/checkpoints/baseline-training-checkpoints/
 The resulting layout is:
 
 ```text
-/scratch/s5862159/slopemon/
+/scratch/...
 ├── decks/heuristic-resolved/...
 ├── checkpoints/baseline-training-checkpoints/snapshot_*.pt
 └── outputs/                         # created by the training launcher

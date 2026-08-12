@@ -45,8 +45,7 @@ multi-deck training:
 ```bash
 ./scripts/fetch_decks.sh           # newest decks-* release: verify + unpack into decks/
 ./scripts/fetch_decks.sh decks-v3  # or pin a specific version for reproducibility
-./scripts/fetch_decks.sh --root /scratch/$USER/slopemon
-                                   # install into /scratch/$USER/slopemon/decks/
+./scripts/fetch_decks.sh --root /path/to/target # install to a specific filepath
 ```
 
 Publish a new corpus (auto-increments to the next `decks-vN`):
@@ -58,7 +57,7 @@ Publish a new corpus (auto-increments to the next `decks-vN`):
 `fetch_decks.sh` picks up the highest-numbered release automatically. Its
 `--root` option changes only the storage root: the release's standard `decks/`
 layout is preserved beneath it, so training can consume it with
-`paths.data_dir=/scratch/$USER/slopemon/decks`. `build_decks_release.sh` is the
+`paths.data_dir=/path/to/target`. `build_decks_release.sh` is the
 low-level builder it wraps if you only want the local tarball.
 
 Every deck in a release comes from Limitless. The scraper also walks Bulbapedia, but its

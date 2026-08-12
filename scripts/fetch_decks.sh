@@ -3,7 +3,7 @@
 #
 #   ./scripts/fetch_decks.sh                  # newest release -> ./decks
 #   ./scripts/fetch_decks.sh decks-v2         # pinned release -> ./decks
-#   ./scripts/fetch_decks.sh --root /scratch/$USER/slopemon
+#   ./scripts/fetch_decks.sh --root /path/to/target
 #                                             # newest -> ROOT/decks
 #
 # The corpus is versioned as GitHub Releases tagged `decks-*`, each carrying a
