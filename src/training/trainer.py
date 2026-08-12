@@ -67,12 +67,24 @@ def _is_worker_death(error: BaseException) -> bool:
     :param error: Exception raised while iterating the collector.
     :return: True if this is a dead worker rather than a fault in the update.
     """
-    if isinstance(error, EOFError | BrokenPipeError | ConnectionResetError):
-        # The parent hit the far end of a worker's pipe directly, before
-        # torchrl's own liveness check ran.
-        return True
-    message = str(error).lower()
-    return any(marker in message for marker in _WORKER_DEATH_MARKERS)
+    # TorchRL's collector iterator calls shutdown while handling a dead-worker
+    # RuntimeError. With current multiprocessing that shutdown can itself raise
+    # ``ValueError: process object is closed``, leaving the original useful
+    # RuntimeError only in ``__context__``. Walk the chain so cleanup cannot
+    # disguise a recoverable pool death as an unrelated ValueError.
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, EOFError | BrokenPipeError | ConnectionResetError):
+            # The parent hit the far end of a worker's pipe directly, before
+            # torchrl's own liveness check ran.
+            return True
+        message = str(current).lower()
+        if any(marker in message for marker in _WORKER_DEATH_MARKERS):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 @dataclass
@@ -299,7 +311,7 @@ class Trainer(BaseTrainer):
                     frames_before = totals.frames
                     try:
                         self._collect(collector, progress_bar, totals, start_time)
-                    except (RuntimeError, OSError, EOFError) as error:
+                    except (RuntimeError, OSError, EOFError, ValueError) as error:
                         if not _is_worker_death(error):
                             raise
                         if restarts >= self._max_collector_restarts:

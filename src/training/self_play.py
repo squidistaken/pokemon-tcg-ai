@@ -17,6 +17,10 @@ from src.policies.greedy_policy_opponent import (
     load_greedy_opponent,
 )
 from src.training.env_factory import OpponentFactory, make_encoder
+from src.training.external_snapshot_opponent_pool import (
+    ExternalSnapshotOpponentPool,
+    valid_snapshot_paths,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +58,12 @@ def build_eval_opponent_factory(
         ``train.eval_opponent_checkpoint``, e.g. a previous run's
         best-submitted agent. A relative path resolves against the original
         working directory, and must exist on disk at startup.
+
+    ``"checkpoint_pool"``
+        Uniformly sample a frozen population from the newest checkpoints in
+        ``train.eval_opponent_checkpoint_dir``. The directory is scanned only
+        when the evaluator is constructed, so learner snapshots can never
+        drift this aggregate reference during a run.
 
     ``/path/to/snapshot.pt``
         The same frozen-checkpoint reference named inline rather than through
@@ -118,6 +128,36 @@ def build_eval_opponent_factory(
             not_found_prefix="eval_opponent_checkpoint",
         )
 
+    if name == "checkpoint_pool":
+        if obs_spec is None or action_spec is None:
+            raise ValueError(
+                "eval_opponent=checkpoint_pool needs obs/action specs to rebuild "
+                "its checkpoint policies."
+            )
+        configured = cfg.train.get("eval_opponent_checkpoint_dir") or cfg.train.get(
+            "opponent_checkpoint_dir"
+        )
+        if not configured:
+            raise ValueError(
+                "eval_opponent=checkpoint_pool requires "
+                "train.eval_opponent_checkpoint_dir or train.opponent_checkpoint_dir."
+            )
+        directory = Path(to_absolute_path(str(configured))).resolve()
+        pool_size = int(
+            cfg.train.get("eval_opponent_pool_size") or cfg.train.get("pool_size", 5)
+        )
+        _validate_external_checkpoint_dir(directory, pool_size)
+        return partial(
+            _make_external_pool,
+            checkpoint_dirs=(directory,),
+            cfg=cfg,
+            obs_spec=obs_spec,
+            action_spec=action_spec,
+            pool_size=pool_size,
+            seed=int(cfg.seed),
+            refresh=False,
+        )
+
     if name.endswith(".pt"):
         if obs_spec is None or action_spec is None:
             raise ValueError(
@@ -138,7 +178,7 @@ def build_eval_opponent_factory(
 
     raise ValueError(
         f"Unsupported eval_opponent '{name}'; expected 'random', 'first_snapshot', "
-        f"'checkpoint', or a path to a .pt checkpoint."
+        f"'checkpoint', 'checkpoint_pool', or a path to a .pt checkpoint."
     )
 
 
@@ -332,6 +372,19 @@ def build_opponent_factory(
     :return: An opponent factory, or None when self-play is disabled.
     :raises ValueError: If ``warmup_opponent`` is not a supported name.
     """
+    mode = str(cfg.train.get("opponent_pool_mode", "selfplay"))
+    if mode not in ("selfplay", "frozen", "refresh"):
+        raise ValueError(
+            f"unknown opponent_pool_mode {mode!r}; expected 'selfplay', "
+            "'frozen' or 'refresh'"
+        )
+    if mode != "selfplay":
+        return _build_external_opponent_factory(
+            cfg, obs_spec, action_spec, checkpoint_dir, mode
+        )
+
+    # Compatibility path: everything below is the established self-play
+    # construction, including snapshot_interval=0 and the random warmup anchor.
     if int(cfg.train.get("snapshot_interval", 0)) <= 0:
         return None
     warmup = str(cfg.train.get("warmup_opponent", "random"))
@@ -355,6 +408,71 @@ def build_opponent_factory(
         seed=int(cfg.seed),
         sampling=sampling,
     )
+
+
+def _build_external_opponent_factory(
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
+    checkpoint_dir: str | Path,
+    mode: str,
+) -> OpponentFactory:
+    """Build an opt-in frozen or learner-refreshed checkpoint population."""
+    sampling = str(cfg.train.get("opponent_sampling", "uniform"))
+    if sampling != "uniform":
+        raise ValueError(
+            f"opponent_pool_mode={mode} requires opponent_sampling=uniform; "
+            f"got {sampling!r}. PFSP remains available in selfplay mode."
+        )
+    configured = cfg.train.get("opponent_checkpoint_dir")
+    if not configured:
+        raise ValueError(
+            f"opponent_pool_mode={mode} requires train.opponent_checkpoint_dir."
+        )
+    baseline_dir = Path(to_absolute_path(str(configured))).resolve()
+    pool_size = int(cfg.train.get("pool_size", 5))
+    _validate_external_checkpoint_dir(baseline_dir, pool_size)
+
+    refresh = mode == "refresh"
+    if refresh and int(cfg.train.get("snapshot_interval", 0)) <= 0:
+        raise ValueError(
+            "opponent_pool_mode=refresh requires train.snapshot_interval > 0 so "
+            "learner checkpoints can enter the opponent population."
+        )
+    directories = [baseline_dir]
+    if refresh:
+        learner_dir = Path(checkpoint_dir).resolve()
+        if learner_dir == baseline_dir:
+            raise ValueError(
+                "The baseline opponent directory and learner checkpoint directory "
+                "must be distinct in refresh mode."
+            )
+        directories.append(learner_dir)
+
+    return partial(
+        _make_external_pool,
+        checkpoint_dirs=tuple(directories),
+        cfg=cfg,
+        obs_spec=obs_spec,
+        action_spec=action_spec,
+        pool_size=pool_size,
+        seed=int(cfg.seed),
+        refresh=refresh,
+    )
+
+
+def _validate_external_checkpoint_dir(directory: Path, pool_size: int) -> None:
+    """Fail in the parent process before workers load an undersized population."""
+    if pool_size <= 0:
+        raise ValueError(f"pool_size must be positive, got {pool_size}")
+    if not directory.is_dir():
+        raise ValueError(f"opponent checkpoint directory {directory} does not exist.")
+    snapshots = valid_snapshot_paths(directory)
+    if len(snapshots) < pool_size:
+        raise ValueError(
+            f"opponent checkpoint directory {directory} contains {len(snapshots)} "
+            f"snapshot(s); expected at least pool_size={pool_size}."
+        )
 
 
 def _make_pool(
@@ -409,6 +527,34 @@ def _make_pool(
         exponent=float(cfg.train.get("pfsp_exponent", 2.0)),
         min_weight=float(cfg.train.get("pfsp_min_weight", 0.05)),
         prior_games=float(cfg.train.get("pfsp_prior_games", 2.0)),
+    )
+
+
+def _make_external_pool(
+    checkpoint_dirs: tuple[Path, ...],
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
+    pool_size: int,
+    seed: int,
+    refresh: bool,
+) -> ExternalSnapshotOpponentPool:
+    """Construct one worker's external checkpoint population."""
+    encoder = make_encoder(
+        cfg.env.get("encoder", "structured"), int(cfg.env.max_options)
+    )
+    return ExternalSnapshotOpponentPool(
+        checkpoint_dirs=checkpoint_dirs,
+        load_snapshot=partial(
+            _load_snapshot,
+            cfg=cfg,
+            obs_spec=obs_spec,
+            action_spec=action_spec,
+            encoder=encoder,
+        ),
+        pool_size=pool_size,
+        refresh=refresh,
+        seed=seed,
     )
 
 

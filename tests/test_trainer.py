@@ -193,6 +193,19 @@ WORKER_DEATH = RuntimeError(
 )
 
 
+def _masked_worker_death() -> ValueError:
+    """Build TorchRL's cleanup-masked dead-worker exception chain."""
+    try:
+        raise RuntimeError(
+            "At least one process failed. Check for more infos in the log."
+        )
+    except RuntimeError:
+        try:
+            raise ValueError("process object is closed")
+        except ValueError as masked:
+            return masked
+
+
 def test_worker_death_is_told_apart_from_ordinary_failures() -> None:
     """
     Only torchrl's dead-process reports and broken pipes count as worker death.
@@ -201,6 +214,16 @@ def test_worker_death_is_told_apart_from_ordinary_failures() -> None:
     assert _is_worker_death(RuntimeError("Cannot proceed, worker 6 dead."))
     assert _is_worker_death(BrokenPipeError())
     assert not _is_worker_death(RuntimeError("shape '[2, 3]' is invalid for input"))
+
+
+def test_worker_death_hidden_by_torchrl_shutdown_is_recoverable() -> None:
+    """TorchRL cleanup must not mask its original dead-process report."""
+    assert _is_worker_death(_masked_worker_death())
+
+
+def test_unrelated_value_error_is_not_recoverable() -> None:
+    """Catching the masked form does not turn ordinary ValueErrors into retries."""
+    assert not _is_worker_death(ValueError("invalid deck configuration"))
 
 
 def test_trainer_resumes_collection_after_a_worker_dies() -> None:
@@ -225,6 +248,27 @@ def test_trainer_resumes_collection_after_a_worker_dies() -> None:
     assert trainer.budgets == [512, 384]
     assert trainer.restarts == [1]
     assert [collector.shutdown_calls for collector in trainer.collectors] == [1, 1]
+
+
+def test_trainer_restarts_after_torchrl_masks_worker_death() -> None:
+    """The ValueError exposed by broken-pool cleanup reaches the restart loop."""
+    trainer = _ScriptedTrainer(
+        collectors=[
+            _ScriptedCollector(
+                batches=1, frames_per_batch=64, error=_masked_worker_death()
+            ),
+            _ScriptedCollector(batches=3, frames_per_batch=64),
+        ],
+        frames_per_batch=64,
+        total_frames=256,
+        max_collector_restarts=2,
+    )
+
+    stats = trainer.train()
+
+    assert stats["frames"] == 256
+    assert trainer.budgets == [256, 192]
+    assert trainer.restarts == [1]
 
 
 def test_trainer_rebuilds_env_factories_with_a_shifted_seed() -> None:
