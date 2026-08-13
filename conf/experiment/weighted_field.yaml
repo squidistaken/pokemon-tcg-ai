@@ -70,6 +70,17 @@ model:
     # parameters against the MLP's 2.85M, ~4% of wall clock either way.
     token_groups: [pokemon]
     option_tokens: true
+    # Post-LN put the LayerNorm after the residual add, so the branch could
+    # carry a large magnitude while the normalized output still looked healthy.
+    # At 129.25M frames the pre-clip gradient norm went 1.0 -> 8 -> 1.2e3 in
+    # three updates with the loss unchanged (loss_critic 0.078, entropy 0.63),
+    # reached 1.3e16, then overflowed fp32. Pre-LN normalizes on the way into
+    # each branch instead. final_norm is the conventional pairing: it restores
+    # the output normalization the heads were trained against, and it is the
+    # one parameter a pre-130M checkpoint does not carry (see
+    # trainer_builder._load_warm_start_weights).
+    norm_first: true
+    final_norm: true
   adapter:
     card_embed_dim: 16
     entity_dim: 128
@@ -80,6 +91,11 @@ agent:
   # At 3e-4 the KL early stop fired on 269 of ~619 updates, cutting 43% of
   # batches short of their 4 epochs. Constant, not annealed.
   lr: 2.0e-4
+  # Nothing bounded the weights over the first 130M frames: linear1 max-abs
+  # grew 0.111 -> 2.16 and never came back, which is how the trunk drifted into
+  # the regime where one minibatch produced a 1e16 gradient. Decoupled, so it
+  # does not interact with Adam's second moment.
+  weight_decay: 0.01
   # 0.015 ran 86M to 128M and held entropy at 0.82 nats, |loss_entropy| /
   # |loss_objective| at 1.25. Whether it beat 0.005 is unmeasured: deck_corpus
   # and eval_agent_deck changed at the same restart, so the eval step from 0.641

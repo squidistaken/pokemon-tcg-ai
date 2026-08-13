@@ -173,6 +173,53 @@ def test_ppo_update_returns_finite_losses(
     assert all(math.isfinite(value) for value in losses.values())
 
 
+def test_non_finite_gradient_is_dropped_instead_of_applied(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    A finite loss can still backpropagate a non-finite gradient, and clipping
+    then multiplies every gradient by a non-finite coefficient. The update must
+    drop that minibatch and leave the weights untouched.
+    """
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    trainer = _make_trainer(actor_critic, action_spec)
+    data = _collect_one_batch(trainer)
+    for parameter in actor_critic.parameters():
+        parameter.register_hook(lambda grad: torch.full_like(grad, float("inf")))
+    before = [parameter.detach().clone() for parameter in actor_critic.parameters()]
+
+    losses = trainer.update_for_test(data)
+
+    assert all(
+        torch.isfinite(parameter).all() for parameter in actor_critic.parameters()
+    ), "an inf gradient must not reach the optimizer"
+    assert all(
+        torch.equal(saved, parameter)
+        for saved, parameter in zip(before, actor_critic.parameters(), strict=True)
+    ), "every minibatch was dropped, so no weight should have moved"
+    assert losses is None, "no minibatch applied means no metrics for this update"
+
+
+def test_update_reports_the_maximum_gradient_norm(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """
+    ``grad_norm`` averages over minibatches, which hides a single spike, so the
+    per-update maximum is reported alongside it.
+    """
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    trainer = _make_trainer(actor_critic, action_spec)
+    losses = trainer.update_for_test(_collect_one_batch(trainer))
+
+    assert losses is not None
+    assert losses["grad_norm_max"] >= losses["grad_norm"]
+    assert losses["nonfinite_grads"] == 0.0
+
+
 def test_ppo_update_reports_unweighted_policy_entropy(
     structured_model_cfg, structured_obs_spec, action_spec
 ) -> None:

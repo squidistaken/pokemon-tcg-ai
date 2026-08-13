@@ -45,8 +45,15 @@ vtrace_c_thresh: 1.0
 # the allocation the WSL GPU scheduler refuses (docs/wsl-crash-diagnosis.md).
 # Exact, not an approximation: worker rows are independent trajectories.
 gae_num_chunks: 8
-# Adam learning rate.
+# AdamW learning rate.
 lr: 3.0e-4
+# Decoupled weight decay. 0.0 is plain Adam, which is what every run up to
+# 130M frames used: with nothing bounding them the transformer's weights grew
+# monotonically for the whole run (linear1 max-abs 0.111 -> 2.16), until a
+# single minibatch produced a gradient large enough to overflow the fp32 norm.
+# Applied to every parameter, LayerNorm gains and biases included; excluding
+# them needs a second parameter group, which a resume cannot load.
+weight_decay: 0.0
 # Optimization epochs over each collected batch. Kept low because the sixteen
 # minibatches below already give the batch plenty of reuse, and more of it than
 # the KL bound comfortably supports.

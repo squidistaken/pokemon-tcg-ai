@@ -16,6 +16,7 @@ from src.models.actor_critic import ActorCritic
 from src.policies.greedy_policy_opponent import save_actor_critic
 
 from .base import TrainingCallback
+from .finite_check import non_finite_entries
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,16 @@ class SnapshotCallback(TrainingCallback):
 
         :param frames: Frame count to embed in the filename.
         """
+        corrupt = non_finite_entries(self._actor_critic.state_dict())
+        if corrupt:
+            logger.error(
+                "Refusing to snapshot at %d frames: %d parameter tensor(s) are "
+                "non-finite (%s). A NaN member would poison the self-play league.",
+                frames,
+                len(corrupt),
+                ", ".join(corrupt[:3]),
+            )
+            return
         self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
         final_path = self._checkpoint_dir / f"snapshot_{frames:0{_FRAME_DIGITS}d}.pt"
         # Same directory (os.replace is only atomic within a filesystem) and a

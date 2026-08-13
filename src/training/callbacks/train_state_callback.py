@@ -8,6 +8,7 @@ from torch import nn
 from torch.optim import Optimizer
 
 from src.training.callbacks.base import TrainingCallback
+from src.training.callbacks.finite_check import non_finite_entries
 
 logger = logging.getLogger(__name__)
 
@@ -110,10 +111,23 @@ class TrainStateCallback(TrainingCallback):
 
         :param frames: Absolute frame count this state was captured at.
         """
+        weights = self._actor_critic.state_dict()
+        corrupt = non_finite_entries(weights)
+        if corrupt:
+            logger.error(
+                "Refusing to write the training state at %d frames: %d parameter "
+                "tensor(s) are non-finite (%s). Overwriting the state would make "
+                "every restart resume a dead model; the previous state stays in "
+                "place instead.",
+                frames,
+                len(corrupt),
+                ", ".join(corrupt[:3]),
+            )
+            return
         self._path.parent.mkdir(parents=True, exist_ok=True)
         state = {
             "format_version": 1,
-            "state_dict": self._actor_critic.state_dict(),
+            "state_dict": weights,
             "optimizer": self._optimizer.state_dict(),
             "frames": frames,
             "torch_rng_state": torch.get_rng_state(),
