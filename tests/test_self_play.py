@@ -367,7 +367,7 @@ def test_warmup_checkpoint_replaces_random_anchor(
     anchor.write_bytes(b"placeholder")
 
     def fake_load(checkpoint_path, cfg, obs_spec, action_spec, encoder):  # noqa: ARG001
-        return lambda obs: [0]
+        return lambda _obs: [0]
 
     monkeypatch.setattr("src.training.self_play._load_snapshot", fake_load)
     cfg = selfplay_cfg(tmp_path, structured_model_cfg)
