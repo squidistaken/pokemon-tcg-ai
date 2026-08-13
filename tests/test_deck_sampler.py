@@ -852,6 +852,78 @@ def test_agent_deck_labels_are_seat_ordered(agent_seat: int) -> None:
 
 
 @pytest.mark.parametrize("agent_seat", [0, 1])
+def test_mirror_deals_the_pinned_deck_to_both_seats(agent_seat: int) -> None:
+    """Both seats pilot the pin, so the league opponent is never handicapped."""
+    sampler = AgentDeckSampler(
+        agent_deck=[1] * 60,
+        field_sampler=PoolDeckSampler(
+            [[2] * 60, [3] * 60], matchup="independent", seed=1, labels=["Two", "Three"]
+        ),
+        agent_label="One",
+        field_probability=0.0,
+        mirror=True,
+        seed=5,
+    )
+    for _ in range(50):
+        deck0, deck1 = sampler.sample_for_seat(agent_seat)
+        assert deck0 == [1] * 60
+        assert deck1 == [1] * 60
+        # Separate lists, so neither seat can alias the other's cards.
+        assert deck0 is not deck1
+        assert sampler.last_labels == ("One", "One")
+
+
+def test_mirror_leaves_the_field_sampler_untouched() -> None:
+    """
+    A mirror episode needs no opponent, so the field sampler must not advance.
+
+    Load-bearing under round-robin: an unnecessary draw would rotate the cursor
+    and change which lists a later field episode sees.
+    """
+
+    def build_field() -> PoolDeckSampler:
+        return PoolDeckSampler(
+            _fake_pool(10),
+            matchup="independent",
+            mode="round_robin",
+            labels=[str(index) for index in range(10)],
+            seed=0,
+        )
+
+    field, untouched = build_field(), build_field()
+    sampler = AgentDeckSampler(
+        agent_deck=[99] * 60,
+        field_sampler=field,
+        agent_label="Alakazam",
+        field_probability=0.0,
+        mirror=True,
+        seed=3,
+    )
+    for _ in range(20):
+        sampler.sample_for_seat(0)
+    # Twenty mirror episodes later the wrapped sampler is still where an
+    # untouched twin is, so no cursor moved and no RNG was consumed.
+    assert field.sample() == untouched.sample()
+
+
+def test_mirror_still_honours_field_probability() -> None:
+    """field_probability keeps its meaning: a field episode is not a mirror."""
+    sampler = AgentDeckSampler(
+        agent_deck=[1] * 60,
+        field_sampler=PoolDeckSampler(
+            [[2] * 60, [3] * 60], matchup="independent", seed=1, labels=["Two", "Three"]
+        ),
+        agent_label="One",
+        field_probability=1.0,
+        mirror=True,
+        seed=5,
+    )
+    for _ in range(20):
+        deck0, deck1 = sampler.sample_for_seat(0)
+        assert [1] * 60 not in (deck0, deck1)
+
+
+@pytest.mark.parametrize("agent_seat", [0, 1])
 def test_single_field_draw_keeps_pin_and_covers_complete_panel(
     agent_seat: int,
 ) -> None:

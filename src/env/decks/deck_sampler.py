@@ -289,6 +289,7 @@ def build_deck_sampler(spec: dict[str, Any], seed: int | None = None) -> DeckSam
             agent_label=spec.get("agent_label"),
             field_probability=spec.get("field_probability", 0.0),
             single_field_draw=spec.get("single_field_draw", False),
+            mirror=spec.get("mirror", False),
             seed=seed,
         )
     if kind == "pool":

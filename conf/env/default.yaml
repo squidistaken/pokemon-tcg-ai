@@ -102,6 +102,20 @@ agent_deck_field_prob: 0.2
 # Fixed-deck fine-tuning enables this so weighted sampling consumes one draw per
 # episode and round-robin evaluation visits every field entry.
 agent_deck_single_field_draw: false
+# Deal the pinned deck to BOTH seats, so every training episode is a mirror on
+# one list and the field sampler supplies no opponent at all.
+#
+# This exists for a pinned self-play run. The league opponent is a snapshot of a
+# network that only practises the pinned deck, so dealing it a field deck makes
+# it misplay and the learner farms an opponent it crippled itself: the previous
+# fixed-deck arm measured train/win_rate 0.771 against its own league that way.
+# A mirror hands the snapshot the deck it was trained on, which puts it back at
+# full strength and returns the collected win rate to ~0.5.
+#
+# The cost is that no field matchup is seen while training. Training only, like
+# agent_deck_field_prob: evaluation keeps dealing the opposing seat the panel,
+# because that is the only measurement of anything but the run itself.
+agent_deck_mirror: false
 # Deck the agent pilots during EVALUATION only, independent of agent_deck.
 #
 # Evaluation should hold the agent's deck fixed even when training does not: the

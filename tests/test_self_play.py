@@ -348,6 +348,40 @@ def test_missing_opponent_pool_mode_keeps_legacy_selfplay_factory(
     assert pool._checkpoint_dir.resolve() == tmp_path.resolve()  # noqa: SLF001
 
 
+def test_warmup_checkpoint_missing_path_fails_during_factory_build(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """A warmup_checkpoint that does not resolve to a file fails in the parent."""
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    cfg.train.warmup_checkpoint = str(tmp_path / "missing.pt")
+
+    with pytest.raises(ValueError, match="warmup_checkpoint .* does not exist"):
+        build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
+
+
+def test_warmup_checkpoint_replaces_random_anchor(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec, monkeypatch
+) -> None:
+    """warmup_checkpoint becomes the league's anchor instead of RandomOpponent."""
+    anchor = tmp_path / "anchor.pt"
+    anchor.write_bytes(b"placeholder")
+
+    def fake_load(checkpoint_path, cfg, obs_spec, action_spec, encoder):  # noqa: ARG001
+        return lambda _obs: [0]
+
+    monkeypatch.setattr("src.training.self_play._load_snapshot", fake_load)
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    cfg.train.warmup_checkpoint = str(anchor)
+
+    factory = build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
+    assert factory is not None
+    pool = factory()
+
+    assert isinstance(pool, SnapshotOpponentPool)
+    assert pool.snapshot_count == 0
+    assert not isinstance(pool.opponents[0], RandomOpponent)
+
+
 def test_unknown_opponent_pool_mode_fails_during_factory_build(
     tmp_path, structured_model_cfg, structured_obs_spec, action_spec
 ) -> None:
