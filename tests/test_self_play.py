@@ -374,6 +374,7 @@ def test_warmup_checkpoint_replaces_random_anchor(
     cfg.train.warmup_checkpoint = str(anchor)
 
     factory = build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
+    assert factory is not None
     pool = factory()
 
     assert isinstance(pool, SnapshotOpponentPool)
