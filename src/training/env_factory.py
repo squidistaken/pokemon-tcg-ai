@@ -526,12 +526,18 @@ def _pin_agent_deck(
         if deck_split == "eval"
         else float(cfg.env.get("agent_deck_field_prob", 0.0) or 0.0)
     )
+    # Training only, like field_probability above and for the same reason: the
+    # eval panel is the benchmark, and it earns that by dealing the opposing
+    # seat a field of decks the agent did not train against. Mirroring it too
+    # would leave the run with no measurement of anything but itself.
+    mirror = deck_split != "eval" and bool(cfg.env.get("agent_deck_mirror", False))
     return {
         "kind": "agent_fixed",
         "agent_deck": load_deck(str(path)),
         "agent_label": _deck_labels([str(path)])[0],
         "field_probability": field_probability,
         "single_field_draw": bool(cfg.env.get("agent_deck_single_field_draw", False)),
+        "mirror": mirror,
         "field": field_spec,
     }
 

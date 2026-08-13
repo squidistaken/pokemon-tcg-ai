@@ -71,7 +71,6 @@ Examples of what `src/train.py` accepts:
 python -m src.train                                                    # defaults
 python -m src.train collector.total_frames=100000 env.num_workers=4    # Hydra overrides
 python -m src.train +experiment=debug                                  # 512-frame smoke test
-./scripts/train_tf_weighted_field.sh                                   # long run, auto-restart
 ```
 
 `train_tf_weighted_field.sh` wraps `scripts/train_supervised.sh`, which restarts training after a

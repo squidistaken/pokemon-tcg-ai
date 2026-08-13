@@ -1,0 +1,60 @@
+# @package _global_
+# Local 10M-frame deck-pinned finetune from the 150M checkpoint against a
+# FROZEN external opponent pool. Overlay on conf/ppo_fixed_deck_finetune.yaml:
+#
+#   uv run python -m src.train --config-name ppo_fixed_deck_finetune \
+#     +experiment=deck_pinned_150m_local
+#
+# This is the frozen-pool variant: the ten opponents are loaded once and never
+# update, and there is no self-play league. For the variant whose league matches
+# the Habrok weighted-field arm (PFSP, pool_size 24, snapshot_interval 1M, the
+# 150M anchor), use conf/experiment/deck_pinned_selfplay_local.yaml instead.
+#
+# The base finetune config pins Player 1 to Alakazam-Dudunsparce and samples
+# Player 2's policy uniformly from a frozen checkpoint population, its deck
+# drawn observation-weighted from the full heuristic-resolved corpus. That
+# config's checkpoint directory (checkpoints/baseline-training-checkpoints) does
+# not exist on this machine, so the paths below are redirected at the 150M run's
+# own snapshots: the frozen pool and the eval panel become the ten newest of
+# those, and the learner warm-starts from the final one.
+
+finetune_checkpoint_dir: outputs/weighted-field-20260808/tf-ptr-weighted-15m-s42/checkpoints
+finetune_init_checkpoint: ${finetune_checkpoint_dir}/snapshot_000150011904.pt
+
+model:
+  backbone:
+    # The 150M snapshot carries a final LayerNorm the finetune baseline predates,
+    # and switches the trunk to pre-LN. Leaving the repo defaults here
+    # (norm_first=false, final_norm=false) would make the checkpoint's final_norm
+    # weights unexpected keys, so the warm start must rebuild the same trunk.
+    norm_first: true
+    final_norm: true
+
+agent:
+  # Match the 150M run's settings. The finetune baseline's 0.015 was a
+  # pre-NaN-fix value; 0.005 holds a sharper policy (the one greedy submission
+  # actually deploys), and 0.01 is the weight decay the trunk needs to stay
+  # bounded over another 10M frames.
+  entropy_coeff: 0.005
+  weight_decay: 0.01
+
+collector:
+  # The supervisor owns this on launch (absolute target minus the warm start's
+  # frame count). 10M here keeps a direct `python -m src.train` probe correct:
+  # 150,011,904 inherited frames + 10,000,000 collected = 160,011,904.
+  total_frames: 10000000
+
+wandb:
+  tags:
+    - fixed-deck-finetune
+    - alakazam-dudunsparce
+    - observation-weighted
+    - transformer
+    - pointer-head
+    - pre-ln
+    - warm-start-150m
+  notes: >-
+    Local 10M-frame fixed-deck finetune continuing from the 150M transformer
+    snapshot. Player 1 always pilots Alakazam-Dudunsparce; Player 2's policy and
+    observation-weighted deck are independently sampled. Sparse terminal
+    rewards; fresh optimizer; pre-LN + final_norm + weight decay.

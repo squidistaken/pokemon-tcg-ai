@@ -1,0 +1,96 @@
+# @package _global_
+# The Habrok weighted-field arm, pinned to one deck, run locally for 10M frames.
+#
+#   ./scripts/train_deck_pinned_150m_local.sh
+#
+# or directly for a short probe:
+#
+#   uv run python -m src.train --config-name ppo_selfplay_multideck \
+#     +experiment=deck_pinned_150m_local collector.total_frames=100000
+#
+# This inherits conf/experiment/weighted_field.yaml rather than restating it, so
+# the self-play league is the same one the Habrok continuation runs: PFSP with
+# `hard` weighting, pool_size 24, snapshot_interval 1M (a 24M-frame league
+# memory), pfsp_min_weight 0.15, and the 150M snapshot frozen in as the
+# permanent warmup_checkpoint anchor. Eval is unchanged too: the same
+# first_snapshot / random / 10.14M-MLP references on the same 10-list panel.
+#
+# Exactly two things differ from that arm, both below.
+defaults:
+  - weighted_field
+  - _self_
+
+env:
+  # The one change that matters. weighted_field leaves this null and trains both
+  # seats over the field; here the learner pilots one deck every episode, the
+  # same list eval has always scored (alakazam-dudunsparce-4). The opposing
+  # field is untouched: still the top20 corpus, still observation-weighted.
+  #
+  agent_deck: ${env.eval_agent_deck}
+  # Both seats pilot the pinned deck, so every training episode is a mirror.
+  #
+  # This is the fix for what _pin_agent_deck warns about. The league opponent is
+  # a snapshot of this network, which under a pin practises only one deck; deal
+  # it a field deck and it misplays, and the learner farms an opponent it
+  # crippled itself. The previous fixed-deck arm shows the signature directly,
+  # at train/win_rate 0.771 against its own league. A mirror hands the snapshot
+  # the deck it was trained on, restoring it to full strength, and the collected
+  # win rate should sit near 0.5 again. It also restores PFSP's input: with the
+  # opponent competent, win rate against a member reflects its strength rather
+  # than how badly the pin handicapped it.
+  #
+  # The cost is that no field matchup is trained on. Eval still deals the
+  # opposing seat the 10-list panel, so the gap between a ~0.5 collected win
+  # rate and the eval curve is exactly the generalisation this buys or loses.
+  # Pin every episode. The default 0.2 would leave a fifth of them on field
+  # decks to keep the rest of the corpus in the gradient; at 10M frames from an
+  # already-trained encoder that insurance costs more than it buys. Raise to
+  # ~0.05 if the per-archetype eval breakdown starts falling on the archetypes
+  # this deck does not play. Note it also gates the mirror: a field episode
+  # takes both seats from the pool and is not a mirror, so 0.0 makes every
+  # training episode a mirror on the pinned list.
+  agent_deck_field_prob: 0.0
+  agent_deck_mirror: true
+  # agent_deck_single_field_draw is deliberately left at false. It is one key
+  # for both splits (src/training/env_factory.py:534), and eval draws its panel
+  # round-robin: turning it on would change how the cursor advances and so
+  # which of the 10 panel lists the opponent meets. Training draws the opposing
+  # deck i.i.d. under observation weights, where discarding the pair's unused
+  # half costs an RNG draw and biases nothing.
+
+train:
+  # first_snapshot is dropped. It resolves to the lowest-frame snapshot in *this
+  # run's* checkpoints/ (src/training/self_play.py:207), which starts empty on a
+  # continuation. Two things follow. eval_interval is 500k and snapshot_interval
+  # is 1M, so the first eval round finds nothing and falls back to
+  # RandomOpponent, opening the first_snapshot/ series with a point measured
+  # against random. After that it resolves to the policy 1M frames in, which on
+  # a run continuing from 150M is all but identical to the anchor already in the
+  # league. The Habrok arm keeps it because there it means something.
+  #
+  # The 150M snapshot replaces it as the progress reference: the exact policy
+  # this run starts from, frozen, so the eval win rate answers the only question
+  # the run asks. Interpolated from warmup_checkpoint so the anchor and the
+  # yardstick cannot drift apart.
+  eval_opponents:
+    - ${train.warmup_checkpoint}
+    - random
+    - outputs/deck-pinned-20260808/mlp-ptr-pinned-15m-s42/checkpoints/snapshot_000010141696.pt
+
+collector:
+  # The launcher overrides this per attempt. 10M keeps a direct `python -m
+  # src.train` probe correct: 150,011,904 inherited + 10,000,000 = 160,011,904.
+  total_frames: 10000000
+
+wandb:
+  tags:
+    - pointer-head
+    - transformer
+    - pokemon-tokens
+    - observation-weighted
+    - deck-pinned
+    - alakazam-dudunsparce
+  notes: >-
+    The weighted-field self-play arm pinned to alakazam-dudunsparce-4, 10M
+    frames from the 150M snapshot, run locally. League, anchor and eval
+    references are the Habrok arm's; only the agent's deck is fixed.
