@@ -391,9 +391,7 @@ def build_opponent_factory(
     if warmup_checkpoint:
         warmup_checkpoint = Path(to_absolute_path(str(warmup_checkpoint)))
         if not warmup_checkpoint.is_file():
-            raise ValueError(
-                f"warmup_checkpoint {warmup_checkpoint} does not exist."
-            )
+            raise ValueError(f"warmup_checkpoint {warmup_checkpoint} does not exist.")
     else:
         warmup_checkpoint = None
     sampling = str(cfg.train.get("opponent_sampling", "uniform"))

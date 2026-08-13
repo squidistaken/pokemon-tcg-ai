@@ -880,6 +880,7 @@ def test_mirror_leaves_the_field_sampler_untouched() -> None:
     Load-bearing under round-robin: an unnecessary draw would rotate the cursor
     and change which lists a later field episode sees.
     """
+
     def build_field() -> PoolDeckSampler:
         return PoolDeckSampler(
             _fake_pool(10),
