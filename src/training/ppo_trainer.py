@@ -126,6 +126,7 @@ class PPOTrainer(Trainer):
         vtrace_rho_thresh: float = 1.0,
         vtrace_c_thresh: float = 1.0,
         lr: float = 3.0e-4,
+        weight_decay: float = 0.0,
         num_epochs: int = 4,
         sub_batch_size: int = 256,
         max_grad_norm: float = 1.0,
@@ -195,7 +196,12 @@ class PPOTrainer(Trainer):
         :param vtrace_c_thresh: V-trace's c-bar, the ceiling on the ratio inside
             the trace. It controls how far a correction propagates back in time,
             and so the variance of the estimate, without moving the fixed point.
-        :param lr: Adam learning rate (the annealing start value).
+        :param lr: AdamW learning rate (the annealing start value).
+        :param weight_decay: Decoupled weight decay. ``0.0`` reproduces plain
+            Adam. Applied to every parameter, including LayerNorm gains and
+            biases: splitting those into a second parameter group would change
+            the optimizer's group count and so break resuming from a state
+            written before the split.
         :param num_epochs: Optimization epochs over each collected batch.
         :param sub_batch_size: Minibatch size for the inner epoch loop.
         :param max_grad_norm: Global gradient-norm clipping threshold.
@@ -336,13 +342,26 @@ class PPOTrainer(Trainer):
             entropy_coeff=entropy_coeff,
         )
         # The optimizer is hardcoded here, but there is no real reason for us
-        # to change it.
-        self._optim = torch.optim.Adam(self._loss.parameters(), lr=lr)
+        # to change it. AdamW with weight_decay=0.0 is plain Adam.
+        self._optim = torch.optim.AdamW(
+            self._loss.parameters(), lr=lr, weight_decay=weight_decay
+        )
         if resume_state is not None:
             self._optim.load_state_dict(resume_state)
+            # load_state_dict overwrites the param groups wholesale, including
+            # the hyperparameters, so a state written by an earlier run silently
+            # reinstates that run's lr and weight_decay. Re-apply the configured
+            # values: without this, turning weight decay on for a resumed run is
+            # a no-op.
+            for param_group in self._optim.param_groups:
+                param_group["lr"] = lr
+                param_group["weight_decay"] = weight_decay
             logger.info(
                 "Restored optimizer state; Adam's moments continue rather than "
-                "restarting from zero."
+                "restarting from zero. Re-applied lr=%g weight_decay=%g over the "
+                "values the saved state carried.",
+                lr,
+                weight_decay,
             )
         # Attached here rather than in the caller because the optimizer whose
         # state it preserves does not exist until this point.
@@ -594,6 +613,8 @@ class PPOTrainer(Trainer):
         batch = data_flat.batch_size[0]
         loss_accum: dict[str, float] = {}
         grad_norm_accum = 0.0
+        grad_norm_max = 0.0
+        nonfinite_grads = 0
         diagnostic_accum: dict[str, float] = {}
         diagnostic_counts: dict[str, int] = {}
         loss_counts = 0
@@ -628,6 +649,16 @@ class PPOTrainer(Trainer):
                 grad_norm = nn.utils.clip_grad_norm_(
                     self._clip_params, self._max_grad_norm
                 )
+                # A finite loss can still produce a non-finite gradient, so the
+                # check above does not cover this. clip_grad_norm_ scales every
+                # gradient by max_norm / total_norm: at total_norm=inf that
+                # factor is 0, which turns an inf gradient into NaN and zeroes
+                # every other one, and at total_norm=NaN it is NaN, which makes
+                # the whole model NaN on the next step. Drop the minibatch.
+                if not torch.isfinite(grad_norm):
+                    self._optim.zero_grad(set_to_none=True)
+                    nonfinite_grads += 1
+                    continue
                 self._optim.step()
                 self._optim.zero_grad(set_to_none=True)
 
@@ -645,6 +676,7 @@ class PPOTrainer(Trainer):
                             value.detach()
                         )
                 grad_norm_accum += float(grad_norm)
+                grad_norm_max = max(grad_norm_max, float(grad_norm))
                 loss_counts += 1
 
                 # The non-optimizable reads on PPO's health, each guarded on
@@ -690,6 +722,14 @@ class PPOTrainer(Trainer):
                 skipped_minibatches,
                 loss_counts,
             )
+        if nonfinite_grads > 0:
+            logger.warning(
+                "Dropped %d minibatch update(s) with a non-finite gradient norm "
+                "(%d applied). The loss was finite, so this is the gradient "
+                "itself: watch train/grad_norm_max on the applied ones.",
+                nonfinite_grads,
+                loss_counts,
+            )
         if loss_counts == 0:
             logger.warning(
                 "Update %d produced no applied minibatches; skipping.",
@@ -697,7 +737,11 @@ class PPOTrainer(Trainer):
             )
             return None
         result = {key: value / loss_counts for key, value in loss_accum.items()}
+        # Mean over minibatches, so one spike among 64 is invisible here; the
+        # max is what shows a single pathological minibatch.
         result["grad_norm"] = grad_norm_accum / loss_counts
+        result["grad_norm_max"] = grad_norm_max
+        result["nonfinite_grads"] = float(nonfinite_grads)
         result.update(
             {
                 key: total / diagnostic_counts[key]
