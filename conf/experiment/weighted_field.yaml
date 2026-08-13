@@ -129,7 +129,17 @@ train:
   # The default 0.05 lets `hard` weighting squeeze a mastered member to ~1/5
   # the share of an even one, which is how the league forgets what it beat.
   pfsp_min_weight: 0.15
-  snapshot_interval: 500000
+  # 1M spacing widens league memory to pool_size * 1M = 24M frames at no extra
+  # memory cost, so the league remembers "me from 16% ago" instead of
+  # near-copies from the last 8%. Sparser snapshots on a converged ladder are
+  # near-free: two snapshots 500k apart are almost interchangeable, while the
+  # extra span reaches genuinely weaker, differently-weak past policies.
+  snapshot_interval: 1000000
+  # Permanent anchor: the checkpoint this run resumes from, frozen in the
+  # league so PFSP always has a strong, stationary opponent to concentrate on.
+  # Replaces the random warmup, which teaches nothing once the learner beats it
+  # (~94% win rate). Resolves relative to the repo root.
+  warmup_checkpoint: outputs/weighted-field-20260808/tf-ptr-weighted-15m-s42/checkpoints/snapshot_000150011904.pt
   train_state_interval: 250000
   eval_interval: 500000
   eval_episodes: 50

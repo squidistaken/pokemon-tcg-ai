@@ -387,6 +387,13 @@ def build_opponent_factory(
             f"Unsupported warmup_opponent '{warmup}'; only 'random' is implemented. "
             f"Facing only past selves from step 0 needs a snapshot that does not exist yet."
         )
+    warmup_checkpoint = cfg.train.get("warmup_checkpoint")
+    if warmup_checkpoint:
+        warmup_checkpoint = Path(to_absolute_path(str(warmup_checkpoint)))
+        if not warmup_checkpoint.is_file():
+            raise ValueError(f"warmup_checkpoint {warmup_checkpoint} does not exist.")
+    else:
+        warmup_checkpoint = None
     sampling = str(cfg.train.get("opponent_sampling", "uniform"))
     if sampling not in ("uniform", "pfsp"):
         raise ValueError(
@@ -401,6 +408,7 @@ def build_opponent_factory(
         pool_size=int(cfg.train.get("pool_size", 5)),
         seed=int(cfg.seed),
         sampling=sampling,
+        warmup_checkpoint=warmup_checkpoint,
     )
 
 
@@ -477,6 +485,7 @@ def _make_pool(
     pool_size: int,
     seed: int,
     sampling: str = "uniform",
+    warmup_checkpoint: Path | None = None,
 ) -> SnapshotOpponentPool:
     """
     Construct one worker's self-play league.
@@ -490,6 +499,8 @@ def _make_pool(
     :param pool_size: Number of most-recent snapshots kept in the league.
     :param seed: Seed for the league's member sampler.
     :param sampling: ``"uniform"`` or ``"pfsp"``; selects the pool class.
+    :param warmup_checkpoint: Snapshot loaded as the league's permanent anchor
+        in place of the random warmup, or None for the random warmup.
     :return: The league for this worker.
     """
     # One encoder shared by every snapshot this worker loads. Encoders are
@@ -500,6 +511,16 @@ def _make_pool(
     encoder = make_encoder(
         cfg.env.get("encoder", "structured"), int(cfg.env.max_options)
     )
+    if warmup_checkpoint is not None:
+        # A stationary strong anchor replaces the random warmup: it gives PFSP
+        # a fixed reference to concentrate on, which a random opponent stops
+        # providing as soon as the learner beats it. Loaded through the shared
+        # encoder, exactly like any other league snapshot.
+        warmup_opponents = [
+            _load_snapshot(warmup_checkpoint, cfg, obs_spec, action_spec, encoder)
+        ]
+    else:
+        warmup_opponents = [RandomOpponent(seed=seed)]
     common = {
         "checkpoint_dir": checkpoint_dir,
         "load_snapshot": partial(
@@ -509,7 +530,7 @@ def _make_pool(
             action_spec=action_spec,
             encoder=encoder,
         ),
-        "warmup_opponents": [RandomOpponent(seed=seed)],
+        "warmup_opponents": warmup_opponents,
         "pool_size": pool_size,
         "seed": seed,
     }

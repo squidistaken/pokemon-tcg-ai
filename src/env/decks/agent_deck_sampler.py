@@ -25,6 +25,14 @@ class AgentDeckSampler:
     pinned list stop receiving gradient entirely, and the observation encoder
     degrades on precisely the cards the *opponent* plays.
 
+    ``mirror`` deals the pinned deck to *both* seats instead of drawing an
+    opponent from the field. Under self-play that is what keeps the league
+    honest: the opponent is a snapshot of a network trained on this one deck,
+    so handing it a field deck it never practises makes it misplay, and the
+    learner then farms an opponent it crippled itself. Dealing it the deck it
+    was trained on restores it to full strength. The cost is that no field
+    matchup is seen during training, which the eval panel still measures.
+
     Seat placement is explicit rather than positional: the environment flips a
     coin for the agent's seat before asking for decks, so a sampler that always
     returns the agent's deck first hands it to the opponent half the time.
@@ -37,6 +45,7 @@ class AgentDeckSampler:
         agent_label: str | None = None,
         field_probability: float = 0.0,
         single_field_draw: bool = False,
+        mirror: bool = False,
         seed: int | None = None,
     ) -> None:
         """
@@ -54,6 +63,9 @@ class AgentDeckSampler:
             sampler for exactly one opponent deck instead of drawing a pair
             and discarding one side. False preserves the historical draw
             sequence for existing configurations.
+        :param mirror: Deal the pinned deck to both seats when the pin applies,
+            leaving the field sampler untouched. ``field_probability`` keeps its
+            meaning: a field episode still takes both decks from the pool.
         :param seed: Seed for the field/pin coin flip.
         :raises ValueError: If ``agent_deck`` is empty or the probability is
             outside [0, 1].
@@ -69,6 +81,7 @@ class AgentDeckSampler:
         self._agent_label = agent_label
         self._field_probability = float(field_probability)
         self._single_field_draw = bool(single_field_draw)
+        self._mirror = bool(mirror)
         self._rng = random.Random(seed)
         self._last_labels: tuple[str, str] | None = None
 
@@ -113,6 +126,8 @@ class AgentDeckSampler:
         :param agent_seat: Seat index (0 or 1) the agent occupies this episode.
         :return: The ``(deck0, deck1)`` pair in engine seat order.
         """
+        if self._mirror:
+            return self._sample_mirror(agent_seat)
         if self._single_field_draw:
             return self._sample_single_field(agent_seat)
 
@@ -137,6 +152,30 @@ class AgentDeckSampler:
         if agent_seat == 0:
             return list(self._agent_deck), opponent_deck
         return opponent_deck, list(self._agent_deck)
+
+    def _sample_mirror(self, agent_seat: int) -> tuple[Deck, Deck]:
+        """
+        Deal the pinned deck to both seats.
+
+        The field sampler is left untouched on a pinned episode, so it advances
+        neither its cursor nor its RNG: there is no opponent to draw. Seat order
+        is immaterial because both decks are the same list, but the pair is
+        built as two separate lists so neither seat can alias the other.
+
+        ``field_probability`` keeps its established meaning, so a field episode
+        still takes both decks from the wrapped sampler and is not a mirror.
+
+        :param agent_seat: Seat occupied by the learning policy.
+        :return: Engine-seat-ordered decks.
+        """
+        if self._rng.random() < self._field_probability:
+            field_deck0, field_deck1 = sample_for_seat(self._field_sampler, agent_seat)
+            self._last_labels = getattr(self._field_sampler, "last_labels", None)
+            return field_deck0, field_deck1
+
+        label = self._agent_label
+        self._last_labels = None if label is None else (label, label)
+        return list(self._agent_deck), list(self._agent_deck)
 
     def _sample_single_field(self, agent_seat: int) -> tuple[Deck, Deck]:
         """
