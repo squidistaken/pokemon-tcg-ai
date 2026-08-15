@@ -66,6 +66,13 @@ resume_state: null
 #              instead of on ones already beaten. Win rates are tracked per
 #              worker from terminal rewards; no extra inter-process traffic.
 opponent_sampling: uniform
+# How a league member picks its move. greedy takes the highest legal logit,
+# which makes every opponent a deterministic function of the state, so the
+# learner faces one fixed reply per position and can best-respond to it.
+# sample draws from the masked distribution instead, so a member offers the
+# spread its policy actually carries. Evaluation opponents stay greedy either
+# way, keeping the eval reference fixed across runs.
+opponent_action_selection: greedy
 # PFSP weighting scheme (ignored under uniform sampling):
 #   hard -> (1 - p)^pfsp_exponent, favours members that beat the learner.
 #   even -> p * (1 - p), favours members the learner is level with.

@@ -107,6 +107,7 @@ class StructuredObsAdapter(nn.Module):
         zone_pooling: str = "mean",
         pokemon_seat_split: bool = False,
         option_target_state: bool = False,
+        card_effect_features: bool = False,
     ) -> None:
         """
         :param obs_spec: Full environment observation spec.
@@ -166,6 +167,12 @@ class StructuredObsAdapter(nn.Module):
             the ``target_state`` block exists must still rebuild at its
             original width to be usable as an evaluation opponent, and the
             deployed Kaggle agent must keep running. New runs opt in.
+        :param card_effect_features: Build the default
+            :class:`~src.env.observation.card_database.CardDatabase` with the
+            parsed card-text columns, so a card reaches the network as what it
+            does rather than only as a learned index. Ignored when
+            ``card_database`` is supplied. Widens the card representation, so a
+            checkpoint trained with it set cannot be rebuilt with it clear.
         :raises ValueError: If ``zone_pooling`` is not a supported mode, or
             ``emit_option_tokens`` is set without an ``options`` group.
         """
@@ -179,7 +186,11 @@ class StructuredObsAdapter(nn.Module):
         self._emit_option_tokens = bool(emit_option_tokens)
         self._pokemon_seat_split = bool(pokemon_seat_split)
         self._option_target_state = bool(option_target_state)
-        database = card_database if card_database is not None else CardDatabase()
+        database = (
+            card_database
+            if card_database is not None
+            else CardDatabase(effect_features=bool(card_effect_features))
+        )
         card_static = database.card_features
         attack_static = database.attack_features
         card_categories = database.card_cats

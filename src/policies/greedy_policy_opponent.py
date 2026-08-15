@@ -108,6 +108,7 @@ class GreedyPolicyOpponent:
         actor_critic: ActorCritic,
         encoder: ObservationEncoder,
         device: torch.device | str = "cpu",
+        action_selection: str = "greedy",
     ) -> None:
         """
         :param actor_critic: Trained actor-critic to act greedily with; put
@@ -115,10 +116,22 @@ class GreedyPolicyOpponent:
         :param encoder: Observation encoder matching the one used in training
             (the flat encoder for the Phase-1 baseline).
         :param device: Device for inference.
+        :param action_selection: ``"greedy"`` takes the highest legal logit,
+            which makes the opponent a deterministic function of the state.
+            ``"sample"`` draws from the masked distribution instead, so a
+            league member offers a spread of lines rather than one, and the
+            learner cannot best-respond to a single fixed reply.
+        :raises ValueError: If ``action_selection`` is not a known mode.
         """
+        if action_selection not in ("greedy", "sample"):
+            raise ValueError(
+                f"Unknown action_selection {action_selection!r}; "
+                "expected 'greedy' or 'sample'."
+            )
         self._device = torch.device(device)
         self._actor_critic = actor_critic.to(self._device).eval()
         self._encoder = encoder
+        self._action_selection = action_selection
 
     @torch.inference_mode()
     def __call__(self, observation: Observation) -> list[int]:
@@ -153,7 +166,13 @@ class GreedyPolicyOpponent:
         picks: list[int] = []
         while len(picks) < max_count:
             logits = self._actor_critic.policy_logits(encoded)
-            chosen = self.greedy_pick(logits, n_options, picks, len(picks) >= min_count)
+            chosen = self.pick(
+                logits,
+                n_options,
+                picks,
+                len(picks) >= min_count,
+                self._action_selection,
+            )
             if chosen is None:
                 break
             picks.append(chosen)
@@ -187,6 +206,66 @@ class GreedyPolicyOpponent:
             return
         refreshed = self._encoder.encode(observation, seat, already_chosen_option_count)
         encoded.set("observation", refreshed.to(self._device))
+
+    @classmethod
+    def pick(
+        cls,
+        logits: torch.Tensor,
+        n_options: int,
+        already_chosen: list[int],
+        stop_allowed: bool,
+        action_selection: str = "greedy",
+    ) -> int | None:
+        """
+        Resolve one pick under the configured selection mode.
+
+        :param logits: Action logits of shape ``(n_actions,)``.
+        :param n_options: Number of real options offered by the selection.
+        :param already_chosen: Option indices picked so far.
+        :param stop_allowed: Whether ``minCount`` has been met.
+        :param action_selection: ``"greedy"`` or ``"sample"``.
+        :return: The chosen option index, or None to stop.
+        """
+        if action_selection == "greedy":
+            return cls.greedy_pick(logits, n_options, already_chosen, stop_allowed)
+        return cls.sampled_pick(logits, n_options, already_chosen, stop_allowed)
+
+    @staticmethod
+    def sampled_pick(
+        logits: torch.Tensor,
+        n_options: int,
+        already_chosen: list[int],
+        stop_allowed: bool,
+    ) -> int | None:
+        """
+        Draw a pick from the masked action distribution.
+
+        Mirrors :meth:`greedy_pick`'s legality rules exactly; only the choice
+        among legal actions differs, so an opponent built this way plays the
+        same policy with its spread intact rather than collapsed to its mode.
+
+        :param logits: Action logits of shape ``(n_actions,)``; the last entry
+            is the synthetic **stop**.
+        :param n_options: Number of real options offered by the selection.
+        :param already_chosen: Option indices picked so far, excluded here
+            because the engine rejects duplicates.
+        :param stop_allowed: Whether ``minCount`` has been met, making stop legal.
+        :return: The chosen option index, or None to stop.
+        """
+        capacity = logits.shape[-1] - 1
+        n_options = min(n_options, capacity)
+        if n_options <= 0:
+            return None
+        masked = torch.full_like(logits, float("-inf"))
+        masked[:n_options] = logits[:n_options]
+        if already_chosen:
+            masked[already_chosen] = float("-inf")
+        if stop_allowed:
+            masked[capacity] = logits[capacity]
+        if not torch.isfinite(masked).any():
+            return None
+        drawn = int(torch.distributions.Categorical(logits=masked).sample().item())
+        return None if drawn == capacity else drawn
 
     @staticmethod
     def greedy_pick(
@@ -295,9 +374,10 @@ def load_greedy_opponent(
     action_spec: TensorSpec,
     encoder: ObservationEncoder,
     device: torch.device | str = "cpu",
+    action_selection: str = "greedy",
 ) -> GreedyPolicyOpponent:
     """
-    Load a snapshot and wrap it as a greedy opponent.
+    Load a snapshot and wrap it as an opponent.
 
     :param checkpoint_path: Path to a :func:`save_actor_critic` snapshot.
     :param cfg: Hydra config used to build the matching architecture.
@@ -305,9 +385,13 @@ def load_greedy_opponent(
     :param action_spec: Environment action spec.
     :param encoder: Observation encoder matching training.
     :param device: Device for inference.
-    :return: A greedy opponent playing the snapshot.
+    :param action_selection: ``"greedy"`` or ``"sample"``; see
+        :class:`GreedyPolicyOpponent`.
+    :return: An opponent playing the snapshot.
     """
     actor_critic = load_actor_critic(
         checkpoint_path, cfg, obs_spec, action_spec, device
     )
-    return GreedyPolicyOpponent(actor_critic, encoder, device=device)
+    return GreedyPolicyOpponent(
+        actor_critic, encoder, device=device, action_selection=action_selection
+    )

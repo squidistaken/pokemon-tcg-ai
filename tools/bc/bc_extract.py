@@ -1,0 +1,307 @@
+"""
+Turn harvested Kaggle replays into a supervised decision dataset.
+
+Each replay step records the acting agent's full observation next to the
+action it submitted, so the expert's decisions can be encoded with the very
+same ``StructuredObservationEncoder`` training uses. Nothing is re-simulated.
+
+A multi-select step is decomposed into the sequential single picks the
+environment produces, so the cloned policy sees the same decision shape it
+will face at play time. Every sample also carries the episode's final result
+from the acting seat, which trains the value head on real outcomes.
+"""
+import argparse
+import glob
+import json
+import random
+from pathlib import Path
+
+import torch
+from cg.api import Observation
+from cg.utils import to_dataclass
+from tensordict import TensorDict
+
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
+
+MAX_OPTIONS = 128
+REPLAY_ROOT = Path("logs/expert_replays")
+
+
+STOP_INDEX = MAX_OPTIONS
+
+
+def legal_mask(n_options: int, chosen: list[int], min_count: int) -> torch.Tensor:
+    """
+    Reproduce ``TCGEnv._build_mask`` for one accumulation position.
+
+    The clone is deployed through ``GreedyPolicyOpponent``, which compares the
+    stop logit against the best option logit to decide when a selection is
+    finished. Training therefore has to see exactly the mask the environment
+    builds, stop slot included, or that comparison is against a logit no
+    gradient ever reached.
+
+    :param n_options: Options the selection offers.
+    :param chosen: Option indices already picked in this accumulation.
+    :param min_count: Minimum picks the selection demands.
+    :return: Bool tensor of shape ``(MAX_OPTIONS + 1,)``.
+    """
+    mask = torch.zeros(MAX_OPTIONS + 1, dtype=torch.bool)
+    mask[: min(n_options, MAX_OPTIONS)] = True
+    for index in chosen:
+        mask[index] = False
+    if len(chosen) >= min_count:
+        mask[STOP_INDEX] = True
+    return mask
+
+
+def iter_decisions(replay: dict, expert_index: int | None, both_seats: bool):
+    """
+    Yield every usable decision in one replay, one per accumulation position.
+
+    A selection of k options becomes k pick rows plus, when the expert could
+    have taken more and chose not to, a terminating stop row. Declining an
+    optional selection outright is that stop row at position zero, which is a
+    real strategic choice and not an absence of one.
+
+    :param replay: Parsed Kaggle replay JSON.
+    :param expert_index: Seat the harvested team played, or None for any seat.
+    :param both_seats: Keep the opponent's decisions too, tagged by result.
+    :yield: ``(observation dict, position, target, mask, seat, outcome)``.
+    """
+    rewards = replay.get("rewards") or [0, 0]
+    for step in replay.get("steps") or []:
+        for agent in step:
+            # A replay carries an observation and an action field for both
+            # seats at every step, but only the ACTIVE one actually submitted
+            # anything here. Pairing the idle seat's stale action with this
+            # state invents a decision the expert never made.
+            if agent.get("status") != "ACTIVE":
+                continue
+            payload = agent.get("observation") or {}
+            select = payload.get("select")
+            state = payload.get("current")
+            if not select or not state:
+                continue
+            options = select.get("option") or []
+            action = agent.get("action")
+            if not options or not isinstance(action, list):
+                continue
+            # The opening step submits a decklist through the same field, so
+            # its "action" holds card ids far outside the option range.
+            if any(
+                not isinstance(index, int) or not 0 <= index < len(options)
+                for index in action
+            ):
+                continue
+            if len(set(action)) != len(action) or len(options) > MAX_OPTIONS:
+                continue
+            seat = state.get("yourIndex")
+            if seat is None:
+                continue
+            if not both_seats and expert_index is not None and seat != expert_index:
+                continue
+            reward = rewards[seat] if seat < len(rewards) else 0
+            outcome = 1.0 if (reward or 0) > 0 else (-1.0 if (reward or 0) < 0 else 0.0)
+
+            min_count = int(select.get("minCount") or 0)
+            max_count = min(int(select.get("maxCount") or 1), len(options))
+            for position, chosen in enumerate(action):
+                yield (
+                    payload,
+                    position,
+                    chosen,
+                    legal_mask(len(options), action[:position], min_count),
+                    seat,
+                    outcome,
+                )
+            # greedy_select stops querying once max_count picks are in hand, so
+            # only a short selection records a deliberate stop.
+            if min_count <= len(action) < max_count:
+                yield (
+                    payload,
+                    len(action),
+                    STOP_INDEX,
+                    legal_mask(len(options), list(action), min_count),
+                    seat,
+                    outcome,
+                )
+
+
+def write_shard(samples: list[dict], destination: Path) -> int:
+    """
+    Stack one batch of rows and memory-map it to disk.
+
+    Rows are ~28 KB each, so a full corpus does not fit in RAM. Writing in
+    shards keeps peak memory at one shard and lets training page rows from
+    disk instead of holding the corpus resident.
+
+    :param samples: Rows to write.
+    :param destination: Directory to memory-map into.
+    :return: Number of rows written.
+    """
+    if not samples:
+        return 0
+    shard = TensorDict(
+        {
+            "observation": torch.stack([s["observation"] for s in samples]),
+            "action": torch.stack([s["action"] for s in samples]),
+            "action_mask": torch.stack([s["action_mask"] for s in samples]),
+            "outcome": torch.stack([s["outcome"] for s in samples]),
+            "episode": torch.stack([s["episode"] for s in samples]),
+        },
+        batch_size=torch.Size((len(samples),)),
+    )
+    destination.mkdir(parents=True, exist_ok=True)
+    shard.memmap_(str(destination))
+    return len(samples)
+
+
+def build(
+    output: Path,
+    max_replays: int,
+    both_seats: bool,
+    winners_only: bool,
+    seed: int,
+    replay_glob: str | None = None,
+    shard_size: int = 1200,
+) -> None:
+    """
+    Encode the replay corpus into a single tensor file.
+
+    :param output: Destination ``.pt`` path.
+    :param max_replays: Cap on replays read, for quick smoke runs.
+    :param both_seats: Include the non-harvested seat's decisions.
+    :param winners_only: Drop decisions made by the side that lost.
+    :param seed: Shuffle seed, so the split is reproducible.
+    """
+    encoder = StructuredObservationEncoder(max_options=MAX_OPTIONS)
+    samples: list[dict] = []
+    # When two harvested teams played each other, that episode sits in both
+    # team directories. Extracting both copies puts identical rows on either
+    # side of the split, so the first copy of an id wins.
+    by_episode: dict[str, tuple[Path, int | None]] = {}
+    duplicates = 0
+    if replay_glob:
+        # Kaggle's official daily export is a flat directory of <episode>.json
+        # with no manifest, so the seat of interest is unknown and both are
+        # kept. These episodes are already filtered to the top of the ladder.
+        for path_str in glob.glob(replay_glob):
+            path = Path(path_str)
+            episode_id = path.stem
+            if episode_id in by_episode:
+                duplicates += 1
+                continue
+            by_episode[episode_id] = (path, None)
+    else:
+        for team_dir in sorted(REPLAY_ROOT.iterdir()):
+            manifest_path = team_dir / "manifest.json"
+            if not manifest_path.is_file():
+                continue
+            manifest = json.loads(manifest_path.read_text())
+            for episode_id, meta in manifest.items():
+                path = team_dir / f"episode-{episode_id}-replay.json"
+                if not path.is_file():
+                    continue
+                if episode_id in by_episode:
+                    duplicates += 1
+                    continue
+                by_episode[episode_id] = (path, meta.get("expert_index"))
+    files = [(eid, path, index) for eid, (path, index) in by_episode.items()]
+    random.Random(seed).shuffle(files)
+    files = files[:max_replays]
+    print(
+        f"reading {len(files)} distinct replays "
+        f"({duplicates} duplicate copies dropped)",
+        flush=True,
+    )
+
+    skipped = 0
+    stop_rows = 0
+    shards = 0
+    total_rows = 0
+    for count, (episode_id, path, expert_index) in enumerate(files, start=1):
+        try:
+            replay = json.loads(path.read_text())
+        except Exception:
+            skipped += 1
+            continue
+        game = int(episode_id) if str(episode_id).isdigit() else count
+        for payload, position, target, mask, seat, outcome in iter_decisions(
+            replay, expert_index, both_seats
+        ):
+            if winners_only and outcome <= 0.0:
+                continue
+            try:
+                observation = to_dataclass(payload, Observation)
+                encoded = encoder.encode(observation, seat, position)
+            except Exception:
+                continue
+            stop_rows += target == STOP_INDEX
+            samples.append(
+                {
+                    "observation": encoded,
+                    "action": torch.tensor(target, dtype=torch.int64),
+                    "action_mask": mask,
+                    "outcome": torch.tensor(outcome, dtype=torch.float32),
+                    "episode": torch.tensor(game, dtype=torch.int64),
+                }
+            )
+        if count % shard_size == 0:
+            written = write_shard(samples, output / f"shard_{shards:04d}")
+            if written:
+                total_rows += written
+                shards += 1
+            samples = []
+        if count % 200 == 0:
+            print(
+                f"  {count}/{len(files)} replays -> "
+                f"{total_rows + len(samples)} decisions",
+                flush=True,
+            )
+
+    written = write_shard(samples, output / f"shard_{shards:04d}")
+    if written:
+        total_rows += written
+        shards += 1
+    if not total_rows:
+        raise SystemExit("no decisions extracted")
+    (output / "meta.json").write_text(
+        json.dumps({"shards": shards, "rows": total_rows}, indent=1)
+    )
+    print(f"\nreplays read : {len(files) - skipped}")
+    print(f"decisions    : {total_rows}")
+    print(f"stop rows    : {stop_rows} ({stop_rows / max(total_rows, 1):.2%})")
+    print(f"shards       : {shards}")
+    print(f"written to   : {output}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=Path("logs/bc_dataset.pt"))
+    parser.add_argument("--max-replays", type=int, default=10_000)
+    parser.add_argument("--both-seats", action="store_true")
+    parser.add_argument("--winners-only", action="store_true")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--replay-glob",
+        default=None,
+        help="Glob for a flat directory of <episode>.json, as Kaggle's daily "
+        "export ships. Bypasses the harvested team manifests.",
+    )
+    parser.add_argument("--shard-size", type=int, default=1200)
+    args = parser.parse_args()
+    build(
+        args.output,
+        args.max_replays,
+        args.both_seats,
+        args.winners_only,
+        args.seed,
+        args.replay_glob,
+        args.shard_size,
+    )
+
+
+if __name__ == "__main__":
+    main()

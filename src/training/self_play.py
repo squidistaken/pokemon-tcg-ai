@@ -591,11 +591,20 @@ def _load_snapshot(
     :param encoder: Observation encoder, shared with this worker's other
         league members; built inside the worker so nothing encoder-shaped has
         to cross the process boundary.
-    :return: A greedy opponent playing that snapshot.
+    :return: A league opponent playing that snapshot, under
+        ``train.opponent_action_selection``.
     """
     # Opponents always infer on CPU: they run inside the env workers, which are
     # CPU-only, and a per-worker CUDA context would be far costlier than the
     # small MLP forward it would accelerate.
     return load_greedy_opponent(
-        checkpoint_path, cfg, obs_spec, action_spec, encoder, device="cpu"
+        checkpoint_path,
+        cfg,
+        obs_spec,
+        action_spec,
+        encoder,
+        device="cpu",
+        action_selection=str(
+            cfg.train.get("opponent_action_selection", "greedy") or "greedy"
+        ),
     )
