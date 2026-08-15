@@ -13,6 +13,7 @@ Stage 1 is finished and submitted. Stage 2 is prepared and not yet run.
 | clone checkpoint | `outputs/bc/bc-v6-submit.pt`, SHA-256 prefix `61b740c2df7c` |
 | held-out accuracy | 0.7249 against a 0.3603 base rate |
 | against the previous agent | 0.967 over 60 games (58-2) |
+| Kaggle score | 873.9, against a previous best of 569.9 |
 | submitted | `bc-v6-expert-top1`, Kaggle ref 55536749 |
 | next | `sbatch slurm-conf/train_kl_anchored.sh` |
 
@@ -182,7 +183,10 @@ does overfit: its validation loss rises every epoch.
 
 The reference opponent is pin-175.7M
 (`outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/checkpoints/snapshot_000175702016.pt`),
-the checkpoint behind the previous best Kaggle score of 628.6.
+the strongest self-play-only checkpoint available locally. It was never itself
+submitted; the closest submitted relative is a 158M snapshot from the same run,
+which scored 521.5. The best submission before cloning was 569.9
+(`fixed-deck-frozen-30m-s42`).
 `tools/bc/head_to_head.py` alternates seats so neither side gets the first-player
 advantage, and plays both policies greedily, which is how they are deployed.
 
@@ -198,8 +202,12 @@ honest limit: on a deck the corpus barely contains, the clone is worse than pin.
 Expert decks overlap that list by 16 of 60 cards on average, and a third of
 expert decklists share no cards with it.
 
-Beating pin-175.7M is necessary, not sufficient. It scores about 628 while the
-corpus this clone learned from averages 1043.
+Beating pin-175.7M is necessary, not sufficient: self-play-only checkpoints from
+that family scored 521 to 570 on Kaggle, while the corpus this clone learned
+from averages 1043.
+
+The clone submitted as `bc-v6-expert-top1` scored **873.9**, against a previous
+best of 569.9.
 
 ## The checkpoint
 
@@ -352,7 +360,7 @@ the clone's, restated above.
 | --- | --- | --- |
 | `kl_anchor_coeff` | 0.05 | the one new term; see below |
 | `kl_anchor_checkpoint` | `outputs/bc/bc-v6-submit.pt` | frozen reference |
-| `train.init_checkpoint` | `outputs/bc/bc-v6-submit.pt` | weights only, Adam restarts |
+| `train.init_checkpoint` | `outputs/bc/bc-v6-submit.pt` | whole network, Adam restarts from zero |
 | `clip_epsilon` | 0.2 | |
 | `entropy_coeff` | 0.02 | entropy bonus on |
 | `gamma` | 0.999 | reward is terminal only, so this predicts win probability |
@@ -372,6 +380,19 @@ the clone's, restated above.
 | `eval_opponents` | first_snapshot, checkpoint, random | see below |
 | `env.num_workers` | 32 | matches the Slurm allocation |
 | `collector.total_frames` | 300,000,000 | past what 24h collects, so the job uses the whole allocation |
+
+`train.init_checkpoint` loads the **whole** network: shared trunk, policy head
+and value head. `_load_warm_start_weights` calls `load_state_dict(strict=False)`
+only to tolerate newly added LayerNorm parameters; anything else missing or
+unexpected raises. The optimizer is not restored, so Adam's moments start at
+zero.
+
+That means the run inherits the clone's value head, which is overconfident:
+correlation 0.474 with the outcome but predictions at standard deviation 0.867
+where 0.47 would be calibrated. PPO retrains the critic against its own returns
+immediately, and r=0.474 is a better start than noise, but the overconfidence
+inflates early advantage magnitudes. Watch `loss_critic` and explained variance
+over the first 1M frames.
 
 Weight decay stays off, even though earlier runs used 1e-4. AdamW shrinks
 weights toward zero, while this run starts at the clone and exists to stay near
@@ -396,8 +417,8 @@ collection-time behaviour. Three fixed opponents, logged under
   This is the number that answers whether reinforcement learning improved on
   what it started from.
 - `checkpoint` is pin-175.7M, the best self-play-only agent and the one behind
-  the 628.6 submission. The clone already beats it 0.967 over 60 games, so this
-  tracks whether that margin holds. It is rebuilt from the config it embeds, so
+  the strongest self-play-only checkpoint. The clone already beats it 0.967 over
+  60 games, so this tracks whether that margin holds. It is rebuilt from the config it embeds, so
   its 1-layer, 512-wide architecture keeps loading against this run's 2-layer
   model.
 - `random` stays comparable across runs and does not depend on which snapshot

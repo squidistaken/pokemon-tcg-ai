@@ -65,6 +65,13 @@ agent:
   # without pinning the policy to the clone.
   kl_anchor_coeff: 0.05
   kl_anchor_checkpoint: outputs/bc/bc-v6-submit.pt
+  # Without this the run defaults to agent.device=cpu and the allocated GPU
+  # sits idle. The anchor makes the update heavier than usual, because every
+  # minibatch runs the frozen reference as well.
+  device: cuda
+  # Required under multi_sync, not an optimisation: workers are forked and CUDA
+  # cannot initialize in a forked child. The PPO update keeps the GPU.
+  collector_device: cpu
 
 train:
   # Weights only, so Adam restarts from zero.
