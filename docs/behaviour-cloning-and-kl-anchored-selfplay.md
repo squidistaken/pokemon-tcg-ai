@@ -432,16 +432,6 @@ uv run python -m src.train --config-name ppo_selfplay_multideck \
   +experiment=kl_anchored_selfplay collector.total_frames=100000
 ```
 
-## Local sweep
-
-`logs/bc/kl_sweep.sh` runs coefficients 0.0, 0.05 and 0.25 for 1M frames each on
-the desktop, then plays each result against the frozen clone for 40 games. Above
-0.50 means reinforcement learning improved on the clone. The control at 0.0
-shows whether the anchor is needed at all.
-
-1M frames is too short to show whether an anchored run keeps improving. It is
-long enough to show whether an unanchored run damages the clone.
-
 # Known limitations
 
 Deck choice is not cloned. The extractor drops the deck-selection step, so the
