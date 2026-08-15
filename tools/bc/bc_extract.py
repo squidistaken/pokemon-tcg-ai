@@ -71,12 +71,12 @@ def iter_decisions(replay: dict, expert_index: int | None, both_seats: bool):
     :yield: ``(observation dict, position, target, mask, seat, outcome)``.
     """
     rewards = replay.get("rewards") or [0, 0]
-    for step in replay.get("steps") or []:
-        for agent in step:
+    steps = replay.get("steps") or []
+    for step_index, step in enumerate(steps):
+        for agent_index, agent in enumerate(step):
             # A replay carries an observation and an action field for both
-            # seats at every step, but only the ACTIVE one actually submitted
-            # anything here. Pairing the idle seat's stale action with this
-            # state invents a decision the expert never made.
+            # seats at every step, but only the ACTIVE one is being asked to
+            # move here. The idle seat's fields are stale.
             if agent.get("status") != "ACTIVE":
                 continue
             payload = agent.get("observation") or {}
@@ -85,7 +85,16 @@ def iter_decisions(replay: dict, expert_index: int | None, both_seats: bool):
             if not select or not state:
                 continue
             options = select.get("option") or []
-            action = agent.get("action")
+            # Kaggle records an agent's answer on the *following* step: step 0
+            # poses the deck prompt and the decklist appears as step 1's
+            # action. Reading this step's action pairs every state with the
+            # previous decision's answer.
+            if step_index + 1 >= len(steps):
+                continue
+            following = steps[step_index + 1]
+            if agent_index >= len(following):
+                continue
+            action = following[agent_index].get("action")
             if not options or not isinstance(action, list):
                 continue
             # The opening step submits a decklist through the same field, so

@@ -1,0 +1,84 @@
+# @package _global_
+# Self-play PPO held near a behaviour-cloned policy, as AlphaStar did.
+#
+# Overlay on conf/ppo_selfplay_multideck.yaml. Launch through the crash
+# supervisor, which owns hydra.run.dir, collector.total_frames and
+# train.resume_state:
+#
+#   ./scripts/train_kl_anchored_selfplay.sh
+#
+# or directly for a short probe:
+#
+#   uv run python -m src.train --config-name ppo_selfplay_multideck \
+#     +experiment=kl_anchored_selfplay collector.total_frames=100000
+#
+# Unanchored self-play here does not accumulate: snapshots 2M frames apart
+# agree on 0.40 of their decisions, and pin-175.7M scores 0.95 on its own deck
+# against 0.05 elsewhere. Starting from the clone does not fix that on its own,
+# because nothing stops the policy leaving expert play once training resumes.
+# The KL term holds for the whole run instead of only at initialization.
+#
+# The model block reproduces the clone's architecture exactly. Without it
+# train.init_checkpoint fails on a size mismatch.
+defaults:
+  - override /model/backbone: transformer
+  - override /model/head: pointer
+
+model:
+  embed_dim: 256
+  backbone:
+    num_layers: 2
+    ff_dim: 512
+    num_heads: 4
+    norm_first: true
+    final_norm: true
+    token_groups: [pokemon]
+    option_tokens: true
+  head:
+    num_cells: [128, 128]
+    activation: tanh
+  value_head:
+    num_cells: [256, 256]
+  adapter:
+    entity_dim: 128
+    card_embed_dim: 16
+    pokemon_seat_split: true
+    option_target_state: true
+
+env:
+  # The 30 most-played ladder lists, 80.0% of decklists across all 9,062 games.
+  # Every one is already in the clone's training data, which is what makes the
+  # anchor meaningful: a KL penalty against the clone on a deck it never saw
+  # would only penalize leaving an uninformed prior. Both seats draw
+  # independently; pinning one list reproduces the collapse measured on
+  # pin-175.7M (0.95 on its own deck, 0.05 to 0.33 elsewhere).
+  deck_pool: decks/expert_pool_30
+  deck_matchup: independent
+  # The pool is the target meta, not a corpus to generalize away from, so no
+  # deck is withheld from training.
+  deck_holdout_frac: 0.0
+  eval_deck_matchup: mirror
+
+agent:
+  # 0.05 puts a 0.5-nat drift from the clone at 0.025 of the loss, the same
+  # order as the entropy term at coefficient 0.02. It shapes the objective
+  # without pinning the policy to the clone.
+  kl_anchor_coeff: 0.05
+  kl_anchor_checkpoint: outputs/bc/bc-v6-submit.pt
+
+train:
+  # Weights only, so Adam restarts from zero.
+  init_checkpoint: outputs/bc/bc-v6-submit.pt
+  # Three references every eval round:
+  #   first_snapshot  the clone itself, so this answers whether reinforcement
+  #                   learning improved on what it started from
+  #   checkpoint      pin-175.7M, the best self-play-only agent (Kaggle 628.6),
+  #                   which the clone already beats 0.967 over 60 games
+  #   random          comparable across runs, but saturates early
+  # The reference is rebuilt from the config it embeds, so its 1-layer/ff-256
+  # architecture keeps loading against this run's 2-layer/ff-512 model.
+  eval_opponents:
+    - first_snapshot
+    - checkpoint
+    - random
+  eval_opponent_checkpoint: outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/checkpoints/snapshot_000175702016.pt

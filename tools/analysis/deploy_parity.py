@@ -26,12 +26,9 @@ from src.policies.ppo_actor import build_actor_critic
 from submission.cg_api import to_observation_class
 from submission.runtime import Policy
 
-BUNDLE = Path("submissions/pinned-selfplay-158m-aladuduns4")
-CHECKPOINT = (
-    "outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/"
-    "checkpoints/snapshot_000158154752.pt"
-)
-DECK = "decks/top20/alakazam-dudunsparce/alakazam-dudunsparce-4.csv"
+BUNDLE = Path("submissions/bc-v6-expert-top1")
+CHECKPOINT = "outputs/bc/bc-v6-submit.pt"
+DECK = "decks/expert_top1.csv"
 MAX_OPTIONS = 128
 
 

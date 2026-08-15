@@ -251,6 +251,8 @@ def _build_ppo_trainer(
         clip_epsilon=cfg.agent.clip_epsilon,
         entropy_bonus=cfg.agent.get("entropy_bonus", True),
         entropy_coeff=cfg.agent.entropy_coeff,
+        kl_anchor_coeff=float(cfg.agent.get("kl_anchor_coeff", 0.0)),
+        kl_anchor_checkpoint=cfg.agent.get("kl_anchor_checkpoint"),
         gamma=cfg.agent.gamma,
         lmbda=cfg.agent.lmbda,
         average_gae=cfg.agent.get("average_gae", True),

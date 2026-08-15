@@ -57,6 +57,13 @@ def main() -> None:
     parser.add_argument(
         "--deck",
         default="decks/top20/alakazam-dudunsparce/alakazam-dudunsparce-4.csv",
+        help="Deck for A, and for B unless --deck-b is given.",
+    )
+    parser.add_argument(
+        "--deck-b",
+        default=None,
+        help="Deck for B. Use this to let each side pilot the deck it is best "
+        "at, which is the matchup a submission actually faces.",
     )
     parser.add_argument("--games", type=int, default=60)
     parser.add_argument("--seed", type=int, default=7)
@@ -66,13 +73,14 @@ def main() -> None:
     network_b, encoder_b = build_network(args.b)
     policy_a = GreedyPolicyOpponent(network_a, encoder_a)
     policy_b = GreedyPolicyOpponent(network_b, encoder_b)
-    deck = load_deck(args.deck)
+    deck_a = load_deck(args.deck)
+    deck_b = load_deck(args.deck_b) if args.deck_b else deck_a
 
     wins = losses = draws = 0
     for game in range(args.games):
         # Alternating rather than random keeps the seat split exactly even.
         seat_a = game % 2
-        result = play(deck, deck, policy_a, policy_b, seat_a)
+        result = play(deck_a, deck_b, policy_a, policy_b, seat_a)
         if result == seat_a:
             wins += 1
         elif result == 1 - seat_a:
@@ -92,7 +100,8 @@ def main() -> None:
     stderr = (0.25 / played) ** 0.5
     print(f"\nA: {args.a}")
     print(f"B: {args.b}")
-    print(f"deck  : {args.deck}")
+    print(f"deck A: {args.deck}")
+    print(f"deck B: {args.deck_b or args.deck}")
     print(f"games : {played}")
     print(f"score : {score:.3f} +/- {stderr:.3f}  (0.50 = even)")
     print(f"W/L/D : {wins}/{losses}/{draws}")

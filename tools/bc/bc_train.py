@@ -33,17 +33,35 @@ REFERENCE = (
 )
 
 
-def build_config(card_effect_features: bool):
+def build_config(
+    card_effect_features: bool,
+    num_layers: int | None = None,
+    ff_dim: int | None = None,
+    dropout: float | None = None,
+):
     """
-    Load the reference architecture and set the ablation switch.
+    Load the reference architecture, with optional capacity overrides.
+
+    The reference was sized for self-play, where the data is generated on
+    demand. Cloning a fixed corpus of over a million decisions is a different
+    regime, so the backbone is allowed to grow here.
 
     :param card_effect_features: Whether the adapter appends effect columns.
+    :param num_layers: Transformer layers, or None to keep the reference value.
+    :param ff_dim: Feed-forward width, or None to keep the reference value.
+    :param dropout: Dropout probability, or None to keep the reference value.
     :return: Hydra-style config carrying a ``model`` section.
     """
     reference = torch.load(REFERENCE, map_location="cpu", weights_only=False)
     config = OmegaConf.create(reference["config"])
     OmegaConf.set_struct(config, False)
     config.model.adapter.card_effect_features = bool(card_effect_features)
+    if num_layers is not None:
+        config.model.backbone.num_layers = int(num_layers)
+    if ff_dim is not None:
+        config.model.backbone.ff_dim = int(ff_dim)
+    if dropout is not None:
+        config.model.backbone.dropout = float(dropout)
     return config
 
 
@@ -236,7 +254,9 @@ def train(args) -> None:
         flush=True,
     )
 
-    config = build_config(args.card_effect_features)
+    config = build_config(
+        args.card_effect_features, args.num_layers, args.ff_dim, args.dropout
+    )
     network = build_network(config).to(device)
     parameters = sum(p.numel() for p in network.parameters())
     optimizer = torch.optim.AdamW(
@@ -286,6 +306,11 @@ def train(args) -> None:
             value = forward.get("state_value").reshape(rows)
             policy_loss = functional.cross_entropy(logits, batch["action"])
             value_loss = functional.mse_loss(value, batch["outcome"])
+            with torch.no_grad():
+                # Train accuracy on the same rows the gradient just used, so a
+                # train/val gap is visible without a second pass over the data.
+                train_correct = (logits.argmax(dim=-1) == batch["action"]).float()
+                train_accuracy = float(train_correct.mean())
             loss = policy_loss + args.value_coef * value_loss
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -297,6 +322,7 @@ def train(args) -> None:
             if step % args.log_every == 0:
                 wandb.log(
                     {
+                        "train/accuracy": train_accuracy,
                         "train/policy_loss": float(policy_loss.detach()),
                         "train/value_loss": float(value_loss.detach()),
                         "train/loss": float(loss.detach()),
@@ -320,8 +346,13 @@ def train(args) -> None:
             f"value {metrics['val/value_loss']:.4f}",
             flush=True,
         )
-        if metrics["val/total"] < best:
-            best = metrics["val/total"]
+        score = (
+            metrics["val/policy_loss"]
+            if args.select_on == "policy"
+            else metrics["val/total"]
+        )
+        if score < best:
+            best = score
             torch.save(
                 {
                     "format_version": 1,
@@ -337,7 +368,7 @@ def train(args) -> None:
             wandb.summary["best_val_top5"] = metrics["val/top5"]
             wandb.summary["best_epoch"] = epoch
 
-    print(f"best val total {best:.4f}, checkpoint at {output}")
+    print(f"best val {args.select_on} {best:.4f}, checkpoint at {output}")
     wandb.finish()
 
 
@@ -347,6 +378,16 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--card-effect-features", action="store_true")
     parser.add_argument("--epochs", type=int, default=12)
+    parser.add_argument("--num-layers", type=int, default=None)
+    parser.add_argument("--ff-dim", type=int, default=None)
+    parser.add_argument("--dropout", type=float, default=None)
+    parser.add_argument(
+        "--select-on",
+        choices=("policy", "total"),
+        default="policy",
+        help="Metric picking the saved checkpoint. The value head degrades "
+        "while the policy improves, so 'total' saves a worse policy.",
+    )
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)

@@ -9,6 +9,15 @@ entropy_bonus: true
 # first million frames of the 5M-frame corpus runs and never recovered, so the
 # rest of the run explored nothing.
 entropy_coeff: 0.02
+
+# Hold the policy near a behaviour-cloned reference for the whole run, as
+# AlphaStar did. Unanchored self-play here keeps producing a fresh best
+# response to the league instead of accumulating skill: snapshots 2M frames
+# apart agree on only 0.40 of their decisions. 0 disables the anchor.
+kl_anchor_coeff: 0.0
+# Snapshot holding the cloned weights. Null anchors to the learner's own
+# initial weights, which is correct when the run is initialized from the clone.
+kl_anchor_checkpoint: null
 # Discount factor for GAE. The reward is terminal only (+1/-1), so the quantity
 # to predict is win probability and any gamma < 1 biases the objective towards
 # winning sooner, which is worth nothing here. Held just under 1 because eval
