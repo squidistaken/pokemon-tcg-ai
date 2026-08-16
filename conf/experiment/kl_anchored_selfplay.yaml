@@ -1,0 +1,166 @@
+# @package _global_
+# Self-play PPO held near a behaviour-cloned policy, as AlphaStar did.
+#
+# Overlay on conf/ppo_selfplay_multideck.yaml. Launch through the crash
+# supervisor, which owns hydra.run.dir, collector.total_frames and
+# train.resume_state:
+#
+#   ./scripts/train_kl_anchored_selfplay.sh
+#
+# or directly for a short probe:
+#
+#   uv run python -m src.train --config-name ppo_selfplay_multideck \
+#     +experiment=kl_anchored_selfplay collector.total_frames=100000
+#
+# Unanchored self-play here does not accumulate: snapshots 2M frames apart
+# agree on 0.40 of their decisions, and pin-175.7M scores 0.95 on its own deck
+# against 0.05 elsewhere. Starting from the clone does not fix that on its own,
+# because nothing stops the policy leaving expert play once training resumes.
+# The KL term holds for the whole run instead of only at initialization.
+#
+# The model block reproduces the clone's architecture exactly. Without it
+# train.init_checkpoint fails on a size mismatch.
+defaults:
+  - override /model/backbone: transformer
+  - override /model/head: pointer
+
+# conf/config.yaml defaults to false. Every config that produced a usable policy
+# sets it true, so worker seeds and torch RNG are reproducible across a resume.
+set_seed: true
+
+model:
+  embed_dim: 256
+  backbone:
+    num_layers: 2
+    ff_dim: 512
+    num_heads: 4
+    norm_first: true
+    final_norm: true
+    token_groups: [pokemon]
+    option_tokens: true
+  head:
+    num_cells: [128, 128]
+    activation: tanh
+  value_head:
+    num_cells: [256, 256]
+  adapter:
+    entity_dim: 128
+    card_embed_dim: 16
+    pokemon_seat_split: true
+    option_target_state: true
+
+env:
+  # The 30 most-played ladder lists, 80.0% of decklists across all 9,062 games.
+  # Every one is already in the clone's training data, which is what makes the
+  # anchor meaningful: a KL penalty against the clone on a deck it never saw
+  # would only penalize leaving an uninformed prior. Both seats draw
+  # independently; pinning one list reproduces the collapse measured on
+  # pin-175.7M (0.95 on its own deck, 0.05 to 0.33 elsewhere).
+  deck_pool: decks/expert_pool_30
+  deck_matchup: independent
+  # The pool is the target meta, not a corpus to generalize away from, so no
+  # deck is withheld from training.
+  deck_holdout_frac: 0.0
+  eval_deck_matchup: mirror
+
+collector:
+  # conf/collector/default.yaml sets `sync`, which was inherited for the first
+  # 8.5M frames of run e4p5tnwg and cost most of its throughput. Under `sync`
+  # the 32 workers only step environments and the policy forward runs in the
+  # main process, single-threaded because the Slurm script pins
+  # OMP_NUM_THREADS=1, so a deeper network serializes the whole collector.
+  # Under multi_sync each worker holds its own policy copy and forwards in
+  # parallel. Measured on rtx6000: tf-ptr-weighted-15m-s42 reached 894 to 925
+  # fps under multi_sync at 32 workers where e4p5tnwg reached 258 under sync.
+  type: multi_sync
+
+agent:
+  # conf/agent/ppo.yaml defaults to 3.0e-4, which run e4p5tnwg inherited for its
+  # first 8.5M frames. Both configs that produced usable policies independently
+  # chose 2.0e-4 (weighted_field.yaml:93, ppo_fixed_deck_finetune.yaml:59), and
+  # those trained from scratch. This run starts from pretrained weights, where a
+  # higher rate than a from-scratch run used is the wrong direction: it moves
+  # the clone's features faster than the anchor can hold them.
+  lr: 2.0e-4
+  # Matches weighted_field.yaml and deck_pinned_150m_local.yaml. The first 8.5M
+  # frames of run e4p5tnwg used 0.02, inherited because this line was missing
+  # from conf/agent/ppo.yaml's default. At 0.02 the entropy term contributed
+  # 0.0177 to the loss against the anchor's kl_anchor_coeff * kl_to_bc =
+  # 0.05 * 0.12 = 0.0060, so the entropy bonus outweighed the anchor 3 to 1 and
+  # the run's one new mechanism was the minority term. 0.005 puts it at 0.0044,
+  # below the anchor.
+  entropy_coeff: 0.005
+  # 0.05 puts a 0.5-nat drift from the clone at 0.025 of the loss, the same
+  # order as the entropy term. It shapes the objective without pinning the
+  # policy to the clone.
+  kl_anchor_coeff: 0.05
+  kl_anchor_checkpoint: outputs/bc/bc-v6-submit.pt
+  # Without this the run defaults to agent.device=cpu and the allocated GPU
+  # sits idle. The anchor makes the update heavier than usual, because every
+  # minibatch runs the frozen reference as well.
+  device: cuda
+  # Required under multi_sync, not an optimisation: workers are forked and CUDA
+  # cannot initialize in a forked child. The PPO update keeps the GPU.
+  collector_device: cpu
+
+train:
+  # Weights only, so Adam restarts from zero.
+  init_checkpoint: outputs/bc/bc-v6-submit.pt
+  # The clone is a permanent league member, not only the KL reference. Without
+  # this the warmup opponent stays `random` (conf/train/default.yaml), so the
+  # learner's fixed reference point is noise and the clone it is anchored to is
+  # never actually faced. A strong stationary anchor is exactly what PFSP needs:
+  # random stops providing a signal the moment the learner reliably beats it.
+  warmup_checkpoint: outputs/bc/bc-v6-submit.pt
+  # The league is a sliding window of the pool_size newest snapshots
+  # (src/env/opponents/snapshot_opponent_pool.py:113), so these two settings
+  # multiply into how much history the learner plays against.
+  #
+  # conf/train/ppo_selfplay.yaml sets snapshot_interval 50,000 and
+  # conf/train/default.yaml sets pool_size 5, which span 250,000 frames: about
+  # four minutes of training at 900 fps, so every opponent is a near-copy of the
+  # learner and train/win_rate pins near 0.5 whatever the policy does. Run
+  # e4p5tnwg inherited both. weighted_field.yaml uses 24 x 1,000,000 = 24M and
+  # ppo_fixed_deck_finetune.yaml uses 10 x 500,000 = 5M.
+  #
+  # 10 x 500,000 rather than 24 x 1,000,000: at 2,525,675 parameters a snapshot
+  # is 10.1 MB, held per worker, so 24 members across 32 workers would add about
+  # 6 GB against the 64 G request where 10 members add about 1.6 GB. A run that
+  # cannot be restarted is the wrong place to find that ceiling.
+  pool_size: 10
+  snapshot_interval: 500000
+  # conf/train/default.yaml sets 0.05; weighted_field.yaml:131 uses 0.15. This
+  # is the floor share of episodes a league member keeps once the learner beats
+  # it reliably. Too low and the league forgets how to beat its own past.
+  pfsp_min_weight: 0.15
+  # ppo_selfplay_multideck raises eval_episodes to 150. Measured locally, 150
+  # episodes against one opponent takes 3.3 minutes; three opponents every
+  # 50,000 frames would cost about 10 minutes per round against 56 seconds of
+  # collection at 890 fps, so evaluation would consume most of a 24-hour
+  # allocation. 40 episodes every 500,000 frames costs roughly 2.5 minutes per
+  # 9 minutes of collection.
+  eval_episodes: 40
+  eval_interval: 500000
+  # Greedy for the learner, matching train.opponent_action_selection=greedy on
+  # the other seat and matching how the policy is submitted. Under the default
+  # false the learner samples while the reference plays argmax, which costs it
+  # win rate for a reason that has nothing to do with the policy: run e4p5tnwg
+  # held entropy at 0.882, an effective exp(H / 0.855) = 2.80 options against
+  # 4.90 mean legal, so a large share of its eval actions were not the argmax.
+  eval_deterministic: true
+  # Three references every eval round:
+  #   first_snapshot  the oldest snapshot this run froze, written at 50,000
+  #                   frames, so it is the clone plus a little training rather
+  #                   than the clone exactly. Below 0.5 here means the policy
+  #                   is going backwards.
+  #   checkpoint      pin-175.7M, the strongest self-play-only checkpoint. Never
+  #                   submitted itself; that family scored 521 to 570 on Kaggle.
+  #                   The clone beats it 0.967 greedy over 60 games.
+  #   random          comparable across runs, but saturates early
+  # The reference is rebuilt from the config it embeds, so its 1-layer/ff-256
+  # architecture keeps loading against this run's 2-layer/ff-512 model.
+  eval_opponents:
+    - first_snapshot
+    - checkpoint
+    - random
+  eval_opponent_checkpoint: outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/checkpoints/snapshot_000175702016.pt

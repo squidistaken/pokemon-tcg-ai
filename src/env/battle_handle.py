@@ -113,6 +113,13 @@ class BattleHandle:
         serial_data = lib.GetBattleData(self._battle_ptr)
         self._select_player = serial_data.selectPlayer
         obs_dict = json.loads(serial_data.json.decode())
+        # GetBattleData returns the serialized state alongside the JSON, and it
+        # is the only input cg.api.search_begin accepts. cg.game attaches it
+        # (cg/game.py:15); this handle used to drop it, which left every
+        # observation this project produced unable to open a search.
+        obs_dict["search_begin_input"] = ctypes.string_at(
+            serial_data.data, serial_data.count
+        ).decode("ascii")
         return to_observation_class(obs_dict)
 
     def _require_active(self) -> None:

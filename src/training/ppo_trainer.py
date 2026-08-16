@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
@@ -26,6 +27,7 @@ from src.training.collectors import (
     parse_collector_kind,
 )
 from src.training.evaluator import Evaluator
+from src.training.kl_anchor import KLAnchor
 from src.training.loss._helpers import _sum_loss_keys
 from src.training.multi_evaluator import MultiEvaluator
 from src.training.trainer import Trainer
@@ -118,6 +120,8 @@ class PPOTrainer(Trainer):
         clip_epsilon: float = 0.2,
         entropy_bonus: bool = True,
         entropy_coeff: float = 0.01,
+        kl_anchor_coeff: float = 0.0,
+        kl_anchor_checkpoint: str | None = None,
         gamma: float = 0.99,
         lmbda: float = 0.95,
         average_gae: bool = True,
@@ -378,6 +382,9 @@ class PPOTrainer(Trainer):
         self._clip_params = list(self._loss.parameters())
 
         self._loss_fwd = torch.compile(self._loss) if compile_loss else self._loss
+        self._kl_anchor = self._build_kl_anchor(
+            actor_critic, kl_anchor_coeff, kl_anchor_checkpoint, device
+        )
 
         # Annealing state.
         self._lr_anneal = lr_anneal
@@ -583,6 +590,37 @@ class PPOTrainer(Trainer):
             coeff if self._ent_anneal else "unchanged",
         )
 
+    @staticmethod
+    def _build_kl_anchor(
+        actor_critic: ActorCritic,
+        coefficient: float,
+        checkpoint: str | None,
+        device: torch.device | str,
+    ) -> KLAnchor | None:
+        """
+        Build the frozen reference policy the KL anchor pulls towards.
+
+        :param actor_critic: Learner, used as the reference architecture.
+        :param coefficient: KL weight; 0 disables the anchor entirely.
+        :param checkpoint: Snapshot holding the behaviour-cloned weights. None
+            anchors to the learner's own initial weights, which is what a run
+            resumed from a clone already carries.
+        :param device: Device the reference runs on.
+        :return: The anchor, or None when disabled.
+        """
+        if coefficient <= 0.0:
+            return None
+        reference = actor_critic
+        if checkpoint is not None:
+            payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+            state_dict = payload.get("state_dict", payload)
+            reference = copy.deepcopy(actor_critic)
+            reference.load_state_dict(state_dict, strict=True)
+            logger.info("KL anchor reference loaded from %s", checkpoint)
+        anchor = KLAnchor(reference, coefficient, device)
+        logger.info("KL anchor active with coefficient %g", coefficient)
+        return anchor
+
     def _update(self, data: TensorDict) -> dict[str, float] | None:
         """
         Compute advantages once, then run ``num_epochs`` of minibatch PPO updates.
@@ -619,6 +657,8 @@ class PPOTrainer(Trainer):
         diagnostic_counts: dict[str, int] = {}
         loss_counts = 0
         skipped_minibatches = 0
+        anchor_kl_accum = 0.0
+        anchor_batches = 0
 
         logger.debug(
             "Update %d starting: batch=%d num_epochs=%d sub_batch_size=%d",
@@ -640,6 +680,12 @@ class PPOTrainer(Trainer):
 
                 loss_vals = self._loss_fwd(mb)
                 total_loss = _sum_loss_keys(loss_vals)
+                if self._kl_anchor is not None:
+                    scored = self._actor_critic(mb.select("observation").clone())
+                    anchor_loss, anchor_kl = self._kl_anchor(mb, scored.get("logits"))
+                    total_loss = total_loss + anchor_loss
+                    anchor_kl_accum += float(anchor_kl)
+                    anchor_batches += 1
 
                 if not torch.isfinite(total_loss):
                     skipped_minibatches += 1
@@ -742,6 +788,10 @@ class PPOTrainer(Trainer):
         result["grad_norm"] = grad_norm_accum / loss_counts
         result["grad_norm_max"] = grad_norm_max
         result["nonfinite_grads"] = float(nonfinite_grads)
+        if anchor_batches > 0:
+            # The divergence itself, unweighted, so the coefficient can be
+            # tuned against a number that does not move when it changes.
+            result["kl_to_bc"] = anchor_kl_accum / anchor_batches
         result.update(
             {
                 key: total / diagnostic_counts[key]
