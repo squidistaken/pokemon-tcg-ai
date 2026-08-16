@@ -8,7 +8,10 @@ reproduces the policy's own ranking and only departs from it where the backed
 up values agree. Values are always from the searching seat, so our nodes
 maximize and the opponent's nodes minimize.
 """
+
 import argparse
+import contextlib
+import logging
 import math
 import random
 import sys
@@ -27,7 +30,9 @@ from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 # the working directory: these tools are run from the repo root and from their
 # own directory both.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lookahead import build_network, determinize  # noqa: E402
+from lookahead import build_network, determinize
+
+logger = logging.getLogger(__name__)
 
 MAX_OPTIONS = 128
 
@@ -37,8 +42,17 @@ class Node:
     One search node: a forked engine state plus its visit statistics.
     """
 
-    __slots__ = ("search_id", "observation", "seat_to_move", "prior", "children",
-                 "visits", "value_sum", "terminal_value", "n_options")
+    __slots__ = (
+        "children",
+        "n_options",
+        "observation",
+        "prior",
+        "search_id",
+        "seat_to_move",
+        "terminal_value",
+        "value_sum",
+        "visits",
+    )
 
     def __init__(self, search_id: int, observation: Observation, our_seat: int):
         """
@@ -79,8 +93,16 @@ class MCTSPolicy:
     :param seed: Seed for determinization.
     """
 
-    def __init__(self, network, encoder, own_list, opponent_list,
-                 simulations: int = 64, c_puct: float = 1.5, seed: int = 0):
+    def __init__(
+        self,
+        network,
+        encoder,
+        own_list,
+        opponent_list,
+        simulations: int = 64,
+        c_puct: float = 1.5,
+        seed: int = 0,
+    ):
         self._network = network
         self._encoder = encoder
         self._own = own_list
@@ -120,7 +142,8 @@ class MCTSPolicy:
         prior = torch.softmax(logits.float(), dim=-1).tolist()
         return prior, value if mover == our_seat else -value
 
-    def _terminal_value(self, observation: Observation, our_seat: int):
+    @staticmethod
+    def _terminal_value(observation: Observation, our_seat: int):
         """
         :param observation: State to check.
         :param our_seat: Seat the search is run for.
@@ -174,6 +197,10 @@ class MCTSPolicy:
                 try:
                     stepped = api.search_step(node.search_id, [option])
                 except Exception:
+                    logger.debug(
+                        "search_step failed; stopping this simulation",
+                        exc_info=True,
+                    )
                     node.children[option] = None
                     break
                 child = Node(stepped.searchId, stepped.observation, self._our_seat)
@@ -185,14 +212,20 @@ class MCTSPolicy:
                         stepped.observation, self._our_seat, child.n_options
                     )
                 else:
-                    value = child.terminal_value if child.terminal_value is not None else 0.0
+                    value = (
+                        child.terminal_value
+                        if child.terminal_value is not None
+                        else 0.0
+                    )
                 node.children[option] = child
                 path.append(child)
                 self._backup(path, value)
                 return
             node = child
             path.append(node)
-        value = node.terminal_value if node.terminal_value is not None else node.mean_value
+        value = (
+            node.terminal_value if node.terminal_value is not None else node.mean_value
+        )
         self._backup(path, value)
 
     @staticmethod
@@ -216,20 +249,29 @@ class MCTSPolicy:
         """
         select = observation.select
         state = observation.current
-        if (select is None or state is None
-                or observation.search_begin_input is None
-                or len(select.option) < 2
-                or select.minCount != 1 or select.maxCount != 1):
+        if (
+            select is None
+            or state is None
+            or observation.search_begin_input is None
+            or len(select.option) < 2
+            or select.minCount != 1
+            or select.maxCount != 1
+        ):
             self.fell_back += 1
             return self._fallback(observation)
         self._our_seat = state.yourIndex
         try:
             begin = api.search_begin(
                 observation,
-                **determinize(observation, self._our_seat, self._own,
-                              self._opponent, self._rng),
+                **determinize(
+                    observation, self._our_seat, self._own, self._opponent, self._rng
+                ),
             )
         except Exception:
+            logger.debug(
+                "search_begin failed; falling back to the raw policy",
+                exc_info=True,
+            )
             self.fell_back += 1
             return self._fallback(observation)
         try:
@@ -241,10 +283,8 @@ class MCTSPolicy:
                 self._simulate(root)
             visited = {k: v.visits for k, v in root.children.items() if v}
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 api.search_end()
-            except Exception:
-                pass
         if not visited:
             self.fell_back += 1
             return self._fallback(observation)
@@ -257,17 +297,20 @@ def main() -> None:
     parser.add_argument(
         "--checkpoint",
         default="outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/"
-        "checkpoints/snapshot_000175702016.pt")
+        "checkpoints/snapshot_000175702016.pt",
+    )
     parser.add_argument(
-        "--deck", default="decks/top20/alakazam-dudunsparce/alakazam-dudunsparce-4.csv")
+        "--deck", default="decks/top20/alakazam-dudunsparce/alakazam-dudunsparce-4.csv"
+    )
     parser.add_argument("--games", type=int, default=20)
     parser.add_argument("--simulations", type=int, default=64)
     args = parser.parse_args()
 
     network, encoder = build_network(args.checkpoint)
     deck = load_deck(args.deck)
-    searcher = MCTSPolicy(network, encoder, deck, deck,
-                          simulations=args.simulations, seed=5)
+    searcher = MCTSPolicy(
+        network, encoder, deck, deck, simulations=args.simulations, seed=5
+    )
     raw = GreedyPolicyOpponent(network, encoder)
 
     wins = losses = draws = 0
@@ -289,9 +332,11 @@ def main() -> None:
         wins += result == our_seat
         losses += result == 1 - our_seat
         draws += result not in (our_seat, 1 - our_seat)
-        print(f"  game {game + 1}: W{wins} L{losses} D{draws} "
-              f"(searched {searcher.searched}, fell back {searcher.fell_back})",
-              flush=True)
+        print(
+            f"  game {game + 1}: W{wins} L{losses} D{draws} "
+            f"(searched {searcher.searched}, fell back {searcher.fell_back})",
+            flush=True,
+        )
 
     scored = wins + losses + draws
     print(f"\nPUCT search ({args.simulations} sims) vs raw argmax, same weights")

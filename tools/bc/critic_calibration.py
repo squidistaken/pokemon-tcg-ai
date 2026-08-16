@@ -7,8 +7,9 @@ the state *after* our move, which is usually a state where the opponent acts
 next. This plays self-play games, records the critic's value at both kinds of
 state, and correlates each against the game's actual result.
 """
+
+import argparse
 import random
-import sys
 
 import torch
 from omegaconf import OmegaConf
@@ -24,15 +25,10 @@ from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 from src.policies.ppo_actor import build_actor_critic
 
 MAX_OPTIONS = 128
-CHECKPOINT = (
-    "outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/"
-    "checkpoints/snapshot_000175702016.pt"
-)
-DECK = "decks/top20/alakazam-dudunsparce/alakazam-dudunsparce-4.csv"
 
 
-def build():
-    checkpoint = torch.load(CHECKPOINT, map_location="cpu", weights_only=False)
+def build(checkpoint_path: str):
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     config = OmegaConf.create(checkpoint["config"])
     encoder = StructuredObservationEncoder(max_options=MAX_OPTIONS)
     n = MAX_OPTIONS + 1
@@ -52,7 +48,9 @@ def correlation(values: list[float], outcomes: list[float]) -> float:
         return float("nan")
     mean_v = sum(values) / len(values)
     mean_o = sum(outcomes) / len(outcomes)
-    cov = sum((v - mean_v) * (o - mean_o) for v, o in zip(values, outcomes))
+    cov = sum(
+        (v - mean_v) * (o - mean_o) for v, o in zip(values, outcomes, strict=True)
+    )
     var_v = sum((v - mean_v) ** 2 for v in values) ** 0.5
     var_o = sum((o - mean_o) ** 2 for o in outcomes) ** 0.5
     return cov / (var_v * var_o) if var_v and var_o else float("nan")
@@ -60,10 +58,21 @@ def correlation(values: list[float], outcomes: list[float]) -> float:
 
 @torch.inference_mode()
 def main() -> None:
-    games = int(sys.argv[1]) if len(sys.argv) > 1 else 20
-    network, encoder = build()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--checkpoint",
+        default="outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/"
+        "checkpoints/snapshot_000175702016.pt",
+    )
+    parser.add_argument(
+        "--deck", default="decks/top20/alakazam-dudunsparce/alakazam-dudunsparce-4.csv"
+    )
+    parser.add_argument("--games", type=int, default=20)
+    args = parser.parse_args()
+
+    network, encoder = build(args.checkpoint)
     policy = GreedyPolicyOpponent(network, encoder)
-    deck = load_deck(DECK)
+    deck = load_deck(args.deck)
     rng = random.Random(4)
 
     def value(observation, seat: int) -> float:
@@ -75,7 +84,7 @@ def main() -> None:
         return float(td.get("state_value").reshape(-1)[0])
 
     our_move, opp_move = ([], []), ([], [])
-    for game in range(games):
+    for _game in range(args.games):
         our_seat = rng.randint(0, 1)
         handle = BattleHandle()
         samples: list[tuple[bool, float]] = []
@@ -92,20 +101,24 @@ def main() -> None:
             result = observation.current.result if observation.current else -1
         finally:
             handle.finish()
-        outcome = 1.0 if result == our_seat else (-1.0 if result == 1 - our_seat else 0.0)
+        outcome = (
+            1.0 if result == our_seat else (-1.0 if result == 1 - our_seat else 0.0)
+        )
         for is_ours, v in samples:
             bucket = our_move if is_ours else opp_move
             bucket[0].append(v)
             bucket[1].append(outcome)
 
-    print(f"games: {games}\n")
+    print(f"games: {args.games}\n")
     print(f"{'state type':34} {'n':>7} {'mean V':>9} {'corr with result':>18}")
     for label, (values, outcomes) in (
         ("our seat to move (trained on)", our_move),
         ("opponent to move (search asks)", opp_move),
     ):
-        print(f"{label:34} {len(values):>7} {sum(values)/max(len(values),1):>9.3f} "
-              f"{correlation(values, outcomes):>18.3f}")
+        print(
+            f"{label:34} {len(values):>7} {sum(values) / max(len(values), 1):>9.3f} "
+            f"{correlation(values, outcomes):>18.3f}"
+        )
 
 
 if __name__ == "__main__":

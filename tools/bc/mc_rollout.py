@@ -7,8 +7,11 @@ A rollout to terminal returns an actual win or loss, which has full per-action
 resolution. Rollouts play randomly so the network stays out of the inner loop
 and the cost is engine-only.
 """
+
 import argparse
 import collections
+import contextlib
+import logging
 import random
 import sys
 from pathlib import Path
@@ -23,7 +26,9 @@ from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 # the working directory: these tools are run from the repo root and from their
 # own directory both.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lookahead import build_network, determinize  # noqa: E402
+from lookahead import build_network, determinize
+
+logger = logging.getLogger(__name__)
 
 
 def random_playout(
@@ -43,6 +48,10 @@ def random_playout(
         try:
             state = api.search_step(current_id, _random_selection(current_id, rng))
         except Exception:
+            logger.debug(
+                "search_step failed; treating the rollout as unresolved",
+                exc_info=True,
+            )
             return None
         observation = state.observation
         current_id = state.searchId
@@ -82,9 +91,7 @@ def _random_selection(search_id: int, rng: random.Random) -> list[int]:
     if count == 0:
         return []
     low = max(select.minCount, 0)
-    high = min(select.maxCount, count)
-    if high < low:
-        high = low
+    high = max(min(select.maxCount, count), low)
     take = rng.randint(low, high) if high > low else low
     return rng.sample(range(count), min(take, count))
 
@@ -145,11 +152,17 @@ class RolloutPolicy:
                         ),
                     )
                 except Exception:
+                    logger.debug(
+                        "search_begin failed; stopping rollouts", exc_info=True
+                    )
                     break
                 for option in range(len(select.option)):
                     try:
                         child = api.search_step(root.searchId, [option])
                     except Exception:
+                        logger.debug(
+                            "search_step failed; skipping option", exc_info=True
+                        )
                         continue
                     _PENDING[child.searchId] = child.observation
                     if child.observation.current is None:
@@ -157,22 +170,20 @@ class RolloutPolicy:
                     result = child.observation.current.result
                     if result != -1:
                         scores[option].append(
-                            1.0 if result == seat else (0.0 if result == 1 - seat else 0.5)
+                            1.0
+                            if result == seat
+                            else (0.0 if result == 1 - seat else 0.5)
                         )
                         continue
                     outcome = random_playout(child.searchId, seat, self._rng)
                     if outcome is not None:
                         scores[option].append(outcome)
-                    try:
+                    with contextlib.suppress(Exception):
                         api.search_release(child.searchId)
-                    except Exception:
-                        pass
         finally:
             _PENDING.clear()
-            try:
+            with contextlib.suppress(Exception):
                 api.search_end()
-            except Exception:
-                pass
         rated = {k: sum(v) / len(v) for k, v in scores.items() if v}
         if not rated:
             self.fell_back += 1
@@ -224,9 +235,11 @@ def main() -> None:
             losses += 1
         else:
             draws += 1
-        print(f"  game {game + 1}: W{wins} L{losses} D{draws} "
-              f"(searched {searcher.searched}, fell back {searcher.fell_back})",
-              flush=True)
+        print(
+            f"  game {game + 1}: W{wins} L{losses} D{draws} "
+            f"(searched {searcher.searched}, fell back {searcher.fell_back})",
+            flush=True,
+        )
 
     scored = wins + losses + draws
     print(f"\nMC rollout search ({args.rollouts}/option) vs raw argmax, same weights")

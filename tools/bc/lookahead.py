@@ -8,8 +8,11 @@ plays each legal option out in a forked copy of the battle
 with the critic, which is the improvement operator plain PPO does not have.
 Needs no retraining: it wraps a checkpoint that already exists.
 """
+
 import argparse
 import collections
+import contextlib
+import logging
 import random
 
 import torch
@@ -26,6 +29,8 @@ from src.env.observation.structured_observation_encoder import (
 )
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 from src.policies.ppo_actor import build_actor_critic
+
+logger = logging.getLogger(__name__)
 
 MAX_OPTIONS = 128
 
@@ -62,10 +67,10 @@ def _visible_cards(player) -> collections.Counter:
     :return: Multiset of visible card IDs.
     """
     seen: collections.Counter = collections.Counter()
-    for card in (player.hand or []):
+    for card in player.hand or []:
         if card:
             seen[card.id] += 1
-    for card in (player.discard or []):
+    for card in player.discard or []:
         if card:
             seen[card.id] += 1
     for mon in [m for m in (player.active or []) + (player.bench or []) if m]:
@@ -126,10 +131,13 @@ def determinize(
         "your_deck": mine[: me.deckCount],
         "your_prize": mine[me.deckCount : me.deckCount + len(me.prize or [])],
         "opponent_deck": theirs[: them.deckCount],
-        "opponent_prize": theirs[them.deckCount : them.deckCount + len(them.prize or [])],
+        "opponent_prize": theirs[
+            them.deckCount : them.deckCount + len(them.prize or [])
+        ],
         "opponent_hand": theirs[
-            them.deckCount + len(them.prize or []) :
-            them.deckCount + len(them.prize or []) + (them.handCount or 0)
+            them.deckCount + len(them.prize or []) : them.deckCount
+            + len(them.prize or [])
+            + (them.handCount or 0)
         ],
         "opponent_active": opponent_active,
     }
@@ -209,6 +217,10 @@ class LookaheadPolicy:
                 **determinize(observation, seat, self._own, self._opponent, self._rng),
             )
         except Exception:
+            logger.debug(
+                "search_begin failed; falling back to the raw policy",
+                exc_info=True,
+            )
             self.fell_back += 1
             return self._fallback(observation)
 
@@ -221,21 +233,18 @@ class LookaheadPolicy:
                 try:
                     child = api.search_step(root.searchId, [option])
                 except Exception:
+                    logger.debug("search_step failed; skipping option", exc_info=True)
                     continue
                 successor = child.observation
                 if successor.current is not None:
                     value = self._sign * self._value(successor, seat)
                     if value > best_value:
                         best_option, best_value = option, value
-                try:
+                with contextlib.suppress(Exception):
                     api.search_release(child.searchId)
-                except Exception:
-                    pass
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 api.search_end()
-            except Exception:
-                pass
         if best_option is None:
             self.fell_back += 1
             return self._fallback(observation)
@@ -254,13 +263,18 @@ def main() -> None:
         "--deck", default="decks/top20/alakazam-dudunsparce/alakazam-dudunsparce-4.csv"
     )
     parser.add_argument("--games", type=int, default=30)
-    parser.add_argument("--minimize", action="store_true",
-                        help="Pick the lowest-valued successor, to test for an inverted ranking.")
+    parser.add_argument(
+        "--minimize",
+        action="store_true",
+        help="Pick the lowest-valued successor, to test for an inverted ranking.",
+    )
     args = parser.parse_args()
 
     network, encoder = build_network(args.checkpoint)
     deck = load_deck(args.deck)
-    lookahead = LookaheadPolicy(network, encoder, deck, deck, seed=5, minimize=args.minimize)
+    lookahead = LookaheadPolicy(
+        network, encoder, deck, deck, seed=5, minimize=args.minimize
+    )
     raw = GreedyPolicyOpponent(network, encoder)
 
     wins = losses = draws = 0
@@ -285,18 +299,22 @@ def main() -> None:
             losses += 1
         else:
             draws += 1
-        print(f"  game {game + 1}: W{wins} L{losses} D{draws} "
-              f"(searched {lookahead.searched}, fell back {lookahead.fell_back})",
-              flush=True)
+        print(
+            f"  game {game + 1}: W{wins} L{losses} D{draws} "
+            f"(searched {lookahead.searched}, fell back {lookahead.fell_back})",
+            flush=True,
+        )
 
     scored = wins + losses + draws
-    print(f"\n1-ply lookahead vs the same checkpoint playing raw argmax")
+    print("\n1-ply lookahead vs the same checkpoint playing raw argmax")
     print(f"  games   : {scored}")
     print(f"  score   : {(wins + 0.5 * draws) / max(scored, 1):.3f} (0.50 = no gain)")
     print(f"  W/L/D   : {wins}/{losses}/{draws}")
     total = lookahead.searched + lookahead.fell_back
-    print(f"  searched: {lookahead.searched}/{total} decisions "
-          f"({lookahead.searched / max(total, 1):.1%})")
+    print(
+        f"  searched: {lookahead.searched}/{total} decisions "
+        f"({lookahead.searched / max(total, 1):.1%})"
+    )
 
 
 if __name__ == "__main__":

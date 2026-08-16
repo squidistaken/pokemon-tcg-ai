@@ -10,20 +10,24 @@ environment produces, so the cloned policy sees the same decision shape it
 will face at play time. Every sample also carries the episode's final result
 from the acting seat, which trains the value head on real outcomes.
 """
+
 import argparse
 import glob
 import json
+import logging
 import random
 from pathlib import Path
 
 import torch
-from cg.api import Observation
-from cg.utils import to_dataclass
 from tensordict import TensorDict
 
+from cg.api import Observation
+from cg.utils import to_dataclass
 from src.env.observation.structured_observation_encoder import (
     StructuredObservationEncoder,
 )
+
+logger = logging.getLogger(__name__)
 
 MAX_OPTIONS = 128
 
@@ -214,6 +218,7 @@ def build(
         try:
             replay = json.loads(path.read_text())
         except Exception:
+            logger.debug("could not parse %s; skipping", path, exc_info=True)
             skipped += 1
             continue
         game = int(episode_id) if str(episode_id).isdigit() else count
@@ -224,6 +229,9 @@ def build(
                 observation = to_dataclass(payload, Observation)
                 encoded = encoder.encode(observation, seat, position)
             except Exception:
+                logger.debug(
+                    "could not encode a decision from %s; skipping", path, exc_info=True
+                )
                 continue
             stop_rows += target == STOP_INDEX
             samples.append(

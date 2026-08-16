@@ -9,14 +9,15 @@ critic trained on actual games rather than on a league's opinion of itself.
 Architecture and checkpoint layout are copied from a reference snapshot, so the
 result loads in the existing eval and submission paths without changes.
 """
+
 import argparse
 import math
 from pathlib import Path
 
 import torch
-import torch.nn.functional as functional
 from omegaconf import OmegaConf
 from tensordict import TensorDict
+from torch.nn import functional
 from torchrl.data import Binary, Categorical, Composite, Unbounded
 
 from src.env.observation.structured_observation_encoder import (
@@ -25,13 +26,10 @@ from src.env.observation.structured_observation_encoder import (
 from src.policies.ppo_actor import build_actor_critic
 
 MAX_OPTIONS = 128
-REFERENCE = (
-    "outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/"
-    "checkpoints/snapshot_000175702016.pt"
-)
 
 
 def build_config(
+    reference_path: str,
     num_layers: int | None = None,
     ff_dim: int | None = None,
     dropout: float | None = None,
@@ -43,12 +41,13 @@ def build_config(
     demand. Cloning a fixed corpus of over a million decisions is a different
     regime, so the backbone is allowed to grow here.
 
+    :param reference_path: Snapshot whose architecture is copied.
     :param num_layers: Transformer layers, or None to keep the reference value.
     :param ff_dim: Feed-forward width, or None to keep the reference value.
     :param dropout: Dropout probability, or None to keep the reference value.
     :return: Hydra-style config carrying a ``model`` section.
     """
-    reference = torch.load(REFERENCE, map_location="cpu", weights_only=False)
+    reference = torch.load(reference_path, map_location="cpu", weights_only=False)
     config = OmegaConf.create(reference["config"])
     OmegaConf.set_struct(config, False)
     if num_layers is not None:
@@ -252,7 +251,7 @@ def train(args) -> None:
         flush=True,
     )
 
-    config = build_config(args.num_layers, args.ff_dim, args.dropout)
+    config = build_config(args.reference, args.num_layers, args.ff_dim, args.dropout)
     network = build_network(config).to(device)
     parameters = sum(p.numel() for p in network.parameters())
     optimizer = torch.optim.AdamW(
@@ -351,9 +350,7 @@ def train(args) -> None:
             torch.save(
                 {
                     "format_version": 1,
-                    "state_dict": {
-                        k: v.cpu() for k, v in network.state_dict().items()
-                    },
+                    "state_dict": {k: v.cpu() for k, v in network.state_dict().items()},
                     "config": OmegaConf.to_container(config, resolve=True),
                     "frames": 0,
                 },
@@ -375,6 +372,12 @@ def main() -> None:
     parser.add_argument("--num-layers", type=int, default=None)
     parser.add_argument("--ff-dim", type=int, default=None)
     parser.add_argument("--dropout", type=float, default=None)
+    parser.add_argument(
+        "--reference",
+        default="outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/"
+        "checkpoints/snapshot_000175702016.pt",
+        help="Snapshot whose architecture the clone copies.",
+    )
     parser.add_argument(
         "--select-on",
         choices=("policy", "total"),

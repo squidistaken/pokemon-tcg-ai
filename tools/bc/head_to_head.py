@@ -5,8 +5,8 @@ Validation accuracy says how often a clone reproduces an expert's move, which
 is not the same question as whether it wins. This plays real games with seats
 alternated, so neither side gets the first-player advantage for free.
 """
+
 import argparse
-import random
 import sys
 from pathlib import Path
 
@@ -18,7 +18,7 @@ from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 # the working directory: these tools are run from the repo root and from their
 # own directory both.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lookahead import build_network  # noqa: E402
+from lookahead import build_network
 
 
 def play(deck_a, deck_b, policy_a, policy_b, seat_a: int) -> int:
