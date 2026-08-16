@@ -27,9 +27,9 @@ from src.training.collectors import (
     parse_collector_kind,
 )
 from src.training.evaluator import Evaluator
+from src.training.kl_anchor import KLAnchor
 from src.training.loss._helpers import _sum_loss_keys
 from src.training.multi_evaluator import MultiEvaluator
-from src.training.supervised_kl_anchor import SupervisedKLAnchor
 from src.training.trainer import Trainer
 
 logger = logging.getLogger(__name__)
@@ -596,7 +596,7 @@ class PPOTrainer(Trainer):
         coefficient: float,
         checkpoint: str | None,
         device: torch.device | str,
-    ) -> SupervisedKLAnchor | None:
+    ) -> KLAnchor | None:
         """
         Build the frozen reference policy the KL anchor pulls towards.
 
@@ -617,7 +617,7 @@ class PPOTrainer(Trainer):
             reference = copy.deepcopy(actor_critic)
             reference.load_state_dict(state_dict, strict=True)
             logger.info("KL anchor reference loaded from %s", checkpoint)
-        anchor = SupervisedKLAnchor(reference, coefficient, device)
+        anchor = KLAnchor(reference, coefficient, device)
         logger.info("KL anchor active with coefficient %g", coefficient)
         return anchor
 

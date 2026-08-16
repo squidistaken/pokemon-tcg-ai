@@ -26,11 +26,11 @@ from src.env.battle_handle import BattleHandle
 from src.env.decks.deck import load_deck
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 
-# lookahead.py sits next to this file, so resolve it from here rather than from
+# _common.py sits next to this file, so resolve it from here rather than from
 # the working directory: these tools are run from the repo root and from their
 # own directory both.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lookahead import build_network, determinize
+from _common import build_network, determinize
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,10 @@ class MCTSPolicy:
     :param opponent_list: Guessed opponent decklist.
     :param simulations: PUCT simulations per decision.
     :param c_puct: Exploration constant.
+    :param prior_temperature: Below 1, sharpens the softmax policy prior so it
+        dominates the noisy critic value in the PUCT score (see
+        :meth:`_evaluate`); the search then degrades to the policy's ranking
+        instead of the critic's when the value cannot tell the options apart.
     :param seed: Seed for determinization.
     """
 
@@ -100,7 +104,8 @@ class MCTSPolicy:
         own_list,
         opponent_list,
         simulations: int = 64,
-        c_puct: float = 1.5,
+        c_puct: float = 3.0,
+        prior_temperature: float = 0.5,
         seed: int = 0,
     ):
         self._network = network
@@ -109,6 +114,7 @@ class MCTSPolicy:
         self._opponent = opponent_list
         self._simulations = simulations
         self._c_puct = c_puct
+        self._prior_temperature = prior_temperature
         self._rng = random.Random(seed)
         self._fallback = GreedyPolicyOpponent(network, encoder)
         self.searched = 0
@@ -139,7 +145,13 @@ class MCTSPolicy:
         self._network(encoded)
         logits = encoded.get("logits").reshape(-1)[:n_options]
         value = float(encoded.get("state_value").reshape(-1)[0])
-        prior = torch.softmax(logits.float(), dim=-1).tolist()
+        # Sharpen the policy prior. Raw softmax over a large option table puts
+        # most options at ~0.01-0.1, which the (noisy, off-distribution)
+        # critic value ``q`` drowns out in the PUCT score. Dividing by a
+        # temperature below 1 concentrates the prior on the policy's top moves,
+        # so when the value is uninformative the search degrades to the
+        # policy's own ranking instead of picking by critic noise.
+        prior = torch.softmax(logits.float() / self._prior_temperature, dim=-1).tolist()
         return prior, value if mover == our_seat else -value
 
     @staticmethod
@@ -304,12 +316,24 @@ def main() -> None:
     )
     parser.add_argument("--games", type=int, default=20)
     parser.add_argument("--simulations", type=int, default=64)
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.5,
+        help="Prior sharpening (see MCTSPolicy); lower trusts the policy more.",
+    )
     args = parser.parse_args()
 
     network, encoder = build_network(args.checkpoint)
     deck = load_deck(args.deck)
     searcher = MCTSPolicy(
-        network, encoder, deck, deck, simulations=args.simulations, seed=5
+        network,
+        encoder,
+        deck,
+        deck,
+        simulations=args.simulations,
+        prior_temperature=args.temperature,
+        seed=5,
     )
     raw = GreedyPolicyOpponent(network, encoder)
 

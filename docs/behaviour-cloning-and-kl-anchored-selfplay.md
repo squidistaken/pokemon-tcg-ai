@@ -256,7 +256,7 @@ single position per game. Do the same before relying on this head.
 
 ## The anchor
 
-`src/training/supervised_kl_anchor.py` holds `SupervisedKLAnchor`. It keeps a
+`src/training/kl_anchor.py` holds `KLAnchor`. It keeps a
 frozen copy of the clone and adds `coefficient * KL(current || reference)` to
 the PPO loss on the states the collector visited. The mask restricts the
 divergence to legal actions, because illegal slots carry arbitrary logits.

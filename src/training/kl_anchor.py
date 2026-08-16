@@ -8,7 +8,7 @@ from torch import nn
 logger = logging.getLogger(__name__)
 
 
-class SupervisedKLAnchor(nn.Module):
+class KLAnchor(nn.Module):
     """
     Penalize divergence from a frozen (behaviour-cloned) policy.
 

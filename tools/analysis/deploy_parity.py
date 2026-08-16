@@ -8,8 +8,17 @@ that was trained.
 """
 import argparse
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
+
+# ``src`` and ``submission`` live at the repo root, which is not necessarily the
+# first sys.path entry: this box's PYTHONPATH points at a sibling project whose
+# stray ``submission.py`` shadows our ``submission/`` package otherwise. Force
+# the repo root to the front before importing either.
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+if sys.path[0] != _REPO_ROOT:
+    sys.path.insert(0, _REPO_ROOT)
 
 import torch
 from omegaconf import OmegaConf
@@ -25,11 +34,6 @@ from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 from src.policies.ppo_actor import build_actor_critic
 from submission.cg_api import to_observation_class
 from submission.runtime import Policy
-
-DEFAULT_BUNDLE = Path("submissions/bc-v6-expert-top1")
-DEFAULT_CHECKPOINT = "outputs/bc/bc-v6-submit.pt"
-DEFAULT_DECK = "decks/expert_top1.csv"
-DEFAULT_MAX_OPTIONS = 128
 
 
 def load_bundle_policy(bundle: Path) -> Policy:
@@ -72,10 +76,12 @@ def load_training_policy(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bundle", type=Path, default=DEFAULT_BUNDLE)
-    parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
-    parser.add_argument("--deck", default=DEFAULT_DECK)
-    parser.add_argument("--max-options", type=int, default=DEFAULT_MAX_OPTIONS)
+    parser.add_argument(
+        "--bundle", type=Path, default=Path("submissions/bc-v6-expert-top1")
+    )
+    parser.add_argument("--checkpoint", default="outputs/bc/bc-v6-submit.pt")
+    parser.add_argument("--deck", default="decks/expert_top1.csv")
+    parser.add_argument("--max-options", type=int, default=128)
     parser.add_argument("--games", type=int, default=5)
     args = parser.parse_args()
 

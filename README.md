@@ -195,7 +195,7 @@ src/
   models/              Backbones (mlp, transformer), obs adapter, policy/value heads, ActorCritic
   policies/            Random, greedy, and Kaggle inference policies + the PPO operator builder
   training/            Trainer, PPO, collectors, env factory, self-play, evaluators, cross-play,
-                       supervised_kl_anchor.py (AlphaStar-style anchor to a cloned policy),
+                       kl_anchor.py (KL divergence w.r.t. to a (cloned)ß policy),
                        loss/ and callbacks/ (snapshots, train state, W&B)
   train.py             Hydra entry point (python -m src.train): main() only
   trainer_builder.py   Builds the trainer, callbacks and run paths from the config

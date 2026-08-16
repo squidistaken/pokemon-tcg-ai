@@ -14,11 +14,11 @@ from src.env.battle_handle import BattleHandle
 from src.env.decks.deck import load_deck
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 
-# lookahead.py sits next to this file, so resolve it from here rather than from
+# _common.py sits next to this file, so resolve it from here rather than from
 # the working directory: these tools are run from the repo root and from their
 # own directory both.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lookahead import build_network
+from _common import build_network
 
 
 def play(deck_a, deck_b, policy_a, policy_b, seat_a: int) -> int:

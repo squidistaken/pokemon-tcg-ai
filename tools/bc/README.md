@@ -74,6 +74,8 @@ encoded observation into tokens, a `TransformerBackbone` reads them, and a
 ## Also here
 
 - `head_to_head.py` — play two checkpoints against each other.
-- `lookahead.py`, `mc_rollout.py`, `mcts.py` — search over the engine's
-  determinized simulator, wrapping a checkpoint.
+- `mcts.py` — PUCT search over the engine's determinized simulator, wrapping a
+  checkpoint (policy as prior, critic as value).
 - `critic_calibration.py` — correlate the critic's value against real outcomes.
+- `_common.py` — shared `build_network` / `determinize` helpers for the tools
+  above.
