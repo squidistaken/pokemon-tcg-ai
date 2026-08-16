@@ -23,16 +23,11 @@ Self-play PPO reached 180M frames and stopped improving against anything except
 its own league. Three measurements show why:
 
 - pin-175.7M scores 0.95 on its pinned deck and 0.05 to 0.33 on other decks,
-  below its own initialization (`tools/analysis/deck_transfer.py`).
+  below its own initialization.
 - Snapshots 2M frames apart agree on 0.40 of their decisions at 20M frames and
-  0.52 at 170M. The policy is a fresh best response, not an accumulation
-  (`tools/analysis/churn.py`).
+  0.52 at 170M. The policy is a fresh best response, not an accumulation.
 - League Bradley-Terry rating rose from -94.2 to +76.0 over 180M frames with 0
-  intransitive triples, while the Kaggle score stayed near 621.8
-  (`tools/analysis/transitivity.py`).
-
-Each script hardcodes the run directory it measured, under `outputs/`, which is
-not in the repository. Re-running one on a different run means editing that path.
+  intransitive triples, while the Kaggle score stayed near 621.8.
 
 Every game AI that beat strong humans bought its improvement operator from
 search or from human data. The one system that bought neither, OpenAI Five, used

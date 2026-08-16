@@ -101,6 +101,7 @@ echo "Eval ref:   $EVAL_OPPONENT_CHECKPOINT"
   "wandb.name=$RUN_NAME" \
   "agent.kl_anchor_checkpoint=$BC_CHECKPOINT" \
   "train.init_checkpoint=$BC_CHECKPOINT" \
+  "train.warmup_checkpoint=$BC_CHECKPOINT" \
   "train.eval_opponent_checkpoint=$EVAL_OPPONENT_CHECKPOINT" \
   "env.deck_pool=$DECK_POOL" \
   ${WORKER_OVERRIDE[@]+"${WORKER_OVERRIDE[@]}"} \

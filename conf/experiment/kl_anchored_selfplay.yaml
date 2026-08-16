@@ -106,6 +106,12 @@ agent:
 train:
   # Weights only, so Adam restarts from zero.
   init_checkpoint: outputs/bc/bc-v6-submit.pt
+  # The clone is a permanent league member, not only the KL reference. Without
+  # this the warmup opponent stays `random` (conf/train/default.yaml), so the
+  # learner's fixed reference point is noise and the clone it is anchored to is
+  # never actually faced. A strong stationary anchor is exactly what PFSP needs:
+  # random stops providing a signal the moment the learner reliably beats it.
+  warmup_checkpoint: outputs/bc/bc-v6-submit.pt
   # The league is a sliding window of the pool_size newest snapshots
   # (src/env/opponents/snapshot_opponent_pool.py:113), so these two settings
   # multiply into how much history the learner plays against.

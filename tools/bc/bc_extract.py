@@ -1,5 +1,5 @@
 """
-Turn harvested Kaggle replays into a supervised decision dataset.
+Turn Kaggle's daily episode export into a supervised decision dataset.
 
 Each replay step records the acting agent's full observation next to the
 action it submitted, so the expert's decisions can be encoded with the very
@@ -26,7 +26,6 @@ from src.env.observation.structured_observation_encoder import (
 )
 
 MAX_OPTIONS = 128
-REPLAY_ROOT = Path("logs/expert_replays")
 
 
 STOP_INDEX = MAX_OPTIONS
@@ -56,7 +55,7 @@ def legal_mask(n_options: int, chosen: list[int], min_count: int) -> torch.Tenso
     return mask
 
 
-def iter_decisions(replay: dict, expert_index: int | None, both_seats: bool):
+def iter_decisions(replay: dict):
     """
     Yield every usable decision in one replay, one per accumulation position.
 
@@ -66,8 +65,6 @@ def iter_decisions(replay: dict, expert_index: int | None, both_seats: bool):
     real strategic choice and not an absence of one.
 
     :param replay: Parsed Kaggle replay JSON.
-    :param expert_index: Seat the harvested team played, or None for any seat.
-    :param both_seats: Keep the opponent's decisions too, tagged by result.
     :yield: ``(observation dict, position, target, mask, seat, outcome)``.
     """
     rewards = replay.get("rewards") or [0, 0]
@@ -108,8 +105,6 @@ def iter_decisions(replay: dict, expert_index: int | None, both_seats: bool):
                 continue
             seat = state.get("yourIndex")
             if seat is None:
-                continue
-            if not both_seats and expert_index is not None and seat != expert_index:
                 continue
             reward = rewards[seat] if seat < len(rewards) else 0
             outcome = 1.0 if (reward or 0) > 0 else (-1.0 if (reward or 0) < 0 else 0.0)
@@ -170,10 +165,9 @@ def write_shard(samples: list[dict], destination: Path) -> int:
 def build(
     output: Path,
     max_replays: int,
-    both_seats: bool,
     winners_only: bool,
     seed: int,
-    replay_glob: str | None = None,
+    replay_glob: str,
     shard_size: int = 1200,
 ) -> None:
     """
@@ -181,43 +175,29 @@ def build(
 
     :param output: Destination ``.pt`` path.
     :param max_replays: Cap on replays read, for quick smoke runs.
-    :param both_seats: Include the non-harvested seat's decisions.
     :param winners_only: Drop decisions made by the side that lost.
     :param seed: Shuffle seed, so the split is reproducible.
+    :param replay_glob: Glob for the flat daily-export directory of
+        ``<episode>.json`` files.
+    :param shard_size: Replays per memory-mapped shard.
     """
     encoder = StructuredObservationEncoder(max_options=MAX_OPTIONS)
     samples: list[dict] = []
-    # When two harvested teams played each other, that episode sits in both
-    # team directories. Extracting both copies puts identical rows on either
-    # side of the split, so the first copy of an id wins.
-    by_episode: dict[str, tuple[Path, int | None]] = {}
+    # The daily export is a flat directory of <episode>.json with no manifest,
+    # already filtered to the top of the ladder. Both seats are cloned because
+    # the acting seat is the only one recorded per step and its team is
+    # unknown; a duplicate path is dropped so a repeated glob never double
+    # counts.
+    by_episode: dict[str, Path] = {}
     duplicates = 0
-    if replay_glob:
-        # Kaggle's official daily export is a flat directory of <episode>.json
-        # with no manifest, so the seat of interest is unknown and both are
-        # kept. These episodes are already filtered to the top of the ladder.
-        for path_str in glob.glob(replay_glob):
-            path = Path(path_str)
-            episode_id = path.stem
-            if episode_id in by_episode:
-                duplicates += 1
-                continue
-            by_episode[episode_id] = (path, None)
-    else:
-        for team_dir in sorted(REPLAY_ROOT.iterdir()):
-            manifest_path = team_dir / "manifest.json"
-            if not manifest_path.is_file():
-                continue
-            manifest = json.loads(manifest_path.read_text())
-            for episode_id, meta in manifest.items():
-                path = team_dir / f"episode-{episode_id}-replay.json"
-                if not path.is_file():
-                    continue
-                if episode_id in by_episode:
-                    duplicates += 1
-                    continue
-                by_episode[episode_id] = (path, meta.get("expert_index"))
-    files = [(eid, path, index) for eid, (path, index) in by_episode.items()]
+    for path_str in glob.glob(replay_glob):
+        path = Path(path_str)
+        episode_id = path.stem
+        if episode_id in by_episode:
+            duplicates += 1
+            continue
+        by_episode[episode_id] = path
+    files = list(by_episode.items())
     random.Random(seed).shuffle(files)
     files = files[:max_replays]
     print(
@@ -230,16 +210,14 @@ def build(
     stop_rows = 0
     shards = 0
     total_rows = 0
-    for count, (episode_id, path, expert_index) in enumerate(files, start=1):
+    for count, (episode_id, path) in enumerate(files, start=1):
         try:
             replay = json.loads(path.read_text())
         except Exception:
             skipped += 1
             continue
         game = int(episode_id) if str(episode_id).isdigit() else count
-        for payload, position, target, mask, seat, outcome in iter_decisions(
-            replay, expert_index, both_seats
-        ):
+        for payload, position, target, mask, seat, outcome in iter_decisions(replay):
             if winners_only and outcome <= 0.0:
                 continue
             try:
@@ -290,21 +268,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("logs/bc_dataset.pt"))
     parser.add_argument("--max-replays", type=int, default=10_000)
-    parser.add_argument("--both-seats", action="store_true")
     parser.add_argument("--winners-only", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--replay-glob",
-        default=None,
-        help="Glob for a flat directory of <episode>.json, as Kaggle's daily "
-        "export ships. Bypasses the harvested team manifests.",
+        required=True,
+        help="Glob for the flat daily-export directory of <episode>.json files, "
+        "e.g. 'logs/kaggle_episodes/*/*.json'.",
     )
     parser.add_argument("--shard-size", type=int, default=1200)
     args = parser.parse_args()
     build(
         args.output,
         args.max_replays,
-        args.both_seats,
         args.winners_only,
         args.seed,
         args.replay_glob,

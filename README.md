@@ -203,12 +203,10 @@ src/
 conf/                  Hydra configs: env/, agent/, model/ (backbone + head), train/,
                        collector/, callbacks/, experiment/, paths/
 scripts/               Dev scripts: corpus building, benchmarks, Kaggle packaging, Slurm launchers
-tools/bc/              Behaviour cloning: replay harvest, decision extraction, training,
-                       head-to-head evaluation, PUCT search
-tools/analysis/        Deployment parity check, plus the three probes behind the
-                       self-play measurements in docs/behaviour-cloning-and-kl-
-                       anchored-selfplay.md. No BC pipeline lives here: use
-                       tools/bc/ for anything that trains or extracts a clone
+tools/bc/              Behaviour cloning: decision extraction from the daily export,
+                       training, head-to-head evaluation, PUCT search
+tools/analysis/        Deployment parity check: the packaged Kaggle bundle must
+                       play the same moves as the trained policy
 slurm-conf/            Slurm profiles, uv setup, job scripts
 submission/            Kaggle entryfile, pure-Python obs parser, torch-only runtime
 submission_analysis/   `python -m submission_analysis <status|episodes|deck-report|scout>`
