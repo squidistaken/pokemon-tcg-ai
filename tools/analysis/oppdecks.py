@@ -6,7 +6,12 @@ This extracts the opponent's list per episode and scores it against every list
 in decks/top20 by card-multiset overlap, which is what decides whether the
 agent has ever trained on the matchup.
 """
-import json, glob, os, collections, csv, statistics
+import collections
+import csv
+import glob
+import json
+import os
+import statistics
 
 
 def corpus() -> dict[str, collections.Counter]:

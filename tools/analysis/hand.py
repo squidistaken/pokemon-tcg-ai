@@ -5,7 +5,9 @@ Reads the final populated prize arrays rather than a running maximum, so the
 prize counts reflect how the game actually ended, and pools wins and losses
 across submissions to give the hand-size comparison a usable sample.
 """
-import json, os, statistics
+import json
+import os
+import statistics
 
 SUBS = {"55431769": "76.5M weighted", "55480315": "150M weighted", "55491703": "158M pinned"}
 

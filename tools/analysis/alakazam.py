@@ -7,7 +7,11 @@ with the number of cards held. This walks the downloaded replays and reports
 how often Alakazam reaches the board, how large the hand is, and how the
 opponent's board compares.
 """
-import json, glob, os, statistics, collections
+import collections
+import glob
+import json
+import os
+import statistics
 
 ALAKAZAM, KADABRA, ABRA = 743, 742, 741
 

@@ -8,12 +8,16 @@ alternated, so neither side gets the first-player advantage for free.
 import argparse
 import random
 import sys
+from pathlib import Path
 
 from src.env.battle_handle import BattleHandle
 from src.env.decks.deck import load_deck
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 
-sys.path.insert(0, "tools/bc")
+# lookahead.py sits next to this file, so resolve it from here rather than from
+# the working directory: these tools are run from the repo root and from their
+# own directory both.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lookahead import build_network  # noqa: E402
 
 

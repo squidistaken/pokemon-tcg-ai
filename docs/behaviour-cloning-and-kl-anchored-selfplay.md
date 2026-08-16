@@ -282,11 +282,16 @@ Gradients reach the learner.
 ## Choice of coefficient
 
 The main run uses 0.05. This is reasoned, not measured. PPO's own `target_kl` is
-0.03 per update. The entropy term uses coefficient 0.02 at 0.7 to 1.9 nats, so
-it contributes 0.015 to 0.04 of the loss. At coefficient 0.05 a drift of 0.5
-nats from the clone costs 0.025, the same order as the entropy term: it shapes
-the objective without dominating it. Coefficient 0.25 would contribute 0.125 and
-probably pin the policy to the clone.
+0.03 per update. At coefficient 0.05 a drift of 0.5 nats from the clone costs
+0.025, which shapes the objective without dominating it. Coefficient 0.25 would
+contribute 0.125 and probably pin the policy to the clone.
+
+The sizing was originally argued against the entropy term at coefficient 0.02,
+which was itself an accident. Measured over the first 8.5M frames the anchor
+contributed 0.05 × 0.12 = 0.0060 against the entropy term's 0.0177, so the
+comparison the reasoning relied on did not hold and the anchor was the smaller
+term by 3x. `entropy_coeff` moved to 0.005 for that reason; see "Changes made
+during the run".
 
 ## Decks
 
@@ -362,7 +367,7 @@ the clone's, restated above.
 | `kl_anchor_checkpoint` | `outputs/bc/bc-v6-submit.pt` | frozen reference |
 | `train.init_checkpoint` | `outputs/bc/bc-v6-submit.pt` | whole network, Adam restarts from zero |
 | `clip_epsilon` | 0.2 | |
-| `entropy_coeff` | 0.02 | entropy bonus on |
+| `entropy_coeff` | 0.005 | 0.02 for the first 8.5M frames; see "Changes made during the run" |
 | `gamma` | 0.999 | reward is terminal only, so this predicts win probability |
 | `lmbda` | 0.98 | GAE, averaged, 8 chunks |
 | `lr` | 3e-4, constant | no annealing |
@@ -376,9 +381,10 @@ the clone's, restated above.
 | `pool_size` | 5 | league size |
 | `opponent_sampling` | pfsp, `hard` weighting | |
 | `opponent_action_selection` | greedy | |
-| `eval_interval` / `eval_episodes` | 50,000 frames / 15 | |
+| `eval_interval` / `eval_episodes` | 500,000 frames / 40 | |
+| `eval_deterministic` | true | greedy, matching submission; see "Changes made during the run" |
 | `eval_opponents` | first_snapshot, checkpoint, random | see below |
-| `env.num_workers` | 32 | matches the Slurm allocation |
+| `env.num_workers` | 32 | matches the Slurm allocation; every 900 fps run on these nodes used 32 |
 | `collector.total_frames` | 300,000,000 | past what 24h collects, so the job uses the whole allocation |
 
 `train.init_checkpoint` loads the **whole** network: shared trunk, policy head
@@ -408,10 +414,10 @@ which accumulates over the whole run.
 
 ## Evaluation during the run
 
-`train.eval_interval: 50000` frames, `eval_episodes: 15`, drawn from the policy
-rather than by argmax (`eval_deterministic: false`) so evaluation matches
-collection-time behaviour. Three fixed opponents, logged under
-`first_snapshot/`, `checkpoint/` and `random/`:
+`train.eval_interval: 500000` frames, `eval_episodes: 40`, by argmax
+(`eval_deterministic: true`) so evaluation matches how the policy is submitted
+and matches `opponent_action_selection: greedy` on the other seat. Three fixed
+opponents, logged under `first_snapshot/`, `checkpoint/` and `random/`:
 
 - `first_snapshot` is the first snapshot the run freezes, which is the clone.
   This is the number that answers whether reinforcement learning improved on
@@ -427,8 +433,81 @@ collection-time behaviour. Three fixed opponents, logged under
 The collected `win_rate` is pinned near 0.5 by construction under self-play and
 says nothing about improvement. Ignore it.
 
-Evaluation samples while deployment plays greedily, so these scores read lower
-than head-to-head results from `tools/bc/head_to_head.py`.
+## Changes made during the run
+
+Two settings changed at 8.5M frames, on 2026-08-16, and the run continued from
+`train_state.pt` rather than restarting. `train_state.pt` stores only
+`state_dict`, `optimizer`, `frames` and `torch_rng_state`
+(`src/training/callbacks/train_state_callback.py:128`), so both new values come
+from the config on resume. The weights, Adam moments and frame count carry over.
+
+| setting | 0 to 8.5M frames | after resume |
+| --- | --- | --- |
+| `collector.type` | sync | multi_sync |
+| `agent.entropy_coeff` | 0.02 | 0.005 |
+| `train.eval_deterministic` | false | true |
+
+**`collector.type` was the throughput bug.** `conf/collector/default.yaml:23`
+sets `sync` and this experiment config never overrode it. Under `sync` the
+collector builds one batched environment and runs the **policy forward in the
+main process**, which the Slurm script pins to a single thread with
+`OMP_NUM_THREADS=1`, so the 32 workers only step environments and a deeper
+network serializes the whole collector. Under `multi_sync` each worker process
+holds its own policy copy (`src/training/collectors.py:271` takes
+`make_env_factories`, one single env per worker, so `env.parallel` is not read
+and nothing nests). Measured on the rtx6000 nodes:
+
+| run | collector | workers | layers / ff | fps |
+| --- | --- | --- | --- | --- |
+| `tf-ptr-weighted-15m-s42`, six runs | multi_sync | 32 | 1 / 256 | 894-925 |
+| `fixed-deck-frozen-30m-s42` | multi_sync | 16 | 1 / 256 | 536-554 |
+| `fixed-deck-expert30-frozen-kl005-30m-s42` | multi_sync | 16 | 2 / 512 | 537 |
+| e4p5tnwg, first segment | sync | 32 | 2 / 512 | 258 |
+
+The third row is this run's architecture and anchor at 16 workers under
+multi_sync, and it matches the small model exactly, so neither the second
+transformer layer nor the KL anchor costs throughput. Only the collector did.
+
+**`eval_deterministic` was wrong for the whole first segment.** The default in
+`conf/train/ppo_selfplay.yaml:22` is `false`, so the learner sampled its actions
+while every reference played argmax. Entropy sat at 0.882, an effective
+`exp(H / 0.855)` = 2.80 options against 4.90 mean legal, so a large share of the
+learner's evaluation actions were not its argmax. Every `eval/*` number below
+8.5M frames is therefore a floor, not a measurement, and is not comparable with
+anything logged after the resume.
+
+**`entropy_coeff` ran at 0.02 by accident for the first segment.**
+`conf/experiment/kl_anchored_selfplay.yaml` had no `entropy_coeff` line and
+inherited the 0.02 default in `conf/agent/ppo.yaml`. The two configs behind
+earlier usable policies both override it to 0.005
+(`conf/experiment/weighted_field.yaml:106`,
+`conf/experiment/deck_pinned_150m_local.yaml:38`); this one did not.
+
+The reason for moving to 0.005 is the anchor, not the earlier runs. At 0.02 the
+entropy term contributed `entropy_coeff × H` = 0.02 × 0.882 = 0.0177 to the
+loss, against the anchor's `kl_anchor_coeff × kl_to_bc` = 0.05 × 0.12 = 0.0060.
+The entropy bonus outweighed the anchor about 3 to 1, which makes the run's one
+new mechanism the minority term in its own experiment. At 0.005 the entropy
+contribution is about 0.0044 and the ordering reverses.
+
+The competing diagnostic did not support the change, and is recorded here
+because it may still be right: `|loss_entropy| / |loss_objective|` measured
+0.355 median (p10-p90 0.31-0.40) over the first segment, already inside the
+0.24-0.38 band the earlier runs recorded at 0.005, because this run's
+`loss_objective` is about 3x larger. By that measure the entropy term was
+already pulling as hard as it did in the runs that worked, and 0.005 puts it at
+roughly 0.089, below anything previously run. Expect `train/entropy` to fall
+from 0.882 and the effective option count `exp(H / 0.855)` to drop from 2.80
+toward 1.5 to 2.0 against 4.90 mean legal options.
+
+Neither change is a diagnosis. The first segment was flat for a reason that is
+still unknown, and 0.02 does not explain it.
+
+`first_snapshot` survives the resume: it resolves by globbing `checkpoint_dir`
+and taking the lowest frame number (`src/training/self_play.py:207`), and the
+checkpoint directory lives in the run directory, which the resume reuses. The
+reference stays the 50,000-frame snapshot on both sides of the boundary.
+
 
 ## Launching on Habrok
 
@@ -484,8 +563,31 @@ tail -f slurm-conf/logs/pokemon-tcg-kl-smoke_<jobid>.out
 tail -f slurm-conf/logs/pokemon-tcg-kl-anchored_<jobid>.out
 ```
 
-`RESUME=1 sbatch slurm-conf/train_kl_anchored.sh` continues from
-`train_state.pt` after the time limit.
+### Resuming, and changing hyperparameters while doing it
+
+```bash
+RESUME=1 sbatch slurm-conf/train_kl_anchored.sh
+```
+
+This continues from `train_state.pt` after the time limit, after a crash, or
+after a deliberate `scancel`. Without `RESUME=1` the wrapper refuses to start
+when `train_state.pt` exists, rather than silently continuing a run
+(`scripts/train_kl_anchored_selfplay.sh:77`).
+
+The resume picks up any config change. `scripts/train_supervised.sh:178`
+appends `train.resume_state=<run dir>/train_state.pt`, and
+`_resolve_warm_start` prefers `resume_state` over `init_checkpoint`
+(`src/trainer_builder.py:380`), so the clone is not reloaded over the trained
+weights. Only weights, Adam moments, frame count and the RNG state come from the
+file; everything else is read fresh from the config. `--total-frames` stays an
+absolute target, with the supervisor subtracting what the state already records.
+
+Two things do not survive a mid-run change of this kind. Evaluation curves are
+only comparable across the boundary if `eval_deterministic`, `eval_episodes`,
+`eval_opponents`, `env.deck_pool` and `env.eval_agent_deck` all stay fixed;
+changing any of them makes the metric a different quantity. And the queue is the
+real cost: cancelling an allocation to resubmit means waiting for another
+`rtx_pro_6000`, so check `squeue --start -u $USER` before cancelling anything.
 
 ### What stops the run failing
 

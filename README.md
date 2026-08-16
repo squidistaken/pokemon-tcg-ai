@@ -205,7 +205,9 @@ conf/                  Hydra configs: env/, agent/, model/ (backbone + head), tr
 scripts/               Dev scripts: corpus building, benchmarks, Kaggle packaging, Slurm launchers
 tools/bc/              Behaviour cloning: replay harvest, decision extraction, training,
                        head-to-head evaluation, PUCT search
-tools/analysis/        One-off diagnostic scripts kept for reference
+tools/analysis/        One-off diagnostic scripts kept for reference. No BC pipeline
+                       lives here: use tools/bc/ for anything that trains or
+                       extracts a clone
 slurm-conf/            Slurm profiles, uv setup, job scripts
 submission/            Kaggle entryfile, pure-Python obs parser, torch-only runtime
 submission_analysis/   `python -m submission_analysis <status|episodes|deck-report|scout>`

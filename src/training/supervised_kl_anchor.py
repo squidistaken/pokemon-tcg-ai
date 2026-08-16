@@ -1,6 +1,3 @@
-"""
-Keep a reinforcement-learning policy close to the behaviour-cloned one.
-"""
 import copy
 import logging
 
@@ -13,20 +10,15 @@ logger = logging.getLogger(__name__)
 
 class SupervisedKLAnchor(nn.Module):
     """
-    Penalize divergence from a frozen behaviour-cloned policy.
+    Penalize divergence from a frozen (behaviour-cloned) policy.
 
-    Self-play here does not accumulate: measured over 180M frames the learner
-    keeps producing a fresh best response to whatever the league is doing now,
-    with snapshots 2M frames apart agreeing on only 0.40 of their decisions.
-    Warm-starting from the clone does not fix that on its own, because nothing
-    stops the policy from walking away from expert play as soon as training
-    resumes.
-
-    AlphaStar's answer was to hold a KL term against the supervised policy for
+    AlphaStar's style KL divergence term against the supervised policy for
     the whole reinforcement-learning run rather than only at initialization.
     That is what this does: the reference network is frozen at construction and
     every update pays ``coefficient * KL(current || reference)`` on the states
     the collector actually visited.
+
+    Assumes a discrete output probability
 
     :param reference: Frozen actor-critic supplying the reference distribution;
         it is deep-copied so later updates to the learner cannot touch it.

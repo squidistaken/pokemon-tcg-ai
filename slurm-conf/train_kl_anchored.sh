@@ -74,6 +74,9 @@ mkdir -p "$TMPDIR"
 
 # 32 collector processes on 32 allocated cores. Prevent each from creating
 # another full pool of math-library threads.
+#
+# 32 is what every fast run on these nodes used: tf-ptr-weighted-15m-s42 reached
+# 894 to 925 fps at 32 workers against 536 to 730 at 16.
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1

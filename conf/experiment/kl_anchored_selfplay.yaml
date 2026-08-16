@@ -59,10 +59,29 @@ env:
   deck_holdout_frac: 0.0
   eval_deck_matchup: mirror
 
+collector:
+  # conf/collector/default.yaml sets `sync`, which was inherited for the first
+  # 8.5M frames of run e4p5tnwg and cost most of its throughput. Under `sync`
+  # the 32 workers only step environments and the policy forward runs in the
+  # main process, single-threaded because the Slurm script pins
+  # OMP_NUM_THREADS=1, so a deeper network serializes the whole collector.
+  # Under multi_sync each worker holds its own policy copy and forwards in
+  # parallel. Measured on rtx6000: tf-ptr-weighted-15m-s42 reached 894 to 925
+  # fps under multi_sync at 32 workers where e4p5tnwg reached 258 under sync.
+  type: multi_sync
+
 agent:
+  # Matches weighted_field.yaml and deck_pinned_150m_local.yaml. The first 8.5M
+  # frames of run e4p5tnwg used 0.02, inherited because this line was missing
+  # from conf/agent/ppo.yaml's default. At 0.02 the entropy term contributed
+  # 0.0177 to the loss against the anchor's kl_anchor_coeff * kl_to_bc =
+  # 0.05 * 0.12 = 0.0060, so the entropy bonus outweighed the anchor 3 to 1 and
+  # the run's one new mechanism was the minority term. 0.005 puts it at 0.0044,
+  # below the anchor.
+  entropy_coeff: 0.005
   # 0.05 puts a 0.5-nat drift from the clone at 0.025 of the loss, the same
-  # order as the entropy term at coefficient 0.02. It shapes the objective
-  # without pinning the policy to the clone.
+  # order as the entropy term. It shapes the objective without pinning the
+  # policy to the clone.
   kl_anchor_coeff: 0.05
   kl_anchor_checkpoint: outputs/bc/bc-v6-submit.pt
   # Without this the run defaults to agent.device=cpu and the allocated GPU
@@ -84,6 +103,13 @@ train:
   # 9 minutes of collection.
   eval_episodes: 40
   eval_interval: 500000
+  # Greedy for the learner, matching train.opponent_action_selection=greedy on
+  # the other seat and matching how the policy is submitted. Under the default
+  # false the learner samples while the reference plays argmax, which costs it
+  # win rate for a reason that has nothing to do with the policy: run e4p5tnwg
+  # held entropy at 0.882, an effective exp(H / 0.855) = 2.80 options against
+  # 4.90 mean legal, so a large share of its eval actions were not the argmax.
+  eval_deterministic: true
   # Three references every eval round:
   #   first_snapshot  the oldest snapshot this run froze, written at 50,000
   #                   frames, so it is the clone plus a little training rather

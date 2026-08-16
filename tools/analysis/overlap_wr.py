@@ -4,7 +4,11 @@ Test whether the agent wins more when the opponent's deck resembles its corpus.
 Bins the 247 replayed Kaggle games by how closely the opponent's 60-card list
 matches the nearest list in decks/top20, then reports the win rate per bin.
 """
-import json, glob, os, collections, statistics
+import collections
+import glob
+import json
+import os
+import statistics
 
 
 def corpus():

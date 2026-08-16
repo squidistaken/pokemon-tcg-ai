@@ -12,6 +12,7 @@ import argparse
 import math
 import random
 import sys
+from pathlib import Path
 
 import torch
 from tensordict import TensorDict
@@ -22,7 +23,10 @@ from src.env.battle_handle import BattleHandle
 from src.env.decks.deck import load_deck
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 
-sys.path.insert(0, "/tmp/claude-1000/-home-matthijs-programming-pokemon-tcg-ai/1907c66a-6c97-40f1-9fd2-7a220e78b811/scratchpad")
+# lookahead.py sits next to this file, so resolve it from here rather than from
+# the working directory: these tools are run from the repo root and from their
+# own directory both.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lookahead import build_network, determinize  # noqa: E402
 
 MAX_OPTIONS = 128

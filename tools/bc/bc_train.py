@@ -125,12 +125,15 @@ class ShardedDataset:
         :return: Stacked TensorDict of those rows.
         """
         shard_of = torch.bucketize(rows, self._offsets[1:], right=True)
-        pieces = []
+        pieces: list[TensorDict] = []
         for shard_index in shard_of.unique().tolist():
             selected = rows[shard_of == shard_index]
             local = selected - int(self._offsets[shard_index])
             pieces.append(self._shards[shard_index][local])
-        return torch.cat(pieces, dim=0) if len(pieces) > 1 else pieces[0]
+        # TensorDict.cat rather than torch.cat: the latter only returns a
+        # TensorDict through __torch_function__ at runtime and is stubbed as
+        # returning a plain Tensor.
+        return TensorDict.cat(pieces, dim=0) if len(pieces) > 1 else pieces[0]
 
 
 def masked_logits(logits: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:

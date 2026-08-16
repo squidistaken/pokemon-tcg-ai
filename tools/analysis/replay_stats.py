@@ -5,7 +5,12 @@ Reconstructs per-episode board statistics from the raw replay JSON: prize
 progress, energy on board, deck exhaustion and bench development, split by
 whether our agent won or lost.
 """
-import json, glob, os, sys, collections, statistics
+import collections
+import glob
+import json
+import os
+import statistics
+import sys
 
 
 def episode_stats(path: str, our_index: int) -> dict:
