@@ -204,7 +204,7 @@ conf/                  Hydra configs: env/, agent/, model/ (backbone + head), tr
                        collector/, callbacks/, experiment/, paths/
 scripts/               Dev scripts: corpus building, benchmarks, Kaggle packaging, Slurm launchers
 tools/bc/              Behaviour cloning: decision extraction from the daily export,
-                       training, head-to-head evaluation, PUCT search
+                       training, head-to-head evaluation
 tools/analysis/        Deployment parity check: the packaged Kaggle bundle must
                        play the same moves as the trained policy
 slurm-conf/            Slurm profiles, uv setup, job scripts
