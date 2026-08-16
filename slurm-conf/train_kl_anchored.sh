@@ -60,6 +60,22 @@ if [ ! -x "$UV_PROJECT_ENVIRONMENT/bin/python" ]; then
   exit 1
 fi
 
+# Resume flag, from the first script argument or from the environment.
+#
+# The argument is the reliable one. Habrok does not export the submitting shell's
+# environment into the job, so `RESUME=1 sbatch ...` arrives unset and the
+# wrapper refuses to continue an existing run: job 30638714 died after 80
+# seconds on exactly that. Arguments after the script name are always passed
+# through by sbatch, so `sbatch slurm-conf/train_kl_anchored.sh 1` works
+# regardless of the cluster's export policy.
+RESUME_FLAG="${1:-${RESUME:-0}}"
+if [ "$RESUME_FLAG" != "0" ] && [ "$RESUME_FLAG" != "1" ]; then
+  echo "ERROR: resume flag must be 0 or 1, got '$RESUME_FLAG'." >&2
+  echo "       Usage: sbatch slurm-conf/train_kl_anchored.sh [0|1]" >&2
+  exit 1
+fi
+echo "Resume: $RESUME_FLAG"
+
 BC_CHECKPOINT="${BC_CHECKPOINT:-outputs/bc/bc-v6-submit.pt}"
 if [ ! -f "$BC_CHECKPOINT" ]; then
   echo "ERROR: behaviour-cloned checkpoint not found: $BC_CHECKPOINT" >&2
@@ -117,7 +133,7 @@ PY
 NUM_WORKERS="${NUM_WORKERS:-32}" \
 TOTAL_FRAMES="${TOTAL_FRAMES:-300000000}" \
 BC_CHECKPOINT="$BC_CHECKPOINT" \
-RESUME="${RESUME:-0}" \
+RESUME="$RESUME_FLAG" \
   ./scripts/train_kl_anchored_selfplay.sh
 
 echo "End: $(date --iso-8601=seconds)"

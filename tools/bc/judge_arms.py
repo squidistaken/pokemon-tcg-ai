@@ -7,6 +7,7 @@ Every arm plays the 181M weighted-field checkpoint on the deck it trained with
 and on decks it never saw, so a win that is only local shows up as a win only
 on the training deck.
 """
+
 import argparse
 import random
 from pathlib import Path
@@ -26,19 +27,25 @@ from src.policies.ppo_actor import build_actor_critic
 from src.training.cross_play import play_series
 
 MAX_OPTIONS = 128
-# The arms' own starting point. Scoring against anything else measures the
-# init rather than the training: pin-175.7M already beats the weighted-field
-# lineage ~0.90 on Alakazam before a single frame of these runs.
-BASELINE = Path(
+# Defaults for the arms this script was written against, all overridable. They
+# point into outputs/ and decks/, neither of which is in the repository, so on
+# any other checkout every one of these has to be passed explicitly.
+#
+# The baseline default is the arms' own starting point. Scoring against anything
+# else measures the init rather than the training: pin-175.7M already beats the
+# weighted-field lineage ~0.90 on Alakazam before a single frame of these runs.
+DEFAULT_BASELINE = (
     "outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/checkpoints/"
     "snapshot_000175702016.pt"
 )
-TRAINING_DECK = "decks/heuristic-resolved/alakazam-dudunsparce/alakazam-dudunsparce-4.csv"
-HELD_OUT_DECKS = {
-    "dragapult-dudunsparce": "decks/top20/dragapult-dudunsparce",
-    "rockets-honchkrow": "decks/top20/rockets-honchkrow",
-    "lucario-hariyama": "decks/top20/lucario-hariyama",
-}
+DEFAULT_TRAINING_DECK = (
+    "decks/heuristic-resolved/alakazam-dudunsparce/alakazam-dudunsparce-4.csv"
+)
+DEFAULT_HELD_OUT_DECKS = (
+    "decks/top20/dragapult-dudunsparce",
+    "decks/top20/rockets-honchkrow",
+    "decks/top20/lucario-hariyama",
+)
 
 
 def build_policy(path: Path) -> GreedyPolicyOpponent:
@@ -96,10 +103,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dirs", nargs="+", help="Hydra run directories to judge.")
     parser.add_argument("--games", type=int, default=40)
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        default=Path(DEFAULT_BASELINE),
+        help="Snapshot every arm is scored against; use the arms' own init.",
+    )
+    parser.add_argument(
+        "--training-deck",
+        default=DEFAULT_TRAINING_DECK,
+        help="Deck the arms trained on. A file, or a directory to take the first list from.",
+    )
+    parser.add_argument(
+        "--held-out",
+        nargs="*",
+        default=list(DEFAULT_HELD_OUT_DECKS),
+        help="Decks the arms never saw, same file-or-directory rule.",
+    )
     args = parser.parse_args()
 
     print("baseline:")
-    baseline = build_policy(BASELINE)
+    baseline = build_policy(args.baseline)
     arms: dict[str, GreedyPolicyOpponent] = {}
     for spec in args.run_dirs:
         run_dir = Path(spec)
@@ -110,10 +134,14 @@ def main() -> None:
         print(f"{run_dir.name}:")
         arms[run_dir.name] = build_policy(snapshot)
 
-    decks = {"TRAINING alakazam-dudunsparce-4": TRAINING_DECK} | HELD_OUT_DECKS
+    decks = {f"TRAINING {Path(args.training_deck).stem}": args.training_deck} | {
+        Path(spec).name: spec for spec in args.held_out
+    }
     handle = BattleHandle()
-    print(f"\nscore vs their own init (pin-175.7M), {args.games} games per cell "
-          f"(0.50 = no change, >0.50 = the arm is better)\n")
+    print(
+        f"\nscore vs {args.baseline.stem}, {args.games} games per cell "
+        "(0.50 = no change, >0.50 = the arm is better)\n"
+    )
     header = "".join(f"{name[:20]:>22}" for name in arms)
     print(f"{'deck':32}{header}")
     try:
@@ -122,8 +150,12 @@ def main() -> None:
             cells = []
             for policy in arms.values():
                 result = play_series(
-                    handle, policy, baseline, FixedDeckSampler(deck, deck),
-                    args.games, random.Random(17),
+                    handle,
+                    policy,
+                    baseline,
+                    FixedDeckSampler(deck, deck),
+                    args.games,
+                    random.Random(17),
                 )
                 cells.append(f"{result.score:>22.2f}")
             print(f"{label:32}{''.join(cells)}")

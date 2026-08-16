@@ -23,11 +23,16 @@ Self-play PPO reached 180M frames and stopped improving against anything except
 its own league. Three measurements show why:
 
 - pin-175.7M scores 0.95 on its pinned deck and 0.05 to 0.33 on other decks,
-  below its own initialization.
+  below its own initialization (`tools/analysis/deck_transfer.py`).
 - Snapshots 2M frames apart agree on 0.40 of their decisions at 20M frames and
-  0.52 at 170M. The policy is a fresh best response, not an accumulation.
+  0.52 at 170M. The policy is a fresh best response, not an accumulation
+  (`tools/analysis/churn.py`).
 - League Bradley-Terry rating rose from -94.2 to +76.0 over 180M frames with 0
-  intransitive triples, while the Kaggle score stayed near 621.8.
+  intransitive triples, while the Kaggle score stayed near 621.8
+  (`tools/analysis/transitivity.py`).
+
+Each script hardcodes the run directory it measured, under `outputs/`, which is
+not in the repository. Re-running one on a different run means editing that path.
 
 Every game AI that beat strong humans bought its improvement operator from
 search or from human data. The one system that bought neither, OpenAI Five, used
@@ -359,7 +364,8 @@ already. This run does not use them.
 
 Inherited from `conf/agent/ppo.yaml` and `conf/train/ppo_selfplay.yaml` unless
 `conf/experiment/kl_anchored_selfplay.yaml` overrides them. The architecture is
-the clone's, restated above.
+the clone's, restated above. Everything marked **explicit** is written out in
+the experiment file; see "The eight defaults that were wrong" below for why.
 
 | parameter | value | note |
 | --- | --- | --- |
@@ -367,25 +373,37 @@ the clone's, restated above.
 | `kl_anchor_checkpoint` | `outputs/bc/bc-v6-submit.pt` | frozen reference |
 | `train.init_checkpoint` | `outputs/bc/bc-v6-submit.pt` | whole network, Adam restarts from zero |
 | `clip_epsilon` | 0.2 | |
-| `entropy_coeff` | 0.005 | 0.02 for the first 8.5M frames; see "Changes made during the run" |
+| `entropy_coeff` | 0.005 | explicit |
 | `gamma` | 0.999 | reward is terminal only, so this predicts win probability |
 | `lmbda` | 0.98 | GAE, averaged, 8 chunks |
-| `lr` | 3e-4, constant | no annealing |
+| `lr` | 2.0e-4, constant | explicit; no annealing |
 | `weight_decay` | 0.0 | deliberate; see below |
 | `num_epochs` | 4 | PPO passes per batch |
 | `frames_per_batch` | 16,384 | |
 | `sub_batch_size` | 1,024 | |
 | `max_grad_norm` | 1.0 | |
 | `target_kl` | 0.03, multiplier 1.5 | PPO's own trust region, separate from the anchor |
-| `snapshot_interval` | 50,000 frames | league snapshots |
-| `pool_size` | 5 | league size |
+| `snapshot_interval` | 500,000 frames | explicit; league snapshots |
+| `pool_size` | 10 | explicit; league size, so the window is 5M frames |
+| `pfsp_min_weight` | 0.15 | explicit; floor share for a beaten league member |
 | `opponent_sampling` | pfsp, `hard` weighting | |
 | `opponent_action_selection` | greedy | |
 | `eval_interval` / `eval_episodes` | 500,000 frames / 40 | |
-| `eval_deterministic` | true | greedy, matching submission; see "Changes made during the run" |
+| `eval_deterministic` | true | explicit; argmax, matching how the policy is submitted |
 | `eval_opponents` | first_snapshot, checkpoint, random | see below |
+| `set_seed` | true | explicit; worker seeds and torch RNG survive a resume |
+| `agent.device` | cuda | explicit; the default leaves the allocated GPU idle |
+| `agent.collector_device` | cpu | required under `multi_sync`: CUDA cannot initialize in a forked child |
+| `env.mp_start_method` | fork | inherited from `conf/env/default.yaml:199` |
+| `collector.type` | multi_sync | explicit; the throughput setting, see below |
 | `env.num_workers` | 32 | matches the Slurm allocation; every 900 fps run on these nodes used 32 |
 | `collector.total_frames` | 300,000,000 | past what 24h collects, so the job uses the whole allocation |
+
+`collector_device: cpu` with `mp_start_method: fork` is not a compromise. That
+exact pair is running in production on
+`fixed-deck-expert30-frozen-kl005-30m-s42`, this run's architecture and anchor,
+which has reached 16.3M frames at 536 fps. The PPO update keeps the GPU; only
+the forked collector workers stay on CPU.
 
 `train.init_checkpoint` loads the **whole** network: shared trunk, policy head
 and value head. `_load_warm_start_weights` calls `load_state_dict(strict=False)`
@@ -412,6 +430,101 @@ Note that `target_kl` and `kl_anchor_coeff` measure different things.
 early-stops the epoch loop. `kl_anchor_coeff` penalizes distance from the clone,
 which accumulates over the whole run.
 
+## The eight defaults that were wrong
+
+The experiment file originally set only the anchor, the decks, the architecture
+and the eval panel. Everything else came from the shared config groups, and
+eight of those inherited values were wrong for this run. It trained about 8M
+frames that way. Not one was a considered choice later revised; each was a
+default the experiment file never mentioned. All eight are now written out
+explicitly, which is the habit worth keeping: state anything the experiment
+depends on, even where the default is already right.
+
+| setting | inherited | now | inherited from |
+| --- | --- | --- | --- |
+| `collector.type` | sync | multi_sync | `conf/collector/default.yaml:23` |
+| `agent.lr` | 3.0e-4 | 2.0e-4 | `conf/agent/ppo.yaml:58` |
+| `agent.entropy_coeff` | 0.02 | 0.005 | `conf/agent/ppo.yaml:11` |
+| `train.pool_size` | 5 | 10 | `conf/train/default.yaml:32` |
+| `train.snapshot_interval` | 50,000 | 500,000 | `conf/train/ppo_selfplay.yaml:8` |
+| `train.pfsp_min_weight` | 0.05 | 0.15 | `conf/train/default.yaml:85` |
+| `train.eval_deterministic` | false | true | `conf/train/ppo_selfplay.yaml:22` |
+| `set_seed` | false | true | `conf/config.yaml:18` |
+
+The run continued from `train_state.pt` rather than restarting. That file stores
+only `state_dict`, `optimizer`, `frames` and `torch_rng_state`
+(`src/training/callbacks/train_state_callback.py:128`), so every new value comes
+from the config on resume while the weights, Adam moments and frame count carry
+over.
+
+**`collector.type` cost most of the throughput.** Under `sync` the collector
+builds one batched environment and runs the policy forward in the main process,
+which the Slurm script pins to one thread with `OMP_NUM_THREADS=1`. The 32
+workers only step environments, so a deeper network serializes the whole
+collector. Under `multi_sync` each worker holds its own policy copy
+(`src/training/collectors.py:271`). Measured on the rtx6000 nodes:
+
+| run | collector | workers | layers / ff | fps |
+| --- | --- | --- | --- | --- |
+| `tf-ptr-weighted-15m-s42`, six runs | multi_sync | 32 | 1 / 256 | 894-925 |
+| `fixed-deck-frozen-30m-s42` | multi_sync | 16 | 1 / 256 | 536-554 |
+| `fixed-deck-expert30-frozen-kl005-30m-s42` | multi_sync | 16 | 2 / 512 | 536 |
+| e4p5tnwg, first segment | sync | 32 | 2 / 512 | 258 |
+
+Row three is this run's architecture and anchor, holding 536 fps out to 16.3M
+frames, and it matches the small model exactly. Neither the second transformer
+layer nor the KL anchor costs throughput. Only the collector did.
+
+**The league was 250,000 frames wide.** `pool_size` times `snapshot_interval` is
+how much history the learner plays against, because the pool keeps the newest
+members and evicts the rest
+(`src/env/opponents/snapshot_opponent_pool.py:113`). At 5 x 50,000 that is about
+four minutes of training at 900 fps, so every opponent is a near-copy of the
+learner and `train/win_rate` pins near 0.5 whatever the policy does. For
+comparison, `weighted_field.yaml` uses 24 x 1,000,000 and
+`ppo_fixed_deck_finetune.yaml` uses 10 x 500,000.
+
+10 x 500,000 rather than 24 x 1,000,000 because a snapshot is 10.1 MB at
+2,525,675 parameters and is held per worker: 24 members across 32 workers adds
+about 6 GB against the 64 G request, where 10 adds about 1.6 GB. On resume the
+pool refills from the 10 newest snapshots on disk, written at the old cadence,
+so the league starts at a 500,000-frame span and widens toward 5M.
+
+**`eval_deterministic: false` made the first segment's eval numbers a floor.**
+The learner sampled its actions while every reference played argmax. Entropy sat
+at 0.882, an effective `exp(H / 0.855)` = 2.80 options against 4.90 mean legal,
+so a large share of the learner's evaluation actions were not its argmax. No
+`eval/*` number below the resume is comparable with anything logged after it.
+
+**`entropy_coeff` ran at 0.02, and outweighed the anchor 3 to 1.** The entropy
+term contributed `entropy_coeff × H` = 0.02 × 0.882 = 0.0177 to the loss against
+the anchor's `kl_anchor_coeff × kl_to_bc` = 0.05 × 0.12 = 0.0060, which made the
+run's one new mechanism the minority term in its own experiment. At 0.005 the
+entropy contribution is about 0.0044 and the ordering reverses. Expect
+`train/entropy` to fall from 0.882 and the effective option count to drop from
+2.80 toward 1.5 to 2.0.
+
+One diagnostic disagreed and is recorded because it may still be right:
+`|loss_entropy| / |loss_objective|` measured 0.355 median (p10-p90 0.31-0.40)
+over the first segment, inside the 0.24-0.38 band earlier runs recorded at
+0.005, because this run's `loss_objective` is about 3x larger. By that measure
+the entropy term was already pulling as hard as in the runs that worked, and
+0.005 puts it at roughly 0.089, below anything previously run.
+
+**None of this diagnoses the flat evaluation curves.** Over the first segment
+the first eight evaluation points against the last eight moved 0.341 to 0.328 on
+`first_snapshot`, 0.822 to 0.813 on `checkpoint` and 0.925 to 0.934 on `random`,
+all inside the 0.075 standard error of a 40-episode measurement, while
+`train/kl_to_bc` held at 0.12, explained variance sat at 0.70 and no non-finite
+gradients appeared. The machinery ran correctly and the policy did not visibly
+improve. Because the learner was sampling against argmax references, those
+numbers are a floor, so whether it improved is not known either way.
+
+`first_snapshot` survives the resume: it resolves by globbing `checkpoint_dir`
+and taking the lowest frame number (`src/training/self_play.py:207`), and the
+checkpoint directory lives in the run directory, which the resume reuses. The
+reference stays the 50,000-frame snapshot on both sides of the boundary.
+
 ## Evaluation during the run
 
 `train.eval_interval: 500000` frames, `eval_episodes: 40`, by argmax
@@ -422,92 +535,15 @@ opponents, logged under `first_snapshot/`, `checkpoint/` and `random/`:
 - `first_snapshot` is the first snapshot the run freezes, which is the clone.
   This is the number that answers whether reinforcement learning improved on
   what it started from.
-- `checkpoint` is pin-175.7M, the best self-play-only agent and the one behind
-  the strongest self-play-only checkpoint. The clone already beats it 0.967 over
-  60 games, so this tracks whether that margin holds. It is rebuilt from the config it embeds, so
-  its 1-layer, 512-wide architecture keeps loading against this run's 2-layer
-  model.
+- `checkpoint` is pin-175.7M, the strongest self-play-only checkpoint. The clone
+  already beats it 0.967 over 60 games, so this tracks whether that margin
+  holds. It is rebuilt from the config it embeds, so its 1-layer, ff-256
+  architecture keeps loading against this run's 2-layer, ff-512 model.
 - `random` stays comparable across runs and does not depend on which snapshot
   was frozen, but it saturates once the policy reliably beats it.
 
 The collected `win_rate` is pinned near 0.5 by construction under self-play and
 says nothing about improvement. Ignore it.
-
-## Changes made during the run
-
-Two settings changed at 8.5M frames, on 2026-08-16, and the run continued from
-`train_state.pt` rather than restarting. `train_state.pt` stores only
-`state_dict`, `optimizer`, `frames` and `torch_rng_state`
-(`src/training/callbacks/train_state_callback.py:128`), so both new values come
-from the config on resume. The weights, Adam moments and frame count carry over.
-
-| setting | 0 to 8.5M frames | after resume |
-| --- | --- | --- |
-| `collector.type` | sync | multi_sync |
-| `agent.entropy_coeff` | 0.02 | 0.005 |
-| `train.eval_deterministic` | false | true |
-
-**`collector.type` was the throughput bug.** `conf/collector/default.yaml:23`
-sets `sync` and this experiment config never overrode it. Under `sync` the
-collector builds one batched environment and runs the **policy forward in the
-main process**, which the Slurm script pins to a single thread with
-`OMP_NUM_THREADS=1`, so the 32 workers only step environments and a deeper
-network serializes the whole collector. Under `multi_sync` each worker process
-holds its own policy copy (`src/training/collectors.py:271` takes
-`make_env_factories`, one single env per worker, so `env.parallel` is not read
-and nothing nests). Measured on the rtx6000 nodes:
-
-| run | collector | workers | layers / ff | fps |
-| --- | --- | --- | --- | --- |
-| `tf-ptr-weighted-15m-s42`, six runs | multi_sync | 32 | 1 / 256 | 894-925 |
-| `fixed-deck-frozen-30m-s42` | multi_sync | 16 | 1 / 256 | 536-554 |
-| `fixed-deck-expert30-frozen-kl005-30m-s42` | multi_sync | 16 | 2 / 512 | 537 |
-| e4p5tnwg, first segment | sync | 32 | 2 / 512 | 258 |
-
-The third row is this run's architecture and anchor at 16 workers under
-multi_sync, and it matches the small model exactly, so neither the second
-transformer layer nor the KL anchor costs throughput. Only the collector did.
-
-**`eval_deterministic` was wrong for the whole first segment.** The default in
-`conf/train/ppo_selfplay.yaml:22` is `false`, so the learner sampled its actions
-while every reference played argmax. Entropy sat at 0.882, an effective
-`exp(H / 0.855)` = 2.80 options against 4.90 mean legal, so a large share of the
-learner's evaluation actions were not its argmax. Every `eval/*` number below
-8.5M frames is therefore a floor, not a measurement, and is not comparable with
-anything logged after the resume.
-
-**`entropy_coeff` ran at 0.02 by accident for the first segment.**
-`conf/experiment/kl_anchored_selfplay.yaml` had no `entropy_coeff` line and
-inherited the 0.02 default in `conf/agent/ppo.yaml`. The two configs behind
-earlier usable policies both override it to 0.005
-(`conf/experiment/weighted_field.yaml:106`,
-`conf/experiment/deck_pinned_150m_local.yaml:38`); this one did not.
-
-The reason for moving to 0.005 is the anchor, not the earlier runs. At 0.02 the
-entropy term contributed `entropy_coeff × H` = 0.02 × 0.882 = 0.0177 to the
-loss, against the anchor's `kl_anchor_coeff × kl_to_bc` = 0.05 × 0.12 = 0.0060.
-The entropy bonus outweighed the anchor about 3 to 1, which makes the run's one
-new mechanism the minority term in its own experiment. At 0.005 the entropy
-contribution is about 0.0044 and the ordering reverses.
-
-The competing diagnostic did not support the change, and is recorded here
-because it may still be right: `|loss_entropy| / |loss_objective|` measured
-0.355 median (p10-p90 0.31-0.40) over the first segment, already inside the
-0.24-0.38 band the earlier runs recorded at 0.005, because this run's
-`loss_objective` is about 3x larger. By that measure the entropy term was
-already pulling as hard as it did in the runs that worked, and 0.005 puts it at
-roughly 0.089, below anything previously run. Expect `train/entropy` to fall
-from 0.882 and the effective option count `exp(H / 0.855)` to drop from 2.80
-toward 1.5 to 2.0 against 4.90 mean legal options.
-
-Neither change is a diagnosis. The first segment was flat for a reason that is
-still unknown, and 0.02 does not explain it.
-
-`first_snapshot` survives the resume: it resolves by globbing `checkpoint_dir`
-and taking the lowest frame number (`src/training/self_play.py:207`), and the
-checkpoint directory lives in the run directory, which the resume reuses. The
-reference stays the 50,000-frame snapshot on both sides of the boundary.
-
 
 ## Launching on Habrok
 

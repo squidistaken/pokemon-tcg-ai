@@ -7,13 +7,16 @@ on that same list. This replays the head-to-head on decks it never trained on.
 If the margin survives, the run learned to play; if it collapses to ~0.5, the
 margin was the training distribution.
 """
-import sys
+
+import argparse
+import random
 from pathlib import Path
 
 import torch
 from omegaconf import OmegaConf
 from torchrl.data import Binary, Categorical, Composite, Unbounded
 
+from src.env.battle_handle import BattleHandle
 from src.env.decks.deck import load_deck
 from src.env.decks.deck_sampler import FixedDeckSampler
 from src.env.observation.structured_observation_encoder import (
@@ -22,26 +25,38 @@ from src.env.observation.structured_observation_encoder import (
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent
 from src.policies.ppo_actor import build_actor_critic
 from src.training.cross_play import play_series
-from src.env.battle_handle import BattleHandle
-import random
 
 MAX_OPTIONS = 128
-WEIGHTED = Path("outputs/weighted-field-20260808/tf-ptr-weighted-15m-s42/checkpoints")
-PINNED = Path("outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/checkpoints")
-
-DECKS = {
-    "alakazam-dudunsparce-4 (pin's home deck)":
-        "decks/top20/alakazam-dudunsparce/alakazam-dudunsparce-4.csv",
-    "dragapult-dudunsparce":
-        "decks/top20/dragapult-dudunsparce",
-    "rockets-honchkrow":
-        "decks/top20/rockets-honchkrow",
-    "lucario-hariyama":
-        "decks/top20/lucario-hariyama",
-}
+# Defaults for the runs this measurement came from, all overridable. They point
+# into outputs/ and decks/, neither of which is in the repository, so on any
+# other checkout every one of these has to be passed explicitly.
+DEFAULT_SUBJECT = (
+    "outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/checkpoints/"
+    "snapshot_000173670400.pt"
+)
+DEFAULT_OPPONENTS = (
+    "outputs/weighted-field-20260808/tf-ptr-weighted-15m-s42/checkpoints/"
+    "snapshot_000150011904.pt",
+    "outputs/weighted-field-20260808/tf-ptr-weighted-15m-s42/checkpoints/"
+    "snapshot_000181518336.pt",
+)
+# The first entry is the subject's home deck, the rest are lists it never
+# trained on. That contrast is the whole measurement.
+DEFAULT_DECKS = (
+    "decks/top20/alakazam-dudunsparce/alakazam-dudunsparce-4.csv",
+    "decks/top20/dragapult-dudunsparce",
+    "decks/top20/rockets-honchkrow",
+    "decks/top20/lucario-hariyama",
+)
 
 
 def build_policy(path: Path) -> GreedyPolicyOpponent:
+    """
+    Rebuild a checkpoint as a greedy policy, using its own embedded config.
+
+    :param path: Snapshot to load.
+    :return: Greedy policy over that checkpoint.
+    """
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     config = OmegaConf.create(checkpoint["config"])
     encoder = StructuredObservationEncoder(max_options=MAX_OPTIONS)
@@ -60,32 +75,68 @@ def build_policy(path: Path) -> GreedyPolicyOpponent:
 
 
 def resolve_deck(spec: str) -> str:
+    """
+    Accept either a decklist path or a directory holding one.
+
+    :param spec: Path to a CSV or to an archetype directory.
+    :return: A concrete decklist path.
+    """
     path = Path(spec)
-    if path.is_file():
-        return str(path)
-    lists = sorted(path.glob("*.csv"))
-    return str(lists[0])
+    return str(path) if path.is_file() else str(sorted(path.glob("*.csv"))[0])
 
 
 def main() -> None:
-    n_games = int(sys.argv[1]) if len(sys.argv) > 1 else 40
-    pin = build_policy(PINNED / "snapshot_000173670400.pt")
-    wf150 = build_policy(WEIGHTED / "snapshot_000150011904.pt")
-    wf181 = build_policy(WEIGHTED / "snapshot_000181518336.pt")
+    """
+    Play the subject against each opponent on every deck and print the grid.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--games", type=int, default=40)
+    parser.add_argument(
+        "--subject",
+        type=Path,
+        default=Path(DEFAULT_SUBJECT),
+        help="Snapshot under test, played as player A.",
+    )
+    parser.add_argument(
+        "--opponents",
+        type=Path,
+        nargs="+",
+        default=[Path(spec) for spec in DEFAULT_OPPONENTS],
+        help="Snapshots to score it against, one column each.",
+    )
+    parser.add_argument(
+        "--decks",
+        nargs="+",
+        default=list(DEFAULT_DECKS),
+        help="Decks to replay on, home deck first. A file, or a directory to "
+        "take the first list from.",
+    )
+    args = parser.parse_args()
+
+    subject = build_policy(args.subject)
+    opponents = [build_policy(path) for path in args.opponents]
     handle = BattleHandle()
-    print(f"pin-173M as player A, {n_games} games per cell, mirror matchups\n")
-    print(f"{'deck':42} {'vs wf-150M':>12} {'vs wf-181M':>12}")
+    print(
+        f"{args.subject.stem} as player A, {args.games} games per cell, "
+        "mirror matchups\n"
+    )
+    header = "".join(f"{path.stem[-12:]:>16}" for path in args.opponents)
+    print(f"{'deck':42}{header}")
     try:
-        for label, spec in DECKS.items():
+        for spec in args.decks:
             deck = load_deck(resolve_deck(spec))
-            row = []
-            for opponent in (wf150, wf181):
+            cells = []
+            for opponent in opponents:
                 result = play_series(
-                    handle, pin, opponent, FixedDeckSampler(deck, deck),
-                    n_games, random.Random(5),
+                    handle,
+                    subject,
+                    opponent,
+                    FixedDeckSampler(deck, deck),
+                    args.games,
+                    random.Random(5),
                 )
-                row.append(result.score)
-            print(f"{label:42} {row[0]:>12.2f} {row[1]:>12.2f}")
+                cells.append(f"{result.score:>16.2f}")
+            print(f"{Path(spec).stem:42}{''.join(cells)}")
     finally:
         handle.finish()
 
