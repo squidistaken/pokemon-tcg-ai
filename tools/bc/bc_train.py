@@ -7,9 +7,7 @@ the acting seat. That value target is the thing self-play never supplied: a
 critic trained on actual games rather than on a league's opinion of itself.
 
 Architecture and checkpoint layout are copied from a reference snapshot, so the
-result loads in the existing eval and submission paths without changes. The
-card-effect ablation is a pure model-config switch, because the dataset stores
-card ids and the effect columns are looked up inside the adapter.
+result loads in the existing eval and submission paths without changes.
 """
 import argparse
 import math
@@ -34,7 +32,6 @@ REFERENCE = (
 
 
 def build_config(
-    card_effect_features: bool,
     num_layers: int | None = None,
     ff_dim: int | None = None,
     dropout: float | None = None,
@@ -46,7 +43,6 @@ def build_config(
     demand. Cloning a fixed corpus of over a million decisions is a different
     regime, so the backbone is allowed to grow here.
 
-    :param card_effect_features: Whether the adapter appends effect columns.
     :param num_layers: Transformer layers, or None to keep the reference value.
     :param ff_dim: Feed-forward width, or None to keep the reference value.
     :param dropout: Dropout probability, or None to keep the reference value.
@@ -55,7 +51,6 @@ def build_config(
     reference = torch.load(REFERENCE, map_location="cpu", weights_only=False)
     config = OmegaConf.create(reference["config"])
     OmegaConf.set_struct(config, False)
-    config.model.adapter.card_effect_features = bool(card_effect_features)
     if num_layers is not None:
         config.model.backbone.num_layers = int(num_layers)
     if ff_dim is not None:
@@ -257,9 +252,7 @@ def train(args) -> None:
         flush=True,
     )
 
-    config = build_config(
-        args.card_effect_features, args.num_layers, args.ff_dim, args.dropout
-    )
+    config = build_config(args.num_layers, args.ff_dim, args.dropout)
     network = build_network(config).to(device)
     parameters = sum(p.numel() for p in network.parameters())
     optimizer = torch.optim.AdamW(
@@ -273,7 +266,6 @@ def train(args) -> None:
         name=args.wandb_name,
         config={
             "arm": args.wandb_name,
-            "card_effect_features": bool(args.card_effect_features),
             "dataset": str(args.dataset),
             "samples": total,
             "split": args.split,
@@ -379,7 +371,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=Path("logs/bc_dataset.pt"))
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--card-effect-features", action="store_true")
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--num-layers", type=int, default=None)
     parser.add_argument("--ff-dim", type=int, default=None)

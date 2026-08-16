@@ -52,15 +52,14 @@ def build_policy(path: Path) -> GreedyPolicyOpponent:
     """
     Rebuild a checkpoint as a greedy policy, using its own embedded config.
 
-    Each arm carries its own architecture in the snapshot, so the card-effect
-    arms rebuild at their wider card representation without any extra flag.
+    Each arm carries its own architecture in the snapshot, so it rebuilds at its
+    original width without any extra flag.
 
     :param path: Snapshot to load.
     :return: Greedy policy over that checkpoint.
     """
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     config = OmegaConf.create(checkpoint["config"])
-    effects = bool(config.model.get("adapter", {}).get("card_effect_features", False))
     encoder = StructuredObservationEncoder(max_options=MAX_OPTIONS)
     n_actions = MAX_OPTIONS + 1
     obs_spec = Composite(
@@ -73,7 +72,7 @@ def build_policy(path: Path) -> GreedyPolicyOpponent:
         config, obs_spec, Categorical(n_actions, dtype=torch.int64)
     )
     network.load_state_dict(checkpoint["state_dict"], strict=True)
-    print(f"  loaded {path.name} (card_effect_features={effects})")
+    print(f"  loaded {path.name}")
     return GreedyPolicyOpponent(network, encoder)
 
 

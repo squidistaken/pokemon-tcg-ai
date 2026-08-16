@@ -3,8 +3,6 @@ from tensordict import TensorDict
 
 from cg.api import all_attack, all_card_data
 
-from .card_effect_features import CardEffectFeatures
-
 
 class CardDatabase:
     """
@@ -30,15 +28,9 @@ class CardDatabase:
     ENERGY_TYPE_COUNT = 12
     MAX_ATTACKS_PER_CARD = 2
 
-    def __init__(self, effect_features: bool = False) -> None:
+    def __init__(self) -> None:
         """
         Load the card and attack lists from the engine and build the tables.
-
-        :param effect_features: Append the parsed card-text effect columns
-            (:class:`~src.env.observation.card_effect_features.CardEffectFeatures`)
-            to :attr:`card_features`. Off by default: turning it on widens the
-            card representation, so a checkpoint trained with it set cannot be
-            rebuilt with it clear, and vice versa.
         """
         cards = all_card_data()
         attacks = all_attack()
@@ -90,12 +82,6 @@ class CardDatabase:
             ):
                 self._card_attack_ids[row, column] = attack_id
 
-        if effect_features:
-            effects = CardEffectFeatures(n_card_rows)
-            self._card_features = torch.cat(
-                [self._card_features, effects.features], dim=1
-            )
-
         n_attack_rows = max(attack.attackId for attack in attacks) + 1
         self._attack_features = torch.zeros(
             n_attack_rows, self.ATTACK_FEATURE_COUNT, dtype=torch.float32
@@ -119,11 +105,8 @@ class CardDatabase:
 
         Columns: hp, retreat cost, basic, stage1, stage2, ex, mega ex, tera,
         ace spec, skill count, attack count, exists flag (0 on unused rows).
-        With ``effect_features`` set, the parsed card-text columns named in
-        ``CardEffectFeatures.FEATURE_NAMES`` follow them.
 
-        :return: Float32 tensor of shape ``(max_card_id + 1, C)``, where ``C``
-            is ``CARD_FEATURE_COUNT`` plus the effect columns when enabled.
+        :return: Float32 tensor of shape ``(max_card_id + 1, CARD_FEATURE_COUNT)``.
         """
         return self._card_features
 

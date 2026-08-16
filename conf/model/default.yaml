@@ -55,22 +55,5 @@ adapter:
   # at its original width to serve as an evaluation opponent, and the deployed
   # Kaggle agent has to keep running.
   option_target_state: true
-  # Give each card its printed effect as features instead of only an ID and its
-  # stats. The engine exposes no card text (cg.api.Card is id/serial/owner), so
-  # with this off the only thing separating "search your deck for a Basic" from
-  # "place damage counters for each card in your hand" is a learned index the
-  # network has to fit from the terminal reward. CardEffectFeatures parses
-  # scraper/EN_Card_Data.csv into 24 columns (draws, searches, bench/hand
-  # placement, heals, discards, switches, damage counters, per-each scaling,
-  # status, energy attachment, coin flips, ability flag) and appends them to
-  # CardDatabase.card_features.
-  #
-  # Widens the card representation 12 -> 36, so a checkpoint trained with this
-  # set cannot rebuild against a config that has it clear, and vice versa; the
-  # strict load fails loudly. Off by default so existing snapshots and the
-  # deployed Kaggle agent keep loading. NOTE: submission/runtime.py carries its
-  # own copy of the card tables, so turning this on for a submitted run needs
-  # the same columns ported there.
-  card_effect_features: false
   # emit_option_tokens is not set here: build_actor_critic derives it from the
   # selected head, so the two can never disagree.
