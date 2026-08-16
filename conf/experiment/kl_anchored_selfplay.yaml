@@ -76,11 +76,22 @@ agent:
 train:
   # Weights only, so Adam restarts from zero.
   init_checkpoint: outputs/bc/bc-v6-submit.pt
+  # ppo_selfplay_multideck raises eval_episodes to 150. Measured locally, 150
+  # episodes against one opponent takes 3.3 minutes; three opponents every
+  # 50,000 frames would cost about 10 minutes per round against 56 seconds of
+  # collection at 890 fps, so evaluation would consume most of a 24-hour
+  # allocation. 40 episodes every 500,000 frames costs roughly 2.5 minutes per
+  # 9 minutes of collection.
+  eval_episodes: 40
+  eval_interval: 500000
   # Three references every eval round:
-  #   first_snapshot  the clone itself, so this answers whether reinforcement
-  #                   learning improved on what it started from
-  #   checkpoint      pin-175.7M, the best self-play-only agent (Kaggle 628.6),
-  #                   which the clone already beats 0.967 over 60 games
+  #   first_snapshot  the oldest snapshot this run froze, written at 50,000
+  #                   frames, so it is the clone plus a little training rather
+  #                   than the clone exactly. Below 0.5 here means the policy
+  #                   is going backwards.
+  #   checkpoint      pin-175.7M, the strongest self-play-only checkpoint. Never
+  #                   submitted itself; that family scored 521 to 570 on Kaggle.
+  #                   The clone beats it 0.967 greedy over 60 games.
   #   random          comparable across runs, but saturates early
   # The reference is rebuilt from the config it embeds, so its 1-layer/ff-256
   # architecture keeps loading against this run's 2-layer/ff-512 model.

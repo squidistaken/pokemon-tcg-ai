@@ -38,8 +38,20 @@ if [ ! -f "$BC_CHECKPOINT" ]; then
   exit 1
 fi
 
-if [ ! -d "decks/expert_pool" ]; then
-  echo "ERROR: decks/expert_pool is missing; the deck pool is not in the repo." >&2
+# decks/ is gitignored, so the pool does not arrive with a git pull.
+DECK_POOL="${DECK_POOL:-decks/expert_pool_30}"
+if [ ! -d "$DECK_POOL" ] || [ -z "$(ls -A "$DECK_POOL" 2>/dev/null)" ]; then
+  echo "ERROR: deck pool $DECK_POOL is missing or empty." >&2
+  echo "       rsync -av decks/expert_pool_30/ <host>:\$PWD/decks/expert_pool_30/" >&2
+  exit 1
+fi
+
+# A missing eval opponent raises inside src.train at the first evaluation,
+# which is 50,000 frames into an allocation. Fail here instead.
+EVAL_OPPONENT_CHECKPOINT="${EVAL_OPPONENT_CHECKPOINT:-outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/checkpoints/snapshot_000175702016.pt}"
+if [ ! -f "$EVAL_OPPONENT_CHECKPOINT" ]; then
+  echo "ERROR: eval opponent checkpoint not found: $EVAL_OPPONENT_CHECKPOINT" >&2
+  echo "       Copy it across, or drop it from train.eval_opponents." >&2
   exit 1
 fi
 
@@ -54,7 +66,7 @@ RUN_DIR="outputs/$WANDB_GROUP/$RUN_NAME"
 # or python3.13, and a guard that misses lets a second run share the GPU and
 # exhaust it. Bracketed first character so the pattern cannot match this
 # script's own command line.
-if pgrep -f "[-]m [s]rc.train" > /dev/null; then
+if pgrep -u "$(id -u)" -f "[-]m [s]rc.train" > /dev/null; then
   echo "ERROR: another src.train process is running and this run wants the same GPU." >&2
   exit 1
 fi
@@ -76,6 +88,8 @@ echo "Config:     $CONFIG_NAME +experiment=$EXPERIMENT"
 echo "Run dir:    $RUN_DIR"
 echo "Budget:     $TOTAL_FRAMES frames"
 echo "Clone:      $BC_CHECKPOINT"
+echo "Deck pool:  $DECK_POOL ($(ls -1 "$DECK_POOL" | wc -l) decks)"
+echo "Eval ref:   $EVAL_OPPONENT_CHECKPOINT"
 
 ./scripts/train_supervised.sh \
   --run-dir "$RUN_DIR" \
@@ -87,6 +101,8 @@ echo "Clone:      $BC_CHECKPOINT"
   "wandb.name=$RUN_NAME" \
   "agent.kl_anchor_checkpoint=$BC_CHECKPOINT" \
   "train.init_checkpoint=$BC_CHECKPOINT" \
+  "train.eval_opponent_checkpoint=$EVAL_OPPONENT_CHECKPOINT" \
+  "env.deck_pool=$DECK_POOL" \
   ${WORKER_OVERRIDE[@]+"${WORKER_OVERRIDE[@]}"} \
   "$@" \
   2>&1 | tee "$LOG"

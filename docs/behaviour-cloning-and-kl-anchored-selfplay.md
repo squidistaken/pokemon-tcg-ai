@@ -430,23 +430,79 @@ says nothing about improvement. Ignore it.
 Evaluation samples while deployment plays greedily, so these scores read lower
 than head-to-head results from `tools/bc/head_to_head.py`.
 
-## Launching
+## Launching on Habrok
 
-Hyperparameters live in `conf/experiment/kl_anchored_selfplay.yaml`.
-`scripts/train_kl_anchored_selfplay.sh` wraps the crash supervisor and refuses
-to start if the clone checkpoint is missing, because without it the run would
-train from scratch anchored to random weights and still look healthy.
+The project runs from scratch storage, `/scratch/s4325621/pokemon-tcg-ai`, not
+from home. `paths.data_dir` and `paths.output_dir` are relative (`decks` and
+`outputs`), so running from that directory resolves everything to scratch with
+no overrides. Hyperparameters live in
+`conf/experiment/kl_anchored_selfplay.yaml`.
+
+### Sync
 
 ```bash
-rsync -av outputs/bc/bc-v6-submit.pt habrok:<project>/outputs/bc/
-sbatch slurm-conf/train_kl_anchored.sh          # RTX Pro 6000, 32 CPUs, 24h
-RESUME=1 sbatch slurm-conf/train_kl_anchored.sh # continue after the time limit
+./scripts/habrok_sync_kl_anchored.sh
 ```
 
-The checkpoint is 10 MB and the deck pool is in the repo, so that is the only
-transfer. W&B group `kl-anchored-selfplay-20260816`.
+It sends the code with `rsync --delete`, then three things the code sync
+deliberately excludes:
 
-For a short local probe:
+| what | why it needs sending separately |
+| --- | --- |
+| `decks/` | gitignored, so it never arrives with the code |
+| `outputs/bc/bc-v6-submit.pt` | `/outputs` is excluded from the code sync |
+| `.../snapshot_000175702016.pt` | the eval reference, same exclusion |
+
+The script fails before touching anything if one of the three is missing
+locally, and lists them on the remote afterwards. It never sends
+`train_state.pt`, so it cannot overwrite a run already in progress.
+
+### Submit
+
+```bash
+cd /scratch/s4325621/pokemon-tcg-ai
+sbatch slurm-conf/train_kl_anchored_smoke.sh   # 30 min, any GPU
+```
+
+The smoke job requests no GPU type, so it takes whatever is free and queues
+briefly. 200,000 frames with evaluation forced to every 50,000 frames and 6
+episodes, which exercises all three eval opponents. `ATTEMPTS=1`, so a failure
+surfaces instead of being retried away. It prints `SMOKE OK` on success.
+
+Only after that passes:
+
+```bash
+sbatch slurm-conf/train_kl_anchored.sh         # 24 h, RTX Pro 6000
+```
+
+It uses a separate run directory and W&B group, so the smoke test cannot
+collide with it.
+
+```bash
+squeue -u $USER
+tail -f slurm-conf/logs/pokemon-tcg-kl-smoke_<jobid>.out
+tail -f slurm-conf/logs/pokemon-tcg-kl-anchored_<jobid>.out
+```
+
+`RESUME=1 sbatch slurm-conf/train_kl_anchored.sh` continues from
+`train_state.pt` after the time limit.
+
+### What stops the run failing
+
+| guard | catches |
+| --- | --- |
+| clone checkpoint check | a run that would train from scratch anchored to random weights and still look healthy |
+| deck pool check | an empty or missing `decks/expert_pool_30` |
+| eval reference check | a missing `snapshot_000175702016.pt`, which otherwise raises at the first evaluation, 50,000 frames in |
+| `pgrep -u "$(id -u)"` | a second run of your own competing for the GPU, without tripping on other users' jobs |
+| CUDA and engine preflight | a node where PyTorch cannot see the GPU, or the vendored engine will not load |
+| `--attempts 10` | a crash mid-run; the supervisor restarts from `train_state.pt` |
+
+`train_state.pt` is written every 250,000 frames and league snapshots every
+50,000, so a crash costs a few minutes at most and there is always a
+submittable checkpoint.
+
+### A short local probe
 
 ```bash
 uv run python -m src.train --config-name ppo_selfplay_multideck \
