@@ -6,8 +6,8 @@ decision, asks the submission's torch-only runtime for its pick from the same
 engine observation. Any disagreement means the deployed agent is not the agent
 that was trained.
 """
+import argparse
 import json
-import sys
 from dataclasses import asdict
 from pathlib import Path
 
@@ -26,33 +26,38 @@ from src.policies.ppo_actor import build_actor_critic
 from submission.cg_api import to_observation_class
 from submission.runtime import Policy
 
-BUNDLE = Path("submissions/bc-v6-expert-top1")
-CHECKPOINT = "outputs/bc/bc-v6-submit.pt"
-DECK = "decks/expert_top1.csv"
-MAX_OPTIONS = 128
+DEFAULT_BUNDLE = Path("submissions/bc-v6-expert-top1")
+DEFAULT_CHECKPOINT = "outputs/bc/bc-v6-submit.pt"
+DEFAULT_DECK = "decks/expert_top1.csv"
+DEFAULT_MAX_OPTIONS = 128
 
 
-def load_bundle_policy() -> Policy:
+def load_bundle_policy(bundle: Path) -> Policy:
     """
     Rebuild the exact policy the Kaggle bundle runs.
 
+    :param bundle: Directory holding the packaged ``model.pt`` and config.
     :return: The bundle's torch-only inference policy.
     """
-    config = json.loads((BUNDLE / "model_config.json").read_text())
-    payload = torch.load(BUNDLE / "model.pt", map_location="cpu", weights_only=True)
+    config = json.loads((bundle / "model_config.json").read_text())
+    payload = torch.load(bundle / "model.pt", map_location="cpu", weights_only=True)
     return Policy(payload, config)
 
 
-def load_training_policy() -> GreedyPolicyOpponent:
+def load_training_policy(
+    checkpoint_path: str, max_options: int
+) -> GreedyPolicyOpponent:
     """
     Rebuild the training-side actor-critic from the same checkpoint.
 
+    :param checkpoint_path: Snapshot the bundle was exported from.
+    :param max_options: Action head width the training encoder used.
     :return: A greedy policy over the training network and encoder.
     """
-    checkpoint = torch.load(CHECKPOINT, map_location="cpu", weights_only=False)
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     config = OmegaConf.create(checkpoint["config"])
-    encoder = StructuredObservationEncoder(max_options=MAX_OPTIONS)
-    n_actions = MAX_OPTIONS + 1
+    encoder = StructuredObservationEncoder(max_options=max_options)
+    n_actions = max_options + 1
     obs_spec = Composite(
         observation=encoder.spec(),
         action_mask=Binary(n=n_actions, dtype=torch.bool),
@@ -66,10 +71,18 @@ def load_training_policy() -> GreedyPolicyOpponent:
 
 
 def main() -> None:
-    bundle_policy = load_bundle_policy()
-    train_policy = load_training_policy()
-    deck = load_deck(DECK)
-    games = int(sys.argv[1]) if len(sys.argv) > 1 else 5
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--bundle", type=Path, default=DEFAULT_BUNDLE)
+    parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
+    parser.add_argument("--deck", default=DEFAULT_DECK)
+    parser.add_argument("--max-options", type=int, default=DEFAULT_MAX_OPTIONS)
+    parser.add_argument("--games", type=int, default=5)
+    args = parser.parse_args()
+
+    bundle_policy = load_bundle_policy(args.bundle)
+    train_policy = load_training_policy(args.checkpoint, args.max_options)
+    deck = load_deck(args.deck)
+    games = args.games
     agree = disagree = 0
     examples: list[tuple[int, list[int], list[int]]] = []
     for game in range(games):
