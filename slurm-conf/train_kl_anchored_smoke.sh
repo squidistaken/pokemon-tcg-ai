@@ -136,7 +136,7 @@ case "$SMOKE_DIR" in
   *) echo "ERROR: refusing to clear '$SMOKE_DIR'; it is not the smoke run." >&2; exit 1 ;;
 esac
 rm -rf "$SMOKE_DIR"
-mkdir -p "$SMOKE_DIR/checkpoints"
+mkdir -p "$SMOKE_DIR"
 
 if [ "$RESUME_FLAG" = "1" ]; then
   if [ ! -f "$REAL_DIR/train_state.pt" ]; then
@@ -144,6 +144,10 @@ if [ "$RESUME_FLAG" = "1" ]; then
     echo "       Submit without the flag to test a cold start instead." >&2
     exit 1
   fi
+  # The checkpoints directory is created here, only on resume, because
+  # _resolve_checkpoint_dir (src/trainer_builder.py) refuses a pre-existing
+  # directory on a cold start: it would mean a second run owns the league.
+  mkdir -p "$SMOKE_DIR/checkpoints"
   # Copies only. The real run directory is read here and never written.
   cp "$REAL_DIR/train_state.pt" "$SMOKE_DIR/train_state.pt"
 

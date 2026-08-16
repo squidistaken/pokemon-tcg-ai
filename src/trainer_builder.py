@@ -533,8 +533,13 @@ def _resolve_checkpoint_dir(cfg: DictConfig) -> Path:
         # so its contents and lifecycle are theirs to manage.
         return configured
     resolved = Path(HydraConfig.get().runtime.output_dir) / configured
+    # A resume reuses the run directory it is resuming, whose league already
+    # lives here: refusing it would make every resume fail at startup. A cold
+    # start must not find a directory, because that would mean a second run
+    # shares this path and would mix its snapshots into the league.
+    resuming = bool(cfg.train.get("resume_state"))
     try:
-        resolved.mkdir(parents=True, exist_ok=False)
+        resolved.mkdir(parents=True, exist_ok=resuming)
     except FileExistsError:
         raise RuntimeError(
             f"Snapshot directory {resolved} already exists, so another run owns it. "
