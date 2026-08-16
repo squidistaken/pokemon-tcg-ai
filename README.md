@@ -173,6 +173,15 @@ uv run python -m submission_analysis deck-report --deck decks/example.csv  # ref
 uv run python -m submission_analysis scout --deck decks/example.csv        # top teams' decks
 ```
 
+[`tools/leaderboard/`](tools/leaderboard/README.md) plots what those submissions are worth. Each
+run fetches the submission list and the public leaderboard again, so the figure always shows the
+current ratings:
+
+```bash
+uv run python tools/leaderboard/elo_progression.py         # -> outputs/leaderboard/elo_progression.png
+uv run python tools/leaderboard/elo_progression.py --output docs/elo.pdf
+```
+
 ## Slurm
 
 [`slurm-conf/`](slurm-conf/README.md) holds the profiles and job scripts for running on a
@@ -211,6 +220,8 @@ tools/bc/              Behaviour cloning: decision extraction from the daily exp
                        training, head-to-head evaluation
 tools/analysis/        Deployment parity check: the packaged Kaggle bundle must
                        play the same moves as the trained policy
+tools/leaderboard/     Elo progression figure: fetches our Kaggle submissions and the
+                       public leaderboard, plots them with seaborn
 slurm-conf/            Slurm profiles, uv setup, job scripts
 submission/            Kaggle entryfile, pure-Python obs parser, torch-only runtime
 submission_analysis/   `python -m submission_analysis <status|episodes|deck-report|scout>`
