@@ -74,7 +74,6 @@ encoded observation into tokens, a `TransformerBackbone` reads them, and a
 ## Also here
 
 - `head_to_head.py` — play two checkpoints against each other.
-- `judge_arms.py` — score experiment arms against a baseline across decks.
 - `lookahead.py`, `mc_rollout.py`, `mcts.py` — search over the engine's
   determinized simulator, wrapping a checkpoint.
 - `critic_calibration.py` — correlate the critic's value against real outcomes.
