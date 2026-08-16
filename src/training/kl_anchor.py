@@ -66,9 +66,7 @@ class KLAnchor(nn.Module):
         :param mask: Boolean legality mask of the same shape.
         :return: Log-probabilities, finite everywhere.
         """
-        return torch.log_softmax(
-            logits.masked_fill(~mask, cls.ILLEGAL_LOGIT), dim=-1
-        )
+        return torch.log_softmax(logits.masked_fill(~mask, cls.ILLEGAL_LOGIT), dim=-1)
 
     def forward(self, minibatch: TensorDict, policy_logits: torch.Tensor):
         """

@@ -682,9 +682,7 @@ class PPOTrainer(Trainer):
                 total_loss = _sum_loss_keys(loss_vals)
                 if self._kl_anchor is not None:
                     scored = self._actor_critic(mb.select("observation").clone())
-                    anchor_loss, anchor_kl = self._kl_anchor(
-                        mb, scored.get("logits")
-                    )
+                    anchor_loss, anchor_kl = self._kl_anchor(mb, scored.get("logits"))
                     total_loss = total_loss + anchor_loss
                     anchor_kl_accum += float(anchor_kl)
                     anchor_batches += 1

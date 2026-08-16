@@ -144,7 +144,9 @@ def build_actor_critic(
                 sorted(unknown),
             )
             adapter_kwargs = {
-                key: value for key, value in adapter_kwargs.items() if key in adapter_params
+                key: value
+                for key, value in adapter_kwargs.items()
+                if key in adapter_params
             }
         adapter = StructuredObsAdapter(
             obs_spec=obs_spec, in_keys=in_keys, **adapter_kwargs
