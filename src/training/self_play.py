@@ -605,6 +605,7 @@ def _load_snapshot(
         encoder,
         device="cpu",
         action_selection=str(
-            cfg.train.get("opponent_action_selection", "greedy") or "greedy"
+            cfg.get("train", {}).get("opponent_action_selection", "greedy")
+            or "greedy"
         ),
     )
