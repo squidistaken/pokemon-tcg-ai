@@ -1,3 +1,5 @@
+import inspect
+import logging
 import math
 
 from hydra.utils import get_class, instantiate
@@ -18,6 +20,7 @@ LOGITS_KEY = "logits"
 VALUE_KEY = "state_value"
 ACTION_MASK_KEY = "action_mask"
 ACTION_KEY = "action"
+logger = logging.getLogger(__name__)
 # The environment nests the encoder's output under "observation". These are
 # the structured encoder's top-level groups (see StructuredObservationEncoder
 # .spec()); MLPBackbone flattens each and concatenates them.
@@ -127,6 +130,24 @@ def build_actor_critic(
         adapter_kwargs["emit_option_tokens"] = (
             needs_option_repr and not backbone_builds_tokens
         )
+        # Snapshots embed their adapter config, so a checkpoint written before
+        # a parameter was removed still carries the stale key (e.g.
+        # ``card_effect_features``). Filter against the adapter's real
+        # signature rather than passing it through and crashing, so those
+        # checkpoints keep rebuilding at the width they were trained with.
+        adapter_params = inspect.signature(StructuredObsAdapter.__init__).parameters
+        unknown = set(adapter_kwargs) - set(adapter_params)
+        if unknown:
+            logger.warning(
+                "Dropping stale/unknown adapter config keys %s; the adapter "
+                "will use its defaults for them.",
+                sorted(unknown),
+            )
+            adapter_kwargs = {
+                key: value
+                for key, value in adapter_kwargs.items()
+                if key in adapter_params
+            }
         adapter = StructuredObsAdapter(
             obs_spec=obs_spec, in_keys=in_keys, **adapter_kwargs
         )

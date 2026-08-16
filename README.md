@@ -195,6 +195,7 @@ src/
   models/              Backbones (mlp, transformer), obs adapter, policy/value heads, ActorCritic
   policies/            Random, greedy, and Kaggle inference policies + the PPO operator builder
   training/            Trainer, PPO, collectors, env factory, self-play, evaluators, cross-play,
+                       kl_anchor.py (KL divergence w.r.t. to a (cloned)ß policy),
                        loss/ and callbacks/ (snapshots, train state, W&B)
   train.py             Hydra entry point (python -m src.train): main() only
   trainer_builder.py   Builds the trainer, callbacks and run paths from the config
@@ -202,6 +203,10 @@ src/
 conf/                  Hydra configs: env/, agent/, model/ (backbone + head), train/,
                        collector/, callbacks/, experiment/, paths/
 scripts/               Dev scripts: corpus building, benchmarks, Kaggle packaging, Slurm launchers
+tools/bc/              Behaviour cloning: decision extraction from the daily export,
+                       training, head-to-head evaluation
+tools/analysis/        Deployment parity check: the packaged Kaggle bundle must
+                       play the same moves as the trained policy
 slurm-conf/            Slurm profiles, uv setup, job scripts
 submission/            Kaggle entryfile, pure-Python obs parser, torch-only runtime
 submission_analysis/   `python -m submission_analysis <status|episodes|deck-report|scout>`
