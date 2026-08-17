@@ -166,6 +166,30 @@ def write_shard(samples: list[dict], destination: Path) -> int:
     return len(samples)
 
 
+def load_team_whitelist(path: Path | None) -> set[str] | None:
+    """
+    Read the teams whose decisions are kept.
+
+    One team name per line, matching ``TeamName`` in the Kaggle leaderboard
+    export exactly. Blank lines and ``#`` comments are ignored. Names carry
+    commas and non-ASCII characters, so this is a file rather than a delimited
+    command-line value.
+
+    :param path: File to read, or None for no filtering.
+    :return: The set of team names, or None when unfiltered.
+    """
+    if path is None:
+        return None
+    names = {
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    if not names:
+        raise ValueError(f"team whitelist {path} is empty")
+    return names
+
+
 def build(
     output: Path,
     max_replays: int,
@@ -173,6 +197,7 @@ def build(
     seed: int,
     replay_glob: str,
     shard_size: int = 1200,
+    team_whitelist: set[str] | None = None,
 ) -> None:
     """
     Encode the replay corpus into a single tensor file.
@@ -184,14 +209,17 @@ def build(
     :param replay_glob: Glob for the flat daily-export directory of
         ``<episode>.json`` files.
     :param shard_size: Replays per memory-mapped shard.
+    :param team_whitelist: Keep only decisions made by a seat belonging to one
+        of these teams. None clones both seats of every game, which fits the
+        whole ladder field rather than the players worth imitating.
     """
     encoder = StructuredObservationEncoder(max_options=MAX_OPTIONS)
     samples: list[dict] = []
-    # The daily export is a flat directory of <episode>.json with no manifest,
-    # already filtered to the top of the ladder. Both seats are cloned because
-    # the acting seat is the only one recorded per step and its team is
-    # unknown; a duplicate path is dropped so a repeated glob never double
-    # counts.
+    # The daily export is a flat directory of <episode>.json with no manifest.
+    # Without a whitelist both seats are cloned, so the corpus is the field
+    # average; `info.TeamNames` is indexed by the same seat number the decision
+    # carries, which is what makes a per-seat rating filter possible. A
+    # duplicate path is dropped so a repeated glob never double counts.
     by_episode: dict[str, Path] = {}
     duplicates = 0
     for path_str in glob.glob(replay_glob):
@@ -214,6 +242,7 @@ def build(
     stop_rows = 0
     shards = 0
     total_rows = 0
+    kept_out = 0
     for count, (episode_id, path) in enumerate(files, start=1):
         try:
             replay = json.loads(path.read_text())
@@ -222,8 +251,14 @@ def build(
             skipped += 1
             continue
         game = int(episode_id) if str(episode_id).isdigit() else count
+        team_names = (replay.get("info") or {}).get("TeamNames") or []
         for payload, position, target, mask, seat, outcome in iter_decisions(replay):
             if winners_only and outcome <= 0.0:
+                continue
+            if team_whitelist is not None and (
+                seat >= len(team_names) or team_names[seat] not in team_whitelist
+            ):
+                kept_out += 1
                 continue
             try:
                 observation = to_dataclass(payload, Observation)
@@ -267,6 +302,11 @@ def build(
     )
     print(f"\nreplays read : {len(files) - skipped}")
     print(f"decisions    : {total_rows}")
+    if team_whitelist is not None:
+        print(
+            f"off-team rows: {kept_out} dropped "
+            f"({kept_out / max(kept_out + total_rows, 1):.1%} of the corpus)"
+        )
     print(f"stop rows    : {stop_rows} ({stop_rows / max(total_rows, 1):.2%})")
     print(f"shards       : {shards}")
     print(f"written to   : {output}")
@@ -285,6 +325,13 @@ def main() -> None:
         "e.g. 'logs/kaggle_episodes/*/*.json'.",
     )
     parser.add_argument("--shard-size", type=int, default=1200)
+    parser.add_argument(
+        "--team-whitelist",
+        type=Path,
+        default=None,
+        help="File of team names, one per line, matching the leaderboard "
+        "export. Only decisions made by a listed team's seat are kept.",
+    )
     args = parser.parse_args()
     build(
         args.output,
@@ -293,6 +340,7 @@ def main() -> None:
         args.seed,
         args.replay_glob,
         args.shard_size,
+        load_team_whitelist(args.team_whitelist),
     )
 
 

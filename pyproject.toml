@@ -37,7 +37,7 @@ dev = [
 
 [tool.pyright]
 # cg/ is vendored engine API code and is deliberately not checked or modified.
-include = ["src", "submission", "tests", "scripts", "main.py"]
+include = ["src", "submission", "tests", "scripts", "main.py", "tools/head_to_head"]
 typeCheckingMode = "basic"
 # tensordict ships no py.typed and types TensorDict.__getitem__ as a broad union
 # (Self | Tensor | ... | Any), so pyright flags valid nested-key indexing like

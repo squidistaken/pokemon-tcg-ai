@@ -66,7 +66,13 @@ RUN_DIR="outputs/$WANDB_GROUP/$RUN_NAME"
 # or python3.13, and a guard that misses lets a second run share the GPU and
 # exhaust it. Bracketed first character so the pattern cannot match this
 # script's own command line.
-if pgrep -u "$(id -u)" -f "[-]m [s]rc.train" > /dev/null; then
+#
+# Skipped under Slurm, which hands each job its own GPU: pgrep sees every
+# process this user owns on the node, so a second arm landing on the same node
+# as a running job was refused although the two never shared a device. Job
+# 30641994 died 18 seconds in on exactly that. The guard is for the desktop,
+# where two launches do land on the one GPU.
+if [ -z "${SLURM_JOB_ID:-}" ] && pgrep -u "$(id -u)" -f "[-]m [s]rc.train" > /dev/null; then
   echo "ERROR: another src.train process is running and this run wants the same GPU." >&2
   exit 1
 fi
