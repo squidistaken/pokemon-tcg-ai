@@ -212,11 +212,13 @@ src/
 conf/                  Hydra configs: env/, agent/, model/ (backbone + head), train/,
                        collector/, callbacks/, experiment/, paths/
 scripts/               Dev scripts: corpus building, benchmarks, Kaggle packaging, Slurm launchers
-tools/bc/              Behaviour cloning: decision extraction from the daily export,
+tools/
+  bc/                  Behaviour cloning: decision extraction from the daily export,
                        training, head-to-head evaluation
-tools/analysis/        Deployment parity check: the packaged Kaggle bundle must
+  head_to_head/        Two-way checkpoint match and its significance test
+  analysis/            Deployment parity check: the packaged Kaggle bundle must
                        play the same moves as the trained policy
-tools/leaderboard/     Elo progression figure: fetches our Kaggle submissions and the
+  leaderboard/         Elo progression figure: fetches our Kaggle submissions and the
                        public leaderboard, plots them with seaborn
 slurm-conf/            Slurm profiles, uv setup, job scripts
 submission/            Kaggle entryfile, pure-Python obs parser, torch-only runtime

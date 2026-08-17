@@ -6,16 +6,19 @@ Two stages, in the order AlphaGo and AlphaStar used. Stage 1 clones expert play
 from Kaggle's published episode exports. Stage 2 runs self-play from that clone
 while a KL term holds the policy near it.
 
-Stage 1 is finished and submitted. Stage 2 is prepared and not yet run.
+Stage 1 is finished and submitted. Stage 2 (kl0.25 on Habrok) ran, then a
+top-25 behavioural-cloning fine-tune was trained on top of it. The final
+submitted agent is `sp11m-top25-meta30`; see [the end of this
+document](#the-submitted-agent-meta30) for the full lineage.
 
 | | |
 | --- | --- |
 | clone checkpoint | `outputs/bc/bc-v6-submit.pt`, SHA-256 prefix `61b740c2df7c` |
 | held-out accuracy | 0.7249 against a 0.3603 base rate |
 | against the previous agent | 0.967 over 60 games (58-2) |
-| Kaggle score | 873.9, against a previous best of 569.9 |
-| submitted | `bc-v6-expert-top1`, Kaggle ref 55536749 |
-| next | `sbatch slurm-conf/train_kl_anchored.sh` |
+| clone's Kaggle score | 873.9, against a previous best of 569.9 |
+| clone submitted | `bc-v6-expert-top1`, Kaggle ref 55536749 |
+| final submitted agent | `sp11m-top25-meta30`, Kaggle ref 55563647, ~1036.8 Elo (rank 63) |
 
 ## Why behaviour cloning
 
@@ -575,3 +578,86 @@ The first ~8M frames trained on inherited defaults that were later corrected:
 `agent.entropy_coeff=0.02` → `0.005`, `train.pool_size=5` → `10`,
 `train.snapshot_interval=50000` → `500000`, `train.pfsp_min_weight=0.05` →
 `0.15`, `train.eval_deterministic=false` → `true`, `set_seed=false` → `true`.
+
+# The submitted agent: meta30
+
+The agent that ended the competition, `sp11m-top25-meta30`, is the product of
+four steps. Each one is a decision the previous step forced, so the whole
+lineage is written down in one place.
+
+## 1. Behavioural clone — `bc-v6-submit.pt`
+
+Detailed above. Cloned from two days of Kaggle ladder exports into the
+transformer + pointer architecture, held-out accuracy 0.7249 against a 0.3603
+base rate. Submitted as `bc-v6-expert-top1`, it scored **873.9**, the first
+jump past the self-play ceiling of ~570-620.
+
+## 2. KL-anchored self-play at coefficient 0.25 — the Habrok run
+
+The clone was continued with PPO on Habrok under `kl_anchor_coeff=0.25`, not
+the 0.05 the body of this document reasons about. Coefficient 0.05 had let
+`kl_to_bc` climb past 0.36 until the policy lost to its own pre-RL ancestor;
+0.25 held it near 0.11. The run is `kl0.25-bcv6-habrok32`, W&B group
+`kl-coeff-ablation-20260816`, out of `/scratch/s4325621/pokemon-tcg-ai-kl025`
+(see `slurm-conf/train_kl025_anchored.sh` and
+`scripts/habrok_sync_kl025_resume.sh`).
+
+
+## 3. Top-25 behavioural-cloning fine-tune — `sp11m-top25.pt`
+
+Rather than abandon the self-play weights, they were used to warm-start a
+second, narrower clone. The data is no longer the whole ladder: it is only the
+decisions of the top 25 teams on the 2026-08-16 public leaderboard (rating
+floor 1104.7, rank 1 at 1268.4). `tools/bc/bc_extract.py --team-whitelist
+logs/bc/teams_top25.txt` keeps only those teams' rows; the 25 names replaced an
+earlier snapshot that shared only 11 of them, so this is genuinely the
+strongest cohort rather than a stale one.
+
+| | |
+| --- | --- |
+| source replays | 13,731 |
+| decisions kept | 595,934 (off-team rows dropped: 1,854,508, 75.7%) |
+| dataset | `logs/bc_dataset_top25` |
+| warm start | `--init-weights snapshot_000011272192.pt`, same as `--reference` |
+| learning rate | 1e-4, 10 epochs, split by game, select on policy loss |
+| best validation | policy loss 0.9060, accuracy 0.6673 against a 0.3306 base rate |
+| checkpoint | `outputs/bc/sp11m-top25.pt`, SHA-256 prefix `bdcb6d116352` |
+
+In two-way head-to-head it measures **0.5150** against the clone (p = 0.49,
++10 Elo) and **0.5350** against the self-play checkpoint it was warm-started
+from (p = 0.094, +24 Elo).
+
+## 4. Deck choice — meta30
+
+Cloning does not choose a deck, so the submission pins one list. The choice was
+made from the ladder, not from local self-play probes (which had proven
+unreliable). meta30 is a **Crustle wall**: Crustle's *Mysterious Rock Inn*
+ability prevents **all** damage from the opponent's ex Pokémon. That is a
+deliberate counter to the field, not a generic-good deck: nearly two-thirds of
+ladder lists run four or more ex/MEGA cards (field-weighted mean ≈ 4.5), so the
+wall blanks a large share of the meta.
+
+meta09 (0.658) and meta05 (0.603) had better standalone win rates, but meta30
+was picked for what it preys on. The list is
+`decks/expert_pool_30/meta30.csv` (4 Crustle, 2 Mega Kangaskhan ex,
+Cornerstone Mask Ogerpon ex, and disruption — Crushing Hammer, Boss's Orders,
+Mist Energy, Spiky Energy).
+
+## 5. Submission and result
+
+`sp11m-top25.pt` on the meta30 deck, submitted greedy (argmax), matches how it
+was evaluated. Label `sp11m-top25-meta30`, Kaggle ref 55563647. As of the
+deadline it held **~1036.8 Elo (20W-6L), rank 63 of 6,888**, beating top-200
+teams 6W-5L. Kaggle tracks the latest two submissions and ranks the team by the
+better of them; meta30 is the better of our latest two (the other is meta05 at
+~830), so it is the number that carries.
+
+### The one-line lineage
+
+```
+Kaggle ladder replays (13-14 Aug)
+  └─ bc-v6-submit.pt            behavioural cloning        → 873.9 Elo
+       └─ kl0.25 self-play      11.27M frames on Habrok
+            └─ sp11m-top25.pt   BC fine-tune, top-25 teams  → 0.5350 vs its init
+                 └─ + meta30    Crustle wall deck           → 1036.8 Elo, rank 63
+```
