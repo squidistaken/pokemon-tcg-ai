@@ -25,6 +25,7 @@ Run from the repository root::
         --source-checkpoint /scratch/run/checkpoints/snapshot_000000004096.pt \
         --source-config /scratch/run/.hydra/config.yaml
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -51,7 +52,9 @@ def parse_args() -> argparse.Namespace:
 
     :return: Parsed arguments.
     """
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument(
         "--source-checkpoint",
         type=Path,
@@ -63,9 +66,14 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="Resolved Hydra config from the training run. If omitted, search parent directories "
-             "of --source-checkpoint for .hydra/config.yaml.",
+        "of --source-checkpoint for .hydra/config.yaml.",
     )
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Directory to write model.pt / model_config.yaml to.")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help="Directory to write model.pt / model_config.yaml to.",
+    )
     return parser.parse_args()
 
 
@@ -122,11 +130,13 @@ def export_inference_checkpoint(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = save_actor_critic(actor_critic, output_dir / "model.pt")
-    model_config = OmegaConf.create({
-        "model": OmegaConf.to_container(cfg.model, resolve=True),
-        "max_options": max_options,
-        "encoder": encoder_name,
-    })
+    model_config = OmegaConf.create(
+        {
+            "model": OmegaConf.to_container(cfg.model, resolve=True),
+            "max_options": max_options,
+            "encoder": encoder_name,
+        }
+    )
     model_config_path = output_dir / "model_config.yaml"
     OmegaConf.save(model_config, model_config_path)
     return checkpoint_path, model_config_path

@@ -2,9 +2,38 @@
 # input_dim, out_features and the StructuredObsAdapter (which embeds card
 # IDs, normalizes scalars and pools unordered zones before the MLP; widths
 # in model.adapter) are injected by build_actor_critic from the specs.
-_target_: src.models.backbone.MLPBackbone
+#
+# Two honesty notes, regardless of option_tokens below. (1) StructuredObsAdapter
+# now includes the synthetic stop slot as always-valid in the masked mean over
+# option rows (it used to be excluded, since `card_id == 0` for the stop action
+# itself, same as padding) -- this shifts the pooled `options` feature this MLP
+# consumes by ~8.8% with 3 real options, so its input is not byte-identical to
+# what fed pre-existing checkpoints/historical runs, even though input_dim is
+# unchanged. (2) This backbone has no per-entity token path for anything but
+# option_tokens' option_repr below -- its pooled `pokemon`/zone features stay
+# seat/zone-blind in every configuration (see conf/model/backbone/
+# transformer.yaml's entity-identity note for what "blind" means and where it
+# was fixed for the transformer's entity-token path only).
+_target_: src.models.mlp.MLPBackbone
 num_cells: [256, 256]
 activation: tanh
+# If true, build the per-option tokens here rather than taking the adapter's:
+# projecting adapter.encode_entity_tokens(groups=["options"]) to out_features
+# plus that group's stop-slot segment embedding -- the same cheap per-entity
+# projection TransformerBackbone's option_tokens uses when encoded_option_repr
+# is left false, without the transformer's attention cost.
+#
+# false (the default) does NOT mean "no option tokens": with either pointer
+# head selected, build_actor_critic has the adapter emit them instead, at
+# entity_dim and unprojected, which is the configuration the pointer head's
+# measured win was obtained in (docs/architecture/pointer-head.md). It only
+# means this backbone adds no parameters of its own. The two sources are
+# mutually exclusive and either pairs with either pointer head. See
+# conf/experiment/ptr_mlp_pointer.yaml, the arm this exists for: does the
+# pointer head's gain need attention at all, or is it available at the MLP's
+# throughput (~2.4x the transformer's, per
+# docs/architecture/transformer-diagnosis-45.md)?
+option_tokens: false
 # Observation keys to consume, nested under the env's "observation" key.
 # These are StructuredObservationEncoder's top-level groups (see its .spec()),
 # each handled by the adapter.

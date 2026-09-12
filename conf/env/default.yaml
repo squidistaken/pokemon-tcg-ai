@@ -21,8 +21,8 @@ deck_switch_steps: 0
 #   uniform     -> each deck equally likely, i.i.d. per episode.
 #   round_robin -> deterministic rotation covering every deck evenly.
 deck_sampling: uniform
-# Draw strategy for the periodic evaluator only. "null" falls back to deck_sampling. 
-# Set this to "round_robin" so eval deterministically and evenly covers the held-out pool: 
+# Draw strategy for the periodic evaluator only. "null" falls back to deck_sampling.
+# Set this to "round_robin" so eval deterministically and evenly covers the held-out pool:
 # the per-archetype breakdown then reflects the policy, not the luck of which held-out decks
 # a uniform draw sampled that round.
 eval_deck_sampling: null
@@ -31,22 +31,113 @@ eval_deck_sampling: null
 # (mirror -> 1.0, independent -> 0.0). Set e.g. 0.5 to mix the two, or sweep it
 # across runs to interpolate between them. Training only; eval uses its matchup.
 deck_mirror_prob: null
-# Bias the training deck draw toward stronger decks via manifest.json, so the
-# policy faces a meta-realistic field instead of every list equally often:
-#   null     -> uniform (every deck equally likely).
-#   winrate  -> weight by tournament record W/(W+L).
-#   placing  -> weight by 1/placing (better finishes sampled more).
+# Bias the training deck draw via manifest.json, so the policy faces a
+# meta-realistic field instead of every list equally often:
+#   null        -> uniform (every deck equally likely).
+#   observation -> weight by the list's observation_count, so a list is dealt
+#                  in proportion to how often it was actually seen in play.
+#   winrate     -> weight by tournament record W/(W+L).
+#   placing     -> weight by 1/placing (better finishes sampled more).
+# The deck actually dealt is drawn per *list*: counts are never summed across
+# lists, each manifest entry standing for the one list it describes. In
+# heuristic-resolved that spreads 50,485 observations over 28,670 lists, of
+# which 76.7% were seen exactly once and hold 43.6% of the mass -- so this
+# sharpens the draw toward the few heavily-played lists (the top 100 hold
+# 11.8%) without collapsing onto them.
+# Applies to the plain pool draw and to the curriculum's within-archetype deal
+# alike. With the curriculum enabled the same weights are additionally summed
+# per archetype, but only to bias which matchup the discovery draw explores
+# (CurriculumDeckSampler._explore_pair); a level is an archetype pair, so that
+# draw has no list-level equivalent. The list dealt within it stays per-list.
 # Training only; evaluation always samples the held-out pool uniformly.
 deck_weighting: null
 # Fraction of the pool held out from training and used only for evaluation, so
 # eval measures generalization to unseen decks. 0.0 trains on the whole pool.
 deck_holdout_frac: 0.0
-# Cap the training pool to this many archetypes (the held-out eval set is left
-# untouched). null uses every training archetype. Sweep it across runs
-# (--multirun env.deck_pool_width=4,8,16,32) to measure how held-out
-# generalization scales with training deck diversity. The chosen archetypes are
-# deterministic given deck_split_seed.
+# Cap the training pool to this many archetypes -- i.e. how many of the corpus's
+# per-archetype folders training may draw from at all, the rest being dropped
+# entirely. The held-out eval set is left untouched, so narrowing training is
+# still measured against the full field. null uses every training archetype.
+#
+# This is the knob that decides how much training each matchup gets. A
+# curriculum level is an ordered (agent, opponent) archetype pair, so the level
+# space is the square of this: 134 archetypes is 17,956 matchups and ~11
+# episodes each over a 15M-frame run, while 12 is 144 matchups and ~1,425 each.
+#
+# Sweep it across runs (--multirun env.deck_pool_width=4,8,16,32) to measure how
+# held-out generalization scales with training deck diversity; the pools are
+# nested as it grows, so a sweep adds archetypes rather than resampling them.
 deck_pool_width: null
+# Which archetypes deck_pool_width keeps:
+#   observation -> the most-observed ones, by summed manifest observation_count.
+#                  Summing here decides which archetypes the pool keeps; the
+#                  deck_weighting draw that deals a list stays per-list.
+#   random      -> a seeded random subset, deterministic given deck_split_seed.
+# Over the scraped corpus the top 12 archetypes hold 55.2% of all observed play,
+# where a random 12 hold a median of 8.6% -- so 'random' answers "how does
+# diversity scale" and 'observation' answers "train on what the ladder deals".
+deck_pool_selection: observation
+# Pin the agent to one deck and draw only its opponent from the pool. null
+# trains both seats from the corpus.
+#
+# The submitted agent plays exactly one list, so a symmetric pool spends all
+# but 1/archetypes of its episodes on decks the agent will never pilot, and
+# spreads the rest over archetypes^2 matchups -- measured on run 049zz7kg,
+# 134 archetypes gave 17,956 matchups 2.8 episodes each over 50,317 episodes,
+# which is why train/curriculum/size reached only 97 with 11,692 still in
+# probation. Pinning one seat leaves the opposing field at full width (that is
+# the ladder the agent is scored against) and collapses the space to one
+# matchup per opponent archetype, a few hundred episodes each.
+#
+# Incompatible with env.curriculum.enabled; see make_env_factories.
+agent_deck: null
+# Share of training episodes that ignore the pin and take both seats from the
+# pool. Without some the card embeddings and per-card statics outside the
+# pinned list stop receiving gradient, degrading the encoder on exactly the
+# cards the opponent plays. Evaluation always uses 0.0 so the eval curve
+# measures the deck that will be submitted.
+agent_deck_field_prob: 0.2
+# Draw exactly one opponent deck when the agent pin applies. False preserves
+# the historical pair draw (whose unused side still advances the pool RNG).
+# Fixed-deck fine-tuning enables this so weighted sampling consumes one draw per
+# episode and round-robin evaluation visits every field entry.
+agent_deck_single_field_draw: false
+# Deal the pinned deck to BOTH seats, so every training episode is a mirror on
+# one list and the field sampler supplies no opponent at all.
+#
+# This exists for a pinned self-play run. The league opponent is a snapshot of a
+# network that only practises the pinned deck, so dealing it a field deck makes
+# it misplay and the learner farms an opponent it crippled itself: the previous
+# fixed-deck arm measured train/win_rate 0.771 against its own league that way.
+# A mirror hands the snapshot the deck it was trained on, which puts it back at
+# full strength and returns the collected win rate to ~0.5.
+#
+# The cost is that no field matchup is seen while training. Training only, like
+# agent_deck_field_prob: evaluation keeps dealing the opposing seat the panel,
+# because that is the only measurement of anything but the run itself.
+agent_deck_mirror: false
+# Deck the agent pilots during EVALUATION only, independent of agent_deck.
+#
+# Evaluation should hold the agent's deck fixed even when training does not: the
+# curve is meant to read like a submission, which is one deck against a field.
+# It is also what makes the per-opponent breakdown meaningful, since the agent's
+# own archetype is then constant and the opponent's is the only thing varying.
+#
+# Unlike agent_deck this costs nothing: evaluation does not train, so a fixed
+# eval deck cannot degrade the self-play opponent the way a training pin does.
+eval_agent_deck: null
+# Restrict evaluation opponents to the N most-observed held-out lists, drawn
+# round-robin, instead of dealing a fresh list every episode.
+#
+# Without it a 50-episode round is 50 different matchups played once each, and
+# which decks the draw happened to hit swamps the policy signal. A fixed panel
+# plays the same matchups every round: the curve is comparable across rounds and
+# each opponent accumulates enough episodes to be read on its own. Set
+# eval_deck_sampling: round_robin alongside it for even coverage.
+#
+# null evaluates against the whole held-out pool (the old behaviour), which is
+# the less noisy choice only when eval_episodes is large.
+eval_panel_size: null
 # Seed for the deterministic train/holdout split.
 deck_split_seed: 0
 # Prioritized Level Replay over deck-archetype matchups. When enabled, each
@@ -55,10 +146,18 @@ deck_split_seed: 0
 # critic still misjudges. Requires deck_pool and mp_start_method=fork.
 curriculum:
   enabled: false
-  # Maximum matchups scored at once. Must be at least the square of the
-  # archetype count; above it, nothing is ever evicted and the buffer simply
-  # holds the whole level space.
+  # Maximum matchups scored at once. When it covers the whole corpus (>= the
+  # square of the archetype count) every matchup is prefilled up front and
+  # nothing is ever evicted. Below that, the corpus is too large to fit -- set
+  # explore_prob > 0 so the rest is discovered lazily instead of raising.
   capacity: 4000
+  # Probability a worker draws a fresh, uniformly random matchup instead of
+  # replaying from the published distribution, so matchups beyond `capacity`
+  # keep getting discovered and scored throughout the run rather than only
+  # once, before the first publish. Required (> 0) whenever the corpus has
+  # more archetype pairs than `capacity`; 0 (default) is the old
+  # everything-prefilled behaviour, appropriate when it fits.
+  explore_prob: 0.0
   # Rank-distribution temperature; lower is greedier toward top-scoring levels.
   score_temperature: 0.9
   # Weight of the staleness term in the sampling mixture. Set above the PLR
@@ -78,6 +177,14 @@ curriculum:
   # those over a window of training, which a single end-of-run total cannot
   # provide. Null derives an interval from the batch size.
   state_interval: null
+  # Continue a previous run's level buffer from one of those dumps, so a
+  # continued run keeps the visit counts and win/loss tallies that decide which
+  # matchups the sampler prioritizes instead of rediscovering the corpus. The
+  # dump must come from a run over this same deck corpus: a matchup is
+  # identified by its position in the archetype list, so a state built over a
+  # different list would silently address the wrong matchups, and loading one
+  # raises. Null starts with an empty buffer.
+  init_state: null
 # Padded size of the option space (stop action excluded); must exceed the
 # largest option list the engine can offer, or options get truncated.
 max_options: 128

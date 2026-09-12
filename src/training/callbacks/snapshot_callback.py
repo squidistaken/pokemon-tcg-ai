@@ -16,6 +16,7 @@ from src.models.actor_critic import ActorCritic
 from src.policies.greedy_policy_opponent import save_actor_critic
 
 from .base import TrainingCallback
+from .finite_check import non_finite_entries
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class SnapshotCallback(TrainingCallback):
     This is the writing half of the self-play loop: every ``interval``
     collected frames it snapshots the actor-critic into ``checkpoint_dir``,
     where the environment workers'
-    :class:`~src.env.snapshot_opponent_pool.SnapshotOpponentPool` instances
+    :class:`~src.env.opponents.snapshot_opponent_pool.SnapshotOpponentPool` instances
     discover it and start playing against it.
 
     Writes go to a temporary file that is then atomically renamed into place,
@@ -44,13 +45,13 @@ class SnapshotCallback(TrainingCallback):
     """
 
     def __init__(
-            self,
-            actor_critic: ActorCritic,
-            checkpoint_dir: str | Path,
-            interval: int,
-            checkpoint_loggers: Iterable[CheckpointLogger] = (),
-            registry_path: str | Path | None = None,
-            repo_root: str | Path | None = None,
+        self,
+        actor_critic: ActorCritic,
+        checkpoint_dir: str | Path,
+        interval: int,
+        checkpoint_loggers: Iterable[CheckpointLogger] = (),
+        registry_path: str | Path | None = None,
+        repo_root: str | Path | None = None,
     ) -> None:
         """
         :param actor_critic: Learner to snapshot; shared with the trainer, so
@@ -89,7 +90,11 @@ class SnapshotCallback(TrainingCallback):
         self._checkpoint_config = _inference_config(run_config)
         self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
         if self._interval > 0:
-            logger.info("Self-play snapshots every %d frames -> %s", self._interval, self._checkpoint_dir)
+            logger.info(
+                "Self-play snapshots every %d frames -> %s",
+                self._interval,
+                self._checkpoint_dir,
+            )
         else:
             logger.info("Final checkpoint -> %s", self._checkpoint_dir)
 
@@ -163,6 +168,16 @@ class SnapshotCallback(TrainingCallback):
 
         :param frames: Frame count to embed in the filename.
         """
+        corrupt = non_finite_entries(self._actor_critic.state_dict())
+        if corrupt:
+            logger.error(
+                "Refusing to snapshot at %d frames: %d parameter tensor(s) are "
+                "non-finite (%s). A NaN member would poison the self-play league.",
+                frames,
+                len(corrupt),
+                ", ".join(corrupt[:3]),
+            )
+            return
         self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
         final_path = self._checkpoint_dir / f"snapshot_{frames:0{_FRAME_DIGITS}d}.pt"
         # Same directory (os.replace is only atomic within a filesystem) and a

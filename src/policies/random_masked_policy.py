@@ -12,7 +12,9 @@ class RandomMaskedPolicy(TensorDictModuleBase):
     pipeline built around it carries over unchanged.
     """
 
-    def __init__(self, mask_key: str = "action_mask", action_key: str = "action") -> None:
+    def __init__(
+        self, mask_key: str = "action_mask", action_key: str = "action"
+    ) -> None:
         """
         :param mask_key: Tensordict key holding the boolean action mask.
         :param action_key: Tensordict key to write the sampled action to.
@@ -32,6 +34,8 @@ class RandomMaskedPolicy(TensorDictModuleBase):
         """
         mask = tensordict.get(self._mask_key)
         flat_mask = mask.reshape(-1, mask.shape[-1])
-        actions = torch.multinomial(flat_mask.to(torch.float32), num_samples=1).squeeze(-1)
+        actions = torch.multinomial(flat_mask.to(torch.float32), num_samples=1).squeeze(
+            -1
+        )
         tensordict.set(self._action_key, actions.reshape(mask.shape[:-1]))
         return tensordict

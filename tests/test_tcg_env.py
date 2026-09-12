@@ -8,8 +8,8 @@ from torchrl.envs.transforms import ActionMask
 from torchrl.envs.utils import check_env_specs
 
 from src.env.battle_handle import BattleHandle
-from src.env.deck import load_deck
-from src.env.random_opponent import RandomOpponent
+from src.env.decks.deck import load_deck
+from src.env.opponents.random_opponent import RandomOpponent
 from src.env.tcg_env import TCGEnv
 from src.policies.random_masked_policy import RandomMaskedPolicy
 

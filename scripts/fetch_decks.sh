@@ -1,8 +1,10 @@
 #!/bin/bash
-# Pull the standard training deck corpus from its GitHub Release into ./decks.
+# Pull the standard training deck corpus from its GitHub Release.
 #
-#   ./scripts/fetch_decks.sh            # newest decks-* release (the standard)
-#   ./scripts/fetch_decks.sh decks-v2   # a specific version, for reproducibility
+#   ./scripts/fetch_decks.sh                  # newest release -> ./decks
+#   ./scripts/fetch_decks.sh decks-v2         # pinned release -> ./decks
+#   ./scripts/fetch_decks.sh --root /path/to/target
+#                                             # newest -> ROOT/decks
 #
 # The corpus is versioned as GitHub Releases tagged `decks-*`, each carrying a
 # stable `decks.tar.gz` plus a `decks.sha256` checksum. Nothing about the version
@@ -13,15 +15,69 @@
 # Requires the GitHub CLI (`gh auth login`).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+INSTALL_ROOT="$PROJECT_ROOT"
+TAG=""
+
+usage() {
+  cat <<'EOF'
+Usage: fetch_decks.sh [--root PATH] [decks-vN]
+
+Download and verify a deck-corpus release. By default it installs into the
+repository's decks/ directory. --root PATH installs into PATH/decks instead,
+which is useful for high-capacity scratch storage.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --root)
+      if [ "$#" -lt 2 ]; then
+        echo "ERROR: --root needs a path" >&2
+        exit 2
+      fi
+      INSTALL_ROOT="$2"
+      shift 2
+      ;;
+    --root=*)
+      INSTALL_ROOT="${1#--root=}"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "ERROR: unknown option '$1'" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      if [ -n "$TAG" ]; then
+        echo "ERROR: only one release tag may be supplied" >&2
+        exit 2
+      fi
+      TAG="$1"
+      shift
+      ;;
+  esac
+done
+
+if [ -z "$INSTALL_ROOT" ]; then
+  echo "ERROR: --root must not be empty" >&2
+  exit 2
+fi
+mkdir -p "$INSTALL_ROOT"
+INSTALL_ROOT="$(cd "$INSTALL_ROOT" && pwd)"
+DECK_DIR="$INSTALL_ROOT/decks"
+
+cd "$PROJECT_ROOT"
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "ERROR: the GitHub CLI (gh) is required. Install it and run 'gh auth login'." >&2
   exit 1
 fi
 
-TAG="${1:-}"
 if [ -z "$TAG" ]; then
   # Highest-numbered decks-vN release (ignores any code releases). Ordering by
   # the version number is immune to a release being edited/re-dated later.
@@ -41,9 +97,9 @@ trap 'rm -rf "$TMP"' EXIT
 gh release download "$TAG" --pattern 'decks.sha256' --dir "$TMP"
 WANT_SHA="$(cut -d' ' -f1 <"$TMP/decks.sha256")"
 
-MARKER="decks/.release-sha256"
+MARKER="$DECK_DIR/.release-sha256"
 if [ -f "$MARKER" ] && [ "$(cat "$MARKER" 2>/dev/null)" = "$WANT_SHA" ]; then
-  echo "Deck corpus already at ${TAG} (${WANT_SHA:0:12}…); nothing to do."
+  echo "Deck corpus at $DECK_DIR already has ${TAG} (${WANT_SHA:0:12}…); nothing to do."
   exit 0
 fi
 
@@ -53,18 +109,18 @@ gh release download "$TAG" --pattern 'decks.tar.gz' --dir "$TMP"
 echo "Verifying checksum…"
 echo "${WANT_SHA}  ${TMP}/decks.tar.gz" | sha256sum -c -
 
-if [ -d "$ROOT/decks" ] && [ "$(ls -A "$ROOT/decks")" ]; then
-  read -p "Overwrite existing decks? (This will wipe all existing files in ./decks except example.csv) [y/N] " response
+if [ -d "$DECK_DIR" ] && [ "$(ls -A "$DECK_DIR")" ]; then
+  read -p "Overwrite $DECK_DIR? (This will wipe all existing files except example.csv) [y/N] " response
   if [[ ! "$response" =~ ^[Yy]$ ]]; then
     echo "Aborted."
     exit 1
   fi
   echo "Cleaning up old decks…"
-  find "$ROOT/decks" -mindepth 1 -not -name 'example.csv' -delete
+  find "$DECK_DIR" -mindepth 1 -not -name 'example.csv' -delete
 fi
 
-echo "Unpacking into ./decks…"
-tar -xzf "${TMP}/decks.tar.gz" -C "$ROOT"
+echo "Unpacking into ${DECK_DIR}…"
+tar -xzf "${TMP}/decks.tar.gz" -C "$INSTALL_ROOT"
 echo "$WANT_SHA" >"$MARKER"
 
-echo "Installed ${TAG}: $(find decks -name '*.csv' ! -name 'example.csv' | wc -l) decks."
+echo "Installed ${TAG}: $(find "$DECK_DIR" -name '*.csv' ! -name 'example.csv' | wc -l) decks in $DECK_DIR."

@@ -1,10 +1,12 @@
+import json
 from pathlib import Path
 
 import pytest
 from omegaconf import DictConfig, OmegaConf
 
-from src.env.deck import load_deck, load_decks, resolve_deck_paths
-from src.env.deck_sampler import (
+from src.env.decks.agent_deck_sampler import AgentDeckSampler
+from src.env.decks.deck import load_deck, load_decks, resolve_deck_paths
+from src.env.decks.deck_sampler import (
     FixedDeckSampler,
     PoolDeckSampler,
     build_deck_sampler,
@@ -13,8 +15,13 @@ from src.training.env_factory import (
     _build_sampler_spec,
     _deck_labels,
     _deck_weights,
+    _eval_panel,
     _limit_pool_width,
+    _load_manifest_for,
+    _observation_weight,
     _record_winrate,
+    archetype_observations,
+    make_env_factories,
 )
 
 REPO_ROOT = Path(__file__).parents[1]
@@ -111,6 +118,18 @@ def test_pool_sampler_round_robin_cycles_evenly() -> None:
     # Two full passes over the pool, each deck exactly twice, contiguous cycle.
     assert sorted(drawn[:4]) == [0, 1, 2, 3]
     assert drawn[:4] == drawn[4:]
+
+
+def test_pool_sampler_single_draw_round_robin_visits_every_entry() -> None:
+    """One-field draws advance RR once, rather than skipping alternate decks."""
+    labels = [f"Deck {index}" for index in range(6)]
+    sampler = PoolDeckSampler(_fake_pool(6), mode="round_robin", labels=labels, seed=0)
+
+    drawn = [sampler.sample_one() for _ in range(12)]
+
+    first_pass = [(deck[0], label) for deck, label in drawn[:6]]
+    assert sorted(first_pass) == list(zip(range(6), labels, strict=True))
+    assert drawn[:6] == drawn[6:]
 
 
 def test_mirror_prob_endpoints_match_presets() -> None:
@@ -497,6 +516,23 @@ def test_deck_labels_prefer_manifest_archetype() -> None:
     assert all(isinstance(label, str) and label for label in labels)
 
 
+def test_deck_labels_read_versioned_strategy_manifest(tmp_path: Path) -> None:
+    archetype_dir = tmp_path / "fallback-folder"
+    archetype_dir.mkdir()
+    deck = archetype_dir / "resolved-list.csv"
+    deck.write_text("\n".join("1" for _ in range(60)))
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "decks": {"resolved-list": {"archetype": "Manifest Archetype"}},
+            }
+        )
+    )
+
+    assert _deck_labels([str(deck)]) == ["Manifest Archetype"]
+
+
 def test_limit_pool_width_keeps_exactly_n_archetypes(tmp_path: Path) -> None:
     """
     Width filtering keeps decks from exactly ``width`` archetypes, deterministically.
@@ -526,20 +562,145 @@ def test_limit_pool_width_rejects_below_one() -> None:
         _limit_pool_width([0], ["arch/a.csv"], width=0, seed=0)
 
 
+def test_eval_panel_keeps_the_most_observed_holdout_decks(tmp_path: Path) -> None:
+    """
+    The eval panel is the N most-observed held-out lists, deterministically.
+    """
+    paths = _observation_corpus(
+        tmp_path, {"rare": 1, "fringe": 3, "solid": 40, "meta": 200}
+    )
+    panel = _eval_panel(list(range(len(paths))), paths, panel_size=2)
+
+    assert [Path(paths[i]).parent.name for i in panel] == ["meta", "solid"]
+    assert _eval_panel(list(range(len(paths))), paths, panel_size=2) == panel
+
+
+def test_eval_panel_rejects_below_one(tmp_path: Path) -> None:
+    """
+    A panel of zero would leave evaluation with no opponent at all.
+    """
+    paths = _observation_corpus(tmp_path, {"a": 1, "b": 2})
+    with pytest.raises(ValueError, match="eval_panel_size"):
+        _eval_panel([0, 1], paths, panel_size=0)
+
+
+def test_eval_agent_deck_pins_eval_without_pinning_training(tmp_path: Path) -> None:
+    """
+    ``eval_agent_deck`` fixes the eval deck while training stays unpinned.
+
+    Pinning training degrades the self-play opponent; pinning eval does not,
+    since evaluation never feeds back into learning.
+    """
+    _observation_corpus(tmp_path, {"meta": 20, "fringe": 2, "rare": 1})
+    cfg = _env_cfg(
+        deck_pool=str(tmp_path),
+        deck_holdout_frac=0.0,
+        eval_agent_deck=EXAMPLE_DECK,
+    )
+    train = _build_sampler_spec(cfg, deck_split="train")
+    eval_ = _build_sampler_spec(cfg, deck_split="eval")
+
+    assert train["kind"] == "pool", "training must not be pinned"
+    assert eval_["kind"] == "agent_fixed", "eval must be pinned"
+    # Eval never mixes in a pool-drawn agent deck: the curve reads one deck.
+    assert eval_["field_probability"] == 0.0
+
+
+def test_limit_pool_width_rejects_unknown_selection() -> None:
+    """
+    An unknown selection mode is rejected rather than silently falling back.
+    """
+    with pytest.raises(ValueError, match="deck_pool_selection"):
+        _limit_pool_width([0], ["arch/a.csv"], width=1, seed=0, selection="popularity")
+
+
+def _observation_corpus(tmp_path: Path, counts: dict[str, int]) -> list[str]:
+    """
+    Fabricate a corpus of one list per archetype with a manifest.
+
+    :param tmp_path: Directory to build under.
+    :param counts: ``observation_count`` per archetype folder name.
+    :return: The deck CSV paths, in archetype-name order.
+    """
+    entries: dict[str, dict] = {}
+    paths: list[str] = []
+    for archetype, count in counts.items():
+        folder = tmp_path / archetype
+        folder.mkdir()
+        csv = folder / f"{archetype}-1.csv"
+        csv.write_text("\n".join("1" for _ in range(60)))
+        paths.append(str(csv))
+        entries[csv.stem] = {"archetype": archetype, "observation_count": count}
+    (tmp_path / "manifest.json").write_text(json.dumps({"decks": entries}))
+    return paths
+
+
+def test_limit_pool_width_keeps_the_most_observed_archetypes(tmp_path: Path) -> None:
+    """
+    The default selection keeps the ``width`` most-observed archetypes.
+    """
+    paths = _observation_corpus(
+        tmp_path, {"rare": 1, "fringe": 3, "solid": 40, "meta": 200}
+    )
+    idx = list(range(len(paths)))
+
+    kept = _limit_pool_width(idx, paths, width=2, seed=0)
+
+    assert {Path(paths[i]).parent.name for i in kept} == {"meta", "solid"}
+    # Nested as width grows, so a sweep adds archetypes rather than swapping them.
+    wider = _limit_pool_width(idx, paths, width=3, seed=0)
+    assert set(kept) < set(wider)
+
+
+def test_archetype_observations_sums_over_lists(tmp_path: Path) -> None:
+    """
+    An archetype's total is the sum of its lists' counts, not a per-list value.
+    """
+    folder = tmp_path / "meta"
+    folder.mkdir()
+    entries: dict[str, dict] = {}
+    paths: list[str] = []
+    for index, count in enumerate((5, 7, 11)):
+        csv = folder / f"meta-{index}.csv"
+        csv.write_text("\n".join("1" for _ in range(60)))
+        paths.append(str(csv))
+        entries[csv.stem] = {"archetype": "meta", "observation_count": count}
+    (tmp_path / "manifest.json").write_text(json.dumps({"decks": entries}))
+
+    assert archetype_observations(paths) == {"meta": 23.0}
+
+
+def test_random_selection_still_available(tmp_path: Path) -> None:
+    """
+    ``random`` keeps the seeded subset, for diversity sweeps.
+    """
+    paths = _observation_corpus(
+        tmp_path, {"rare": 1, "fringe": 3, "solid": 40, "meta": 200}
+    )
+    idx = list(range(len(paths)))
+
+    kept = {
+        Path(paths[i]).parent.name
+        for i in _limit_pool_width(idx, paths, width=2, seed=0, selection="random")
+    }
+    assert len(kept) == 2
+    assert kept != {"meta", "solid"}, "a random subset must not rank by observations"
+
+
 @requires_corpus
 def test_deck_pool_width_narrows_train_but_not_eval() -> None:
     """
     ``deck_pool_width`` shrinks the training pool while the held-out set is fixed.
     """
     full = _env_cfg(deck_pool=str(CORPUS_DIR), deck_holdout_frac=0.2)
-    narrow = _env_cfg(deck_pool=str(CORPUS_DIR), deck_holdout_frac=0.2, deck_pool_width=5)
-    assert (
-        len(_build_sampler_spec(narrow, deck_split="train")["decks"])
-        < len(_build_sampler_spec(full, deck_split="train")["decks"])
+    narrow = _env_cfg(
+        deck_pool=str(CORPUS_DIR), deck_holdout_frac=0.2, deck_pool_width=5
     )
-    assert (
-        len(_build_sampler_spec(narrow, deck_split="eval")["decks"])
-        == len(_build_sampler_spec(full, deck_split="eval")["decks"])
+    assert len(_build_sampler_spec(narrow, deck_split="train")["decks"]) < len(
+        _build_sampler_spec(full, deck_split="train")["decks"]
+    )
+    assert len(_build_sampler_spec(narrow, deck_split="eval")["decks"]) == len(
+        _build_sampler_spec(full, deck_split="eval")["decks"]
     )
 
 
@@ -578,6 +739,37 @@ def test_deck_weights_from_real_manifest() -> None:
 
 
 @requires_corpus
+def test_observation_weighting_matches_the_manifest_counts() -> None:
+    """
+    ``observation`` weighting reproduces each list's ``observation_count``.
+    """
+    paths = resolve_deck_paths(str(CORPUS_DIR))[:200]
+    manifest = _load_manifest_for(paths)
+    weights = _deck_weights(paths, "observation")
+
+    assert len(weights) == len(paths)
+    assert all(weight >= 1.0 for weight in weights)
+    for path, weight in zip(paths, weights, strict=True):
+        count = manifest.get(Path(path).stem, {}).get("observation_count")
+        expected = float(count) if isinstance(count, int) and count > 0 else 1.0
+        assert weight == expected
+    # A real corpus has a spread of counts, otherwise the scheme is a no-op.
+    assert len(set(weights)) > 1
+
+
+def test_observation_weight_falls_back_to_one() -> None:
+    """
+    A missing or nonsensical count weighs the same as a single observation.
+    """
+    assert _observation_weight(7) == 7.0
+    assert _observation_weight(1) == 1.0
+    assert _observation_weight(None) == 1.0
+    assert _observation_weight(0) == 1.0
+    assert _observation_weight(-3) == 1.0
+    assert _observation_weight("12") == 1.0
+
+
+@requires_corpus
 def test_sampler_spec_zero_holdout_evaluates_on_full_pool() -> None:
     """
     With no holdout, train and eval both draw from the whole pool.
@@ -607,3 +799,257 @@ def test_env_samples_different_decks_across_resets() -> None:
         assert len(seen) > 1  # the curriculum rotates decks across episodes
     finally:
         env.close()
+
+
+def _pinning_sampler(field_probability: float) -> AgentDeckSampler:
+    """
+    Build an :class:`AgentDeckSampler` over a small labelled field.
+
+    :param field_probability: Share of episodes that ignore the pin.
+    :return: A seeded sampler pinning ``[1] * 60`` as the agent's deck.
+    """
+    field = PoolDeckSampler(
+        [[2] * 60, [3] * 60],
+        matchup="independent",
+        seed=1,
+        labels=["Two", "Three"],
+    )
+    return AgentDeckSampler(
+        agent_deck=[1] * 60,
+        field_sampler=field,
+        agent_label="One",
+        field_probability=field_probability,
+        seed=5,
+    )
+
+
+@pytest.mark.parametrize("agent_seat", [0, 1])
+def test_agent_deck_lands_on_the_agents_seat(agent_seat: int) -> None:
+    """
+    The environment draws the agent's seat before asking for decks, so a
+    positional sampler hands the pinned list to the opponent half the time.
+    """
+    sampler = _pinning_sampler(field_probability=0.0)
+    for _ in range(50):
+        decks = sampler.sample_for_seat(agent_seat)
+        assert decks[agent_seat] == [1] * 60
+        assert decks[1 - agent_seat] != [1] * 60
+
+
+@pytest.mark.parametrize("agent_seat", [0, 1])
+def test_agent_deck_labels_are_seat_ordered(agent_seat: int) -> None:
+    """
+    ``last_labels`` is indexed by seat downstream (``_episode_archetype``), so
+    the pinned deck's label has to sit at the agent's index, not at 0.
+    """
+    sampler = _pinning_sampler(field_probability=0.0)
+    for _ in range(50):
+        sampler.sample_for_seat(agent_seat)
+        labels = sampler.last_labels
+        assert labels is not None
+        assert labels[agent_seat] == "One"
+        assert labels[1 - agent_seat] in ("Two", "Three")
+
+
+@pytest.mark.parametrize("agent_seat", [0, 1])
+def test_mirror_deals_the_pinned_deck_to_both_seats(agent_seat: int) -> None:
+    """Both seats pilot the pin, so the league opponent is never handicapped."""
+    sampler = AgentDeckSampler(
+        agent_deck=[1] * 60,
+        field_sampler=PoolDeckSampler(
+            [[2] * 60, [3] * 60], matchup="independent", seed=1, labels=["Two", "Three"]
+        ),
+        agent_label="One",
+        field_probability=0.0,
+        mirror=True,
+        seed=5,
+    )
+    for _ in range(50):
+        deck0, deck1 = sampler.sample_for_seat(agent_seat)
+        assert deck0 == [1] * 60
+        assert deck1 == [1] * 60
+        # Separate lists, so neither seat can alias the other's cards.
+        assert deck0 is not deck1
+        assert sampler.last_labels == ("One", "One")
+
+
+def test_mirror_leaves_the_field_sampler_untouched() -> None:
+    """
+    A mirror episode needs no opponent, so the field sampler must not advance.
+
+    Load-bearing under round-robin: an unnecessary draw would rotate the cursor
+    and change which lists a later field episode sees.
+    """
+
+    def build_field() -> PoolDeckSampler:
+        return PoolDeckSampler(
+            _fake_pool(10),
+            matchup="independent",
+            mode="round_robin",
+            labels=[str(index) for index in range(10)],
+            seed=0,
+        )
+
+    field, untouched = build_field(), build_field()
+    sampler = AgentDeckSampler(
+        agent_deck=[99] * 60,
+        field_sampler=field,
+        agent_label="Alakazam",
+        field_probability=0.0,
+        mirror=True,
+        seed=3,
+    )
+    for _ in range(20):
+        sampler.sample_for_seat(0)
+    # Twenty mirror episodes later the wrapped sampler is still where an
+    # untouched twin is, so no cursor moved and no RNG was consumed.
+    assert field.sample() == untouched.sample()
+
+
+def test_mirror_still_honours_field_probability() -> None:
+    """field_probability keeps its meaning: a field episode is not a mirror."""
+    sampler = AgentDeckSampler(
+        agent_deck=[1] * 60,
+        field_sampler=PoolDeckSampler(
+            [[2] * 60, [3] * 60], matchup="independent", seed=1, labels=["Two", "Three"]
+        ),
+        agent_label="One",
+        field_probability=1.0,
+        mirror=True,
+        seed=5,
+    )
+    for _ in range(20):
+        deck0, deck1 = sampler.sample_for_seat(0)
+        assert [1] * 60 not in (deck0, deck1)
+
+
+@pytest.mark.parametrize("agent_seat", [0, 1])
+def test_single_field_draw_keeps_pin_and_covers_complete_panel(
+    agent_seat: int,
+) -> None:
+    """The opt-in path fixes the real agent seat and consumes every RR entry."""
+    field = PoolDeckSampler(
+        _fake_pool(10),
+        matchup="independent",
+        mode="round_robin",
+        labels=[str(index) for index in range(10)],
+        seed=0,
+    )
+    sampler = AgentDeckSampler(
+        agent_deck=[99] * 60,
+        field_sampler=field,
+        agent_label="Alakazam",
+        single_field_draw=True,
+        seed=0,
+    )
+
+    opponents = []
+    for _ in range(10):
+        decks = sampler.sample_for_seat(agent_seat)
+        opponents.append(decks[1 - agent_seat][0])
+        assert decks[agent_seat] == [99] * 60
+        assert sampler.last_labels is not None
+        assert sampler.last_labels[agent_seat] == "Alakazam"
+
+    assert sorted(opponents) == list(range(10))
+
+
+def test_field_probability_governs_how_often_the_pin_applies() -> None:
+    """
+    Some episodes must keep drawing the agent's deck from the pool, or the
+    cards outside the pinned list stop receiving gradient entirely.
+    """
+    always = _pinning_sampler(field_probability=0.0)
+    never = _pinning_sampler(field_probability=1.0)
+    pinned_always = sum(always.sample_for_seat(0)[0] == [1] * 60 for _ in range(400))
+    pinned_never = sum(never.sample_for_seat(0)[0] == [1] * 60 for _ in range(400))
+    assert pinned_always == 400
+    assert pinned_never == 0
+
+
+def test_build_deck_sampler_wraps_a_field_spec() -> None:
+    """The picklable spec round-trips through the worker-side builder."""
+    sampler = build_deck_sampler(
+        {
+            "kind": "agent_fixed",
+            "agent_deck": [1] * 60,
+            "agent_label": "One",
+            "field_probability": 0.0,
+            "field": {
+                "kind": "pool",
+                "decks": [[2] * 60],
+                "matchup": "independent",
+                "labels": ["Two"],
+            },
+        },
+        seed=3,
+    )
+    assert isinstance(sampler, AgentDeckSampler)
+    assert sampler.sample_for_seat(1) == ([2] * 60, [1] * 60)
+
+
+def test_build_deck_sampler_enables_single_field_draw_explicitly() -> None:
+    """The worker-side spec exposes the one-draw path without changing defaults."""
+    sampler = build_deck_sampler(
+        {
+            "kind": "agent_fixed",
+            "agent_deck": [99] * 60,
+            "agent_label": "Alakazam",
+            "single_field_draw": True,
+            "field": {
+                "kind": "pool",
+                "decks": _fake_pool(4),
+                "mode": "round_robin",
+                "matchup": "independent",
+            },
+        },
+        seed=0,
+    )
+
+    assert isinstance(sampler, AgentDeckSampler)
+    opponents = [sampler.sample_for_seat(0)[1][0] for _ in range(4)]
+    assert sorted(opponents) == list(range(4))
+
+
+def test_agent_deck_without_a_deck_pool_is_rejected() -> None:
+    """
+    The pin only chooses the agent's seat; the opposing field it leaves at full
+    width comes from the pool. Without one there is nothing to pin against, and
+    the no-pool path used to return a plain fixed sampler -- dropping the pin
+    with no warning, so the run trained on env.deck0/deck1 while the config said
+    it was piloting agent_deck.
+    """
+    cfg = OmegaConf.create(
+        {
+            "seed": 0,
+            "env": {
+                "deck0": EXAMPLE_DECK,
+                "deck1": EXAMPLE_DECK,
+                "agent_deck": EXAMPLE_DECK,
+                "max_options": 8,
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="needs env.deck_pool"):
+        _build_sampler_spec(cfg, "train")
+
+
+def test_agent_deck_pin_and_curriculum_are_rejected_together() -> None:
+    """
+    A curriculum level is an ordered (agent, opponent) pair; pinning the agent
+    discards the half of every level the curriculum drew, so its scores would
+    describe matchups nobody played. Fail loudly instead.
+    """
+    cfg = OmegaConf.create(
+        {
+            "seed": 0,
+            "env": {
+                "deck_pool": str(CORPUS_DIR),
+                "agent_deck": EXAMPLE_DECK,
+                "num_workers": 1,
+                "max_options": 8,
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="cannot both be set"):
+        make_env_factories(cfg, curriculum=object())

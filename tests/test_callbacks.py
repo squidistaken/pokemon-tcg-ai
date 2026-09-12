@@ -5,6 +5,7 @@ from types import ModuleType
 from typing import Any, override
 
 import pytest
+import torch
 from tensordict import TensorDict
 
 from src.policies.random_masked_policy import RandomMaskedPolicy
@@ -66,6 +67,14 @@ class RecordingCallback(TrainingCallback):
         :param metrics: Evaluation metrics.
         """
         self.events.append((self.name, "eval", step, dict(metrics)))
+
+    def on_train_error(self, error: BaseException) -> None:
+        """
+        Record a run failure.
+
+        :param error: The exception that ended the run.
+        """
+        self.events.append((self.name, "error", str(error)))
 
     def on_train_end(self, summary: Mapping[str, float]) -> None:
         """
@@ -149,6 +158,7 @@ class FakeRun:
         self.url = "https://wandb.test/fake-run-id"
         self.summary: dict[str, Any] = {}
         self.logged: list[tuple[dict[str, float], int | None]] = []
+        self.log_lines: list[str] = []
         self.artifacts: list[tuple[str, str | None, str | None, list[str] | None]] = []
         self.finished = False
 
@@ -166,6 +176,10 @@ class FakeRun:
         Mark the run as closed.
         """
         self.finished = True
+
+    def write_logs(self, text: str) -> None:
+        """Capture text written directly to W&B's Logs tab."""
+        self.log_lines.append(text)
 
     def log_artifact(
         self,
@@ -185,6 +199,11 @@ class BrokenWandbModule(ModuleType):
 
     def __init__(self) -> None:
         super().__init__("wandb")
+
+    @staticmethod
+    def Settings(**kwargs: Any) -> Any:
+        """Return a minimal settings object accepted by the callback."""
+        return type("Settings", (), kwargs)()
 
     @staticmethod
     def init(**_kwargs: Any) -> Any:
@@ -210,6 +229,11 @@ class FakeWandbModule(ModuleType):
         super().__init__("wandb")
         self.run = run
         self.init_kwargs: dict[str, Any] | None = None
+
+    @staticmethod
+    def Settings(**kwargs: Any) -> Any:
+        """Return a minimal settings object whose fields tests can inspect."""
+        return type("Settings", (), kwargs)()
 
     def init(self, **kwargs: Any) -> FakeRun:
         """
@@ -268,7 +292,9 @@ def test_callback_list_fans_out_to_every_member_in_order() -> None:
     Each hook reaches all members, in the order they were registered.
     """
     events: list[tuple] = []
-    callbacks = CallbackList([RecordingCallback("first", events), RecordingCallback("second", events)])
+    callbacks = CallbackList(
+        [RecordingCallback("first", events), RecordingCallback("second", events)]
+    )
 
     callbacks.on_train_start({"seed": 1})
     callbacks.on_rollout_start(0)
@@ -310,7 +336,9 @@ def test_trainer_notifies_callbacks_across_the_run() -> None:
     Start, one batch per collector iteration, then end, x-axed by frames.
     """
     recorder = RecordingCallback()
-    trainer = make_trainer([recorder], run_config={"seed": 0, "agent": {"name": "dummy"}})
+    trainer = make_trainer(
+        [recorder], run_config={"seed": 0, "agent": {"name": "dummy"}}
+    )
 
     stats = trainer.train()
 
@@ -359,6 +387,10 @@ def test_trainer_notifies_train_end_when_the_run_fails() -> None:
     hooks = [hook for _, hook, *_ in recorder.events]
     assert hooks[0] == "start"
     assert hooks[-1] == "end"
+    # The failure is reported before teardown, so a backend can mark the run
+    # crashed rather than closing it as cleanly as a finished one.
+    assert hooks[-2] == "error"
+    assert "update exploded" in recorder.events[-2][2]
 
 
 def test_trainer_without_callbacks_still_trains() -> None:
@@ -394,6 +426,8 @@ def test_wandb_callback_records_config_and_namespaces_metrics(
     assert module.init_kwargs["force"] is False
     assert module.init_kwargs["dir"] == "/scratch/runs/one"
     assert module.init_kwargs["config"] == {"seed": 7}
+    assert module.init_kwargs["settings"].console == "redirect"
+    assert module.init_kwargs["settings"].capture_loggers == {"root": "INFO"}
 
     callback.on_rollout_end(64, {"win_rate": 0.5, "loss_objective": -0.2})
     assert run.logged[-1] == ({"train/win_rate": 0.5, "train/loss_objective": -0.2}, 64)
@@ -509,9 +543,15 @@ def test_wandb_logging_failure_propagates(
         callback.on_rollout_end(64, {"win_rate": 0.5})
 
 
-def test_wandb_start_failure_shuts_down_collector(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wandb_start_failure_creates_no_collector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
-    Strict callback startup still releases the already-created TorchRL collector.
+    A backend that fails at startup costs no environment workers at all.
+
+    Collectors are built inside the run loop, after ``on_train_start``, so a
+    strict backend rejecting the run short-circuits before anything is forked
+    -- there is no collector left to leak rather than one that gets cleaned up.
     """
     created: list[Any] = []
 
@@ -526,12 +566,123 @@ def test_wandb_start_failure_shuts_down_collector(monkeypatch: pytest.MonkeyPatc
         def shutdown(self) -> None:
             self.shutdown_called = True
 
-    monkeypatch.setattr("src.training.trainer.Collector", FakeCollector)
+    monkeypatch.setattr("src.training.collectors.Collector", FakeCollector)
     monkeypatch.setitem(sys.modules, "wandb", BrokenWandbModule())
 
     trainer = make_trainer([WeightsAndBiases(project="pokemon-tcg-ai")])
     with pytest.raises(RuntimeError, match="wandb is down"):
         trainer.train()
 
-    assert len(created) == 1
-    assert created[0].shutdown_called
+    assert created == []
+
+
+def test_wandb_marks_a_failed_run_crashed(
+    fake_wandb, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    A run that dies mid-collection is finished with a non-zero exit code.
+
+    Otherwise W&B shows it as ``finished``, making a crash indistinguishable
+    from a short successful run.
+    """
+    _, run = fake_wandb
+    exit_codes: list[int | None] = []
+    monkeypatch.setattr(
+        run, "finish", lambda exit_code=None: exit_codes.append(exit_code)
+    )
+
+    callback = WeightsAndBiases(project="pokemon-tcg-ai", mode="offline")
+    callback.on_train_start({})
+    callback.on_train_error(RuntimeError("Cannot proceed, worker 20 dead."))
+    callback.on_train_end({"frames": 475136.0})
+
+    assert exit_codes == [1]
+    assert "worker 20 dead" in str(run.summary["summary/error"])
+    assert run.log_lines == ["RuntimeError: Cannot proceed, worker 20 dead."]
+
+
+def test_wandb_training_failure_publishes_traceback(
+    fake_wandb: tuple[FakeWandbModule, FakeRun],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    A simulated OOM during training is sent to W&B before the run is closed.
+
+    The fake run intercepts ``write_logs`` at the SDK boundary, so this covers
+    the complete trainer/callback failure path without contacting W&B or
+    allocating enough memory to cause a real OOM.
+    """
+
+    class FakeCollector:
+        """Yield one synthetic rollout without creating environments or workers."""
+
+        def __iter__(self):
+            done = torch.zeros(64, 1, dtype=torch.bool)
+            done[-1] = True
+            reward = torch.zeros(64, 1)
+            yield TensorDict(
+                {
+                    "next": TensorDict(
+                        {"done": done, "terminated": done.clone(), "reward": reward},
+                        batch_size=[64],
+                    )
+                },
+                batch_size=[64],
+            )
+
+        def shutdown(self) -> None:
+            pass
+
+    class OutOfMemoryTrainer(FailingTrainer):
+        @override
+        def _make_collector(self, remaining_frames: int) -> FakeCollector:
+            return FakeCollector()
+
+        @override
+        def _update(self, data: TensorDict) -> dict[str, float] | None:
+            raise torch.OutOfMemoryError("CUDA out of memory (simulated)")
+
+    _, run = fake_wandb
+    exit_codes: list[int | None] = []
+    monkeypatch.setattr(
+        run, "finish", lambda exit_code=None: exit_codes.append(exit_code)
+    )
+    trainer = OutOfMemoryTrainer(
+        env_factories=[],
+        policy=RandomMaskedPolicy(),
+        frames_per_batch=64,
+        total_frames=128,
+        use_parallel_env=False,
+        callbacks=[WeightsAndBiases(project="pokemon-tcg-ai", mode="offline")],
+    )
+
+    with pytest.raises(
+        torch.OutOfMemoryError, match="CUDA out of memory \\(simulated\\)"
+    ):
+        trainer.train()
+
+    assert exit_codes == [1]
+    assert len(run.log_lines) == 1
+    outgoing_message = run.log_lines[0]
+    assert "Traceback (most recent call last):" in outgoing_message
+    assert "in _update" in outgoing_message
+    assert "OutOfMemoryError: CUDA out of memory (simulated)" in outgoing_message
+
+
+def test_wandb_marks_a_clean_run_finished(
+    fake_wandb, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    A run that completes normally is still finished with no exit code.
+    """
+    _, run = fake_wandb
+    exit_codes: list[int | None] = []
+    monkeypatch.setattr(
+        run, "finish", lambda exit_code=None: exit_codes.append(exit_code)
+    )
+
+    callback = WeightsAndBiases(project="pokemon-tcg-ai", mode="offline")
+    callback.on_train_start({})
+    callback.on_train_end({"frames": 5000000.0})
+
+    assert exit_codes == [None]

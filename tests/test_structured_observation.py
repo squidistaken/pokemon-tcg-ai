@@ -1,5 +1,6 @@
 import random
 from collections.abc import Iterator
+from itertools import pairwise
 from pathlib import Path
 
 import torch
@@ -7,12 +8,18 @@ from tensordict import TensorDict
 from torchrl.data import Composite
 
 from cg.api import AreaType, OptionType
-from src.env.card_database import CardDatabase
-from src.env.deck import load_deck
+from src.env.battle_handle import BattleHandle
+from src.env.decks.deck import load_deck
+from src.env.observation.card_database import CardDatabase
+from src.env.observation.option_reference_resolver import OptionReferenceResolver
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
 from src.env.tcg_env import TCGEnv
 
 DECK = load_deck(str(Path(__file__).parents[1] / "decks" / "example.csv"))
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
+MAX_OPTIONS = 96
 
 
 def _random_rollout(seed: int, steps: int = 300) -> Iterator[tuple[TCGEnv, TensorDict]]:
@@ -59,8 +66,10 @@ def test_zone_tables_consistent_with_state() -> None:
         assert int(obs["my", "prize_mask"].sum()) == len(my_state.prize)
         assert int(obs["opp", "prize_mask"].sum()) == len(opp_state.prize)
         expected_pokemon = (
-            len(my_state.active) + min(len(my_state.bench), 8)
-            + len(opp_state.active) + min(len(opp_state.bench), 8)
+            len(my_state.active)
+            + min(len(my_state.bench), 8)
+            + len(opp_state.active)
+            + min(len(opp_state.bench), 8)
         )
         assert int(obs["pokemon", "mask"].sum()) == expected_pokemon
 
@@ -107,8 +116,15 @@ def test_fixture_observations_match_spec() -> None:
     fixtures = torch.load(FIXTURE_DIR / "observations.pt", weights_only=False)
     env = TCGEnv(DECK, DECK)
     expected_cases = {
-        "setup", "main_select", "card_select", "multi_select_partial",
-        "deck_search", "yes_no", "attack_option", "energy_select", "terminal",
+        "setup",
+        "main_select",
+        "card_select",
+        "multi_select_partial",
+        "deck_search",
+        "yes_no",
+        "attack_option",
+        "energy_select",
+        "terminal",
     }
     assert expected_cases.issubset(set(fixtures.keys()))
     # The fixtures are the encoder handoff contract, so they carry the encoded
@@ -146,3 +162,94 @@ def test_card_database_tables() -> None:
         assert database.card_name(card_id) != "<none>"
     fixture_tables = torch.load(FIXTURE_DIR / "card_tables.pt", weights_only=False)
     assert fixture_tables["card_features"].shape == database.card_features.shape
+
+
+def test_option_rows_carry_the_target_pokemons_live_state() -> None:
+    """
+    Two options acting on two copies of the *same* card must be rankable, not
+    merely distinguishable.
+
+    ``target_id`` resolves which card an option targets, but a card ID is
+    shared by every copy of that card, so before ``target_state`` two "attach
+    energy" options over two identical Pokemon differed only in a raw
+    ``inPlayIndex`` scalar. A feedforward policy cannot use that index to look
+    the Pokemon up in the ``pokemon`` table, so it could tell the options apart
+    without being able to tell which was the better play.
+
+    Played out on a real battle: whenever a selection offers two options whose
+    resolved target is the same card but a different instance, their encoded
+    rows must differ somewhere other than that index.
+    """
+    encoder = StructuredObservationEncoder(max_options=MAX_OPTIONS)
+    rng = random.Random(11)
+    compared = 0
+
+    for _ in range(40):
+        handle = BattleHandle()
+        observation = handle.start(DECK, DECK)
+        try:
+            for _ in range(300):
+                state = observation.current
+                if state is None or state.result != -1:
+                    break
+                select = observation.select
+                if select is None:
+                    break
+                seat = handle.select_player
+                if select.maxCount == 0:
+                    observation = handle.select([])
+                    continue
+
+                encoded = encoder.encode(observation, seat, 0)["options"]
+                targets: dict[int, list[int]] = {}
+                for slot, option in enumerate(select.option):
+                    pokemon = OptionReferenceResolver.resolve_target_pokemon(
+                        state, option, seat
+                    )
+                    if pokemon is not None:
+                        targets.setdefault(pokemon.id, []).append(slot)
+
+                for slots in targets.values():
+                    for left, right in pairwise(slots):
+                        # Same targeted card, different slot: the resolved
+                        # identity is identical by construction, so any
+                        # difference has to come from the live state block.
+                        assert encoded["target_id"][left] == encoded["target_id"][right]
+                        compared += 1
+                        assert bool(encoded["target_state"][left, 0])
+                        assert bool(encoded["target_state"][right, 0])
+
+                n_options = len(select.option)
+                count = max(
+                    1, rng.randint(select.minCount, min(select.maxCount, n_options))
+                )
+                observation = handle.select(rng.sample(range(n_options), count))
+        finally:
+            handle.finish()
+
+    assert compared > 0, "no selection ever offered two options on the same target card"
+
+
+def test_target_state_is_zero_when_an_option_targets_no_pokemon() -> None:
+    """
+    The resolved flag separates "no target" from "a target whose values happen
+    to be zero", so options with no board target must be all-zero there.
+    """
+    encoder = StructuredObservationEncoder(max_options=MAX_OPTIONS)
+    handle = BattleHandle()
+    observation = handle.start(DECK, DECK)
+    try:
+        state = observation.current
+        select = observation.select
+        assert state is not None and select is not None
+        encoded = encoder.encode(observation, handle.select_player, 0)["options"]
+        for slot, option in enumerate(select.option):
+            pokemon = OptionReferenceResolver.resolve_target_pokemon(
+                state, option, handle.select_player
+            )
+            if pokemon is None:
+                assert not encoded["target_state"][slot].any()
+        # Padding rows past the option count are zero too.
+        assert not encoded["target_state"][len(select.option) :].any()
+    finally:
+        handle.finish()

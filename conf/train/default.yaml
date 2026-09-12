@@ -7,6 +7,18 @@
 # league member afterwards, so the agent keeps a fixed reference point instead
 # of drifting against copies of itself. "random" is the only implemented value.
 warmup_opponent: random
+# Optional permanent anchor: a .pt snapshot loaded as a greedy opponent and
+# kept in the league for the whole run, replacing the random warmup. A strong
+# stationary checkpoint (e.g. the one the run resumes from) gives PFSP a fixed
+# opponent to concentrate on while it still beats the learner, which a random
+# opponent stops providing the moment the learner passes it.
+warmup_checkpoint: null
+# Opponent population source. `selfplay` is the historical/default behavior:
+# random warmup plus learner snapshots from checkpoint_dir. `frozen` and
+# `refresh` are opt-in fixed-deck fine-tuning modes backed by the external
+# checkpoint directory below; refresh also admits this run's learner snapshots.
+opponent_pool_mode: selfplay
+opponent_checkpoint_dir: null
 # Freeze the learner into the self-play pool every N collected frames
 # (0 disables periodic self-play snapshots -> train against the warmup
 # opponent only). Every PPO run still writes one final submission checkpoint.
@@ -19,6 +31,34 @@ checkpoint_dir: checkpoints
 # Number of most-recent snapshots kept in the opponent pool.
 pool_size: 5
 
+# Continue a previous run's policy: load this checkpoint's weights into the
+# freshly built network before training. Weights only -- the snapshot format
+# carries no optimizer state, so Adam's moments restart from zero and the first
+# rollouts after a warm start are noisier than the ones before it. The league
+# also starts empty, refilling from the warm-started weights.
+# null trains from initialization.
+init_checkpoint: null
+# Frames the loaded checkpoint already collected, which the continued run counts
+# from so its metrics, snapshot filenames and evaluation intervals carry on
+# rather than restarting at zero. null reads the count out of the checkpoint,
+# which is what any snapshot written by this repo records; set it explicitly
+# only for a legacy checkpoint that stores none. collector.total_frames is
+# unaffected -- it still means frames to collect in *this* run.
+start_frames: null
+# Rolling file holding the optimizer state, so an interrupted run can be picked
+# up rather than restarted. Written alongside the league snapshots but kept out
+# of them: optimizer moments roughly triple a snapshot's size, and only the
+# newest is ever read. Relative paths resolve inside the Hydra run directory.
+# null writes none, which leaves this run resumable by weights only.
+train_state_path: train_state.pt
+# Frames between training-state writes. 0 writes only at the end of the run.
+train_state_interval: 250000
+# Continue from a train_state.pt: restores the optimizer moments alongside the
+# weights, so Adam does not restart cold the way train.init_checkpoint alone
+# does. Takes precedence over init_checkpoint for the weights, since the two
+# came from the same step. null starts the optimizer fresh.
+resume_state: null
+
 # How the league draws the opponent for each episode:
 #   uniform -> every member equally likely (plain fictitious self-play).
 #   pfsp    -> weight members by the learner's win rate against them, so the
@@ -26,6 +66,13 @@ pool_size: 5
 #              instead of on ones already beaten. Win rates are tracked per
 #              worker from terminal rewards; no extra inter-process traffic.
 opponent_sampling: uniform
+# How a league member picks its move. greedy takes the highest legal logit,
+# which makes every opponent a deterministic function of the state, so the
+# learner faces one fixed reply per position and can best-respond to it.
+# sample draws from the masked distribution instead, so a member offers the
+# spread its policy actually carries. Evaluation opponents stay greedy either
+# way, keeping the eval reference fixed across runs.
+opponent_action_selection: greedy
 # PFSP weighting scheme (ignored under uniform sampling):
 #   hard -> (1 - p)^pfsp_exponent, favours members that beat the learner.
 #   even -> p * (1 - p), favours members the learner is level with.
@@ -67,6 +114,10 @@ eval_opponent: random
 # Snapshot path for eval_opponent=checkpoint; a relative path resolves
 # against the original working directory. Unused for eval_opponent=random.
 eval_opponent_checkpoint: null
+# External frozen population used by eval_opponent=checkpoint_pool. Null falls
+# back to opponent_checkpoint_dir. The evaluation pool never refreshes.
+eval_opponent_checkpoint_dir: null
+eval_opponent_pool_size: null
 # Score against several references at once (overrides eval_opponent when set).
 # Each entry is an eval_opponent value; metrics are namespaced per opponent
 # ("random/win_rate", "first_snapshot/win_rate"). Evaluation cost is the sum
@@ -74,7 +125,7 @@ eval_opponent_checkpoint: null
 eval_opponents: null
 # Cross-play evaluation of the learner against its own frozen checkpoints
 # (needs snapshot_interval > 0). During training it logs the current model vs
-# the latest snapshot; at run end it round-robins every checkpoint into a 
+# the latest snapshot; at run end it round-robins every checkpoint into a
 # win-rate matrix + Bradley-Terry Elo ranking, for picking which checkpoint to submit.
 cross_play: false
 # Games per pairing (per series). Higher is less noisy but costs more at run end.
@@ -84,10 +135,10 @@ cross_play_max_checkpoints: 8
 # Best-response (exploitability) run: instead of self-play, train this learner
 # against one frozen agent and score it against the same agent. The learner's
 # eval win-rate is that agent's exploitability, or how beatable a best-responder
-# finds it. Overrides self-play and eval_opponent, still honors snapshot_interval 
+# finds it. Overrides self-play and eval_opponent, still honors snapshot_interval
 # so the best-responder itself is recoverable and ignores cross_play.
 # Set eval_interval > 0 to see the curve.
 best_response: false
-# Saved agent whose exploitability is measured; required when best_response is 
+# Saved agent whose exploitability is measured; required when best_response is
 # true. Relative paths resolve against the original working directory.
 best_response_checkpoint: null

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
@@ -9,6 +10,7 @@ if TYPE_CHECKING:
     from wandb.sdk.wandb_run import Run
 
 from src.training.callbacks.base import TrainingCallback
+from src.training.callbacks.wandb_fork_guard import WandbForkGuard
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,9 @@ _ARCHETYPE_PREFIX = "archetype_win_rate/"
 
 WandbMode = Literal["online", "offline", "disabled"]
 _VALID_MODES: tuple[str, ...] = get_args(WandbMode)
+
+#: Console-capture modes W&B accepts, in the order of how much they intercept.
+_VALID_CONSOLE_MODES: tuple[str, ...] = ("auto", "off", "wrap", "redirect")
 
 
 class WeightsAndBiases(TrainingCallback):
@@ -33,17 +38,18 @@ class WeightsAndBiases(TrainingCallback):
     """
 
     def __init__(
-            self,
-            project: str,
-            entity: str | None = None,
-            name: str | None = None,
-            group: str | None = None,
-            job_type: str | None = None,
-            tags: Sequence[str] | None = None,
-            mode: str = "online",
-            notes: str | None = None,
-            dir: str | None = None,
-            log_checkpoints: bool = True,
+        self,
+        project: str,
+        entity: str | None = None,
+        name: str | None = None,
+        group: str | None = None,
+        job_type: str | None = None,
+        tags: Sequence[str] | None = None,
+        mode: str = "online",
+        notes: str | None = None,
+        dir: str | None = None,
+        log_checkpoints: bool = True,
+        console: str = "redirect",
     ) -> None:
         """
         :param project: W&B project to log the run under.
@@ -58,12 +64,24 @@ class WeightsAndBiases(TrainingCallback):
         :param dir: Parent directory for W&B's local run files.
         :param log_checkpoints: Mirror written model checkpoints as versioned
             W&B model artifacts.
+        :param console: How W&B captures console output. ``redirect`` replaces
+            the process's file descriptors, which also captures what the forked
+            ``ParallelEnv`` workers write; ``wrap`` only sees writes made in this
+            process; ``off`` captures nothing. Exposed because the workers write
+            through inherited pipes under ``redirect``, which is one candidate
+            for the mid-run worker hangs (see :class:`WandbForkGuard`), and
+            switching it is how that candidate is tested.
         :raises ValueError: If ``mode`` is not a mode W&B accepts. Checked here so
             a config typo fails before the environments are built.
         """
         if mode not in _VALID_MODES:
             raise ValueError(
                 f"Invalid W&B mode {mode!r}; expected one of {', '.join(_VALID_MODES)}."
+            )
+        if console not in _VALID_CONSOLE_MODES:
+            raise ValueError(
+                f"Invalid W&B console mode {console!r}; expected one of "
+                f"{', '.join(_VALID_CONSOLE_MODES)}."
             )
         self._project = project
         self._entity = entity
@@ -75,8 +93,11 @@ class WeightsAndBiases(TrainingCallback):
         self._notes = notes
         self._dir = dir
         self._log_checkpoints = log_checkpoints
+        self._console = console
+        self._fork_guard = WandbForkGuard()
         self._run: Run | None = None
         self._latest_archetype_rates: dict[str, float] = {}
+        self._failure: BaseException | None = None
 
     def on_train_start(self, run_config: Mapping[str, Any]) -> None:
         """
@@ -101,7 +122,21 @@ class WeightsAndBiases(TrainingCallback):
             dir=self._dir,
             config=dict(run_config),
             force=self._mode == "online",
+            # ParallelEnv workers inherit the parent's file descriptors. Using
+            # low-level redirection captures their stdout and stderr too, while
+            # W&B's default stream wrapping only sees writes in this process.
+            settings=wandb.Settings(
+                console=cast(Any, self._console),
+                # ``redirect`` preserves low-level worker output in output.log,
+                # but those records may not populate W&B's Logs tab. Send the
+                # application's Python logs there through W&B's supported
+                # logger integration as well.
+                capture_loggers={"root": "INFO"},
+            ),
         )
+        # Before the collector forks its workers, so none of them inherits a
+        # finalizer that would block their exit and with it the parent's.
+        self._fork_guard.install()
         logger.info(
             "W&B run started: %s (%s, mode=%s)",
             self._run.name,
@@ -134,21 +169,25 @@ class WeightsAndBiases(TrainingCallback):
         :param metrics: Evaluation metrics.
         """
         archetype_rates = {
-            key[len(_ARCHETYPE_PREFIX):]: value
+            key[len(_ARCHETYPE_PREFIX) :]: value
             for key, value in metrics.items()
             if key.startswith(_ARCHETYPE_PREFIX)
         }
         if archetype_rates:
             self._latest_archetype_rates = archetype_rates
         summary = {
-            key: value for key, value in metrics.items() if not key.startswith(_ARCHETYPE_PREFIX)
+            key: value
+            for key, value in metrics.items()
+            if not key.startswith(_ARCHETYPE_PREFIX)
         }
         self._log("eval", step, summary)
 
-    def log_table(self, key: str, columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
+    def log_table(
+        self, key: str, columns: Sequence[str], rows: Sequence[Sequence[Any]]
+    ) -> None:
         """
         Log a one-shot table to the run.
-        
+
         :param key: W&B key the table is logged under.
         :param columns: Column names.
         :param rows: Table rows, one sequence of cell values per row.
@@ -196,7 +235,27 @@ class WeightsAndBiases(TrainingCallback):
         """
         if self._run is None:
             return
-        self._run.log({f"{prefix}/{key}": value for key, value in metrics.items()}, step=step)
+        self._run.log(
+            {f"{prefix}/{key}": value for key, value in metrics.items()}, step=step
+        )
+
+    def on_train_error(self, error: BaseException) -> None:
+        """
+        Remember that the run is ending in failure.
+
+        Recorded rather than acted on immediately, because the run still has to
+        be closed by :meth:`on_train_end`; this only decides the exit code it
+        closes with.
+
+        :param error: The exception that ended the run.
+        """
+        self._failure = error
+        if self._run is not None:
+            self._run.summary["summary/error"] = f"{type(error).__name__}: {error}"
+            # The run is finished during callback teardown, before the
+            # interpreter prints an uncaught exception. Publish the traceback
+            # now so it is visible in W&B's Logs tab while the run is active.
+            self._run.write_logs("".join(traceback.format_exception(error)).rstrip())
 
     def on_train_end(self, summary: Mapping[str, float]) -> None:
         """
@@ -204,6 +263,12 @@ class WeightsAndBiases(TrainingCallback):
 
         Aggregates go to the summary, not the step series: they describe the
         whole run, so they are what the W&B run table sorts on.
+
+        A run that ended in failure is finished with a non-zero exit code, so
+        W&B marks it ``crashed`` rather than ``finished``. Without that, a run
+        that died partway through is indistinguishable in the UI from a short
+        successful one -- which is exactly how a mid-run environment crash came
+        to look like a completed 475k-frame run.
 
         :param summary: Aggregate statistics for the whole run.
         """
@@ -217,6 +282,11 @@ class WeightsAndBiases(TrainingCallback):
             )
         for key, value in summary.items():
             self._run.summary[f"summary/{key}"] = value
-        self._run.finish()
-        logger.info("W&B run finished: %s", self._run.id)
+        run_id = self._run.id
+        if self._failure is None:
+            self._run.finish()
+            logger.info("W&B run finished: %s", run_id)
+        else:
+            self._run.finish(exit_code=1)
+            logger.warning("W&B run marked failed: %s (%s)", run_id, self._failure)
         self._run = None

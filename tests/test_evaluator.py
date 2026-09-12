@@ -2,7 +2,7 @@ from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.env.deck import load_deck
+from src.env.decks.deck import load_deck
 from src.policies.random_masked_policy import RandomMaskedPolicy
 from src.training.env_factory import make_env
 from src.training.evaluator import Evaluator, _archetype_metrics, _episode_archetype
@@ -10,7 +10,9 @@ from src.training.evaluator import Evaluator, _archetype_metrics, _episode_arche
 DECK_PATH = str(Path(__file__).parents[1] / "decks" / "example.csv")
 
 
-def _stub_env(deck_labels: tuple[str, str] | None, agent_seat: int = 0) -> SimpleNamespace:
+def _stub_env(
+    deck_labels: tuple[str, str] | None, agent_seat: int = 0
+) -> SimpleNamespace:
     """A transform-wrapped env stub exposing the attributes eval reads.
 
     :param deck_labels: The leaf env's ``deck_labels``, or None if unlabelled.
@@ -71,12 +73,19 @@ def test_archetype_metrics_empty_is_absent() -> None:
     assert _archetype_metrics({}) == {}
 
 
-def test_episode_archetype_credits_agent_seat() -> None:
+def test_episode_archetype_credits_the_opponent_seat() -> None:
     """
-    An episode is attributed to the deck the agent (not the opponent) piloted.
+    An episode is attributed to the deck the agent *faced*, not the one it piloted.
+
+    Evaluation holds the agent's deck fixed, so crediting its own archetype would
+    put every episode in one bucket; which opponents it beats is the useful split.
     """
-    # Seat 1 holds "opp-b"; the agent sits there, so that is the credited deck.
-    assert _episode_archetype(_stub_env(("mirror-a", "opp-b"), agent_seat=1)) == "opp-b"
+    # Agent sits in seat 1, so seat 0's "mirror-a" is the opponent it faced.
+    assert (
+        _episode_archetype(_stub_env(("mirror-a", "opp-b"), agent_seat=1)) == "mirror-a"
+    )
+    # And from the other seat, the opponent is seat 1's deck.
+    assert _episode_archetype(_stub_env(("mirror-a", "opp-b"), agent_seat=0)) == "opp-b"
 
 
 def test_episode_archetype_none_without_labels() -> None:
@@ -131,9 +140,7 @@ def test_evaluate_without_labels_omits_archetype_metrics() -> None:
     per-archetype breakdown is requested.
     """
     deck = load_deck(DECK_PATH)
-    factory = partial(
-        make_env, {"kind": "fixed", "deck0": deck, "deck1": deck}, 96, 0
-    )
+    factory = partial(make_env, {"kind": "fixed", "deck0": deck, "deck1": deck}, 96, 0)
     evaluator = Evaluator(env_factory=factory, n_episodes=3, per_archetype=True)
     try:
         metrics = evaluator.evaluate(RandomMaskedPolicy())

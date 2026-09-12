@@ -1,26 +1,40 @@
 from .battle_handle import BattleHandle
-from .card_database import CardDatabase
-from .deck import load_deck, load_decks, resolve_deck_paths
-from .deck_sampler import (
+from .decks import (
+    AgentDeckSampler,
     DeckSampler,
     FixedDeckSampler,
     PoolDeckSampler,
     build_deck_sampler,
+    load_deck,
+    load_decks,
+    resolve_deck_paths,
 )
-from .observation_encoder import ObservationEncoder
-from .opponent_pool import OpponentPool
-from .random_opponent import RandomOpponent
-from .snapshot_opponent_pool import SnapshotOpponentPool
-from .structured_observation_encoder import StructuredObservationEncoder
+from .observation import (
+    CardDatabase,
+    ObservationEncoder,
+    OptionReferenceResolver,
+    StructuredObservationEncoder,
+)
+from .opponents import (
+    ExternalSnapshotOpponentPool,
+    OpponentPool,
+    PFSPOpponentPool,
+    RandomOpponent,
+    SnapshotOpponentPool,
+)
 from .tcg_env import TCGEnv
 
 __all__ = [
+    "AgentDeckSampler",
     "BattleHandle",
     "CardDatabase",
     "DeckSampler",
+    "ExternalSnapshotOpponentPool",
     "FixedDeckSampler",
     "ObservationEncoder",
     "OpponentPool",
+    "OptionReferenceResolver",
+    "PFSPOpponentPool",
     "PoolDeckSampler",
     "RandomOpponent",
     "SnapshotOpponentPool",

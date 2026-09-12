@@ -469,12 +469,12 @@ Every cap is an `__init__` parameter of the encoder; the defaults trace to engin
 |---|---|---|
 | `max_options` | 96 | Empirical headroom (max seen under random play: 42; full deck search ≈ 60). Option table has `max_options + 1 = 97` rows so row `i` matches action `i` |
 | `bench_cap` | 8 | Engine constant `BENCH_SIZE_MAX` (in-game default is 5; card effects can raise it) |
-| `hand_cap` | 30 | Headroom; no engine limit on hand size |
+| `hand_cap` | 60 | No engine limit on hand size, but a player owns only `DECK_SIZE` cards |
 | `discard_cap` | 60 | `DECK_SIZE` — a discard pile can never exceed a full deck |
 | `prize_cap` | 6 | `PRIZE_SIZE` — always exactly 6 by rule |
 | `deck_cap` | 60 | `DECK_SIZE` — largest possible deck-search reveal |
 | `looking_cap` | 60 | `DECK_SIZE` |
-| `energy_cap` | 40 | Headroom; no engine limit on attachments |
+| `energy_cap` | 60 | No engine limit on attachments; bounded by `DECK_SIZE` |
 | `evolution_cap` | 2 | Basic → Stage 1 → Stage 2 = at most 2 pre-evolutions |
 
 Derived: `pokemon_rows = 2 * (1 + bench_cap) = 18`.

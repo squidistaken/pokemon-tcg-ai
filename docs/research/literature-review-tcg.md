@@ -35,7 +35,7 @@ function, no rollouts), so the training paradigm doesn't fit a self-play PPO loo
 though the attention architecture is the clearest "attention works for hidden-info TCG
 state" result in the review.
 
-**Relevant/useful:** not at all, because its decision transformers, offline imitation style RL, not applicable. 
+**Relevant/useful:** not at all, because its decision transformers, offline imitation style RL, not applicable.
 
 **Notes:**: The environments they used are too specific of a card game for us to really get some ideas on how to encode the TCG observations.
 
@@ -339,4 +339,3 @@ draft/battle objective mismatch by sharing gradients between them.
   streamer in all Best-of-5 tournaments** of full games (deck building + battle).
   > *"we employ a 0/1 action mask to indicate the available actions that varies at each time
   > step."* / *"Our models defeat the human player in all Best-of-5 tournaments of full games."*
-

@@ -1,6 +1,8 @@
+import inspect
+import logging
 import math
 
-from hydra.utils import instantiate
+from hydra.utils import get_class, instantiate
 from omegaconf import DictConfig, ListConfig
 from tensordict.nn import TensorDictModule
 from torchrl.data import Categorical, Composite, TensorSpec
@@ -18,6 +20,7 @@ LOGITS_KEY = "logits"
 VALUE_KEY = "state_value"
 ACTION_MASK_KEY = "action_mask"
 ACTION_KEY = "action"
+logger = logging.getLogger(__name__)
 # The environment nests the encoder's output under "observation". These are
 # the structured encoder's top-level groups (see StructuredObservationEncoder
 # .spec()); MLPBackbone flattens each and concatenates them.
@@ -42,7 +45,9 @@ def _normalize_keys(raw_keys) -> list:
     :param raw_keys: Keys as read from config (strings or lists for nesting).
     :return: List of ``str`` or ``tuple[str, ...]`` tensordict keys.
     """
-    return [tuple(key) if isinstance(key, (list, ListConfig)) else key for key in raw_keys]
+    return [
+        tuple(key) if isinstance(key, (list, ListConfig)) else key for key in raw_keys
+    ]
 
 
 def _feature_width(spec: TensorSpec | Composite) -> int:
@@ -70,15 +75,15 @@ def _input_dim(obs_spec: Composite, in_keys: list[str]) -> int:
     :param obs_spec: Observation composite spec of the environment.
     :param in_keys: Observation keys the backbone consumes; an entry may name
         a leaf field or a composite group (see :func:`_feature_width`).
-    :return: Total input width fed to :class:`~src.models.backbone.MLPBackbone`.
+    :return: Total input width fed to :class:`~src.models.mlp.MLPBackbone`.
     """
     return sum(_feature_width(obs_spec[key]) for key in in_keys)
 
 
 def build_actor_critic(
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
 ) -> ActorCritic:
     """
     Build the standalone :class:`~src.models.actor_critic.ActorCritic`.
@@ -108,10 +113,44 @@ def build_actor_critic(
     n_actions = int(action_spec.space.n)
 
     in_keys = _normalize_keys(cfg.model.backbone.get("in_keys", DEFAULT_IN_KEYS))
+    # Whether the adapter emits per-option tokens is derived from the chosen
+    # head rather than configured separately: the two must agree, and a config
+    # where they disagree is only ever a mistake.
+    head_class = get_class(cfg.model.head["_target_"])
+    needs_option_repr = bool(getattr(head_class, "requires_option_repr", False))
+    # A trunk configured with option_tokens builds the table itself (projecting
+    # it to the trunk's width and adding a stop-slot segment embedding), so the
+    # adapter must not also emit one -- the backbone rejects both at once.
+    backbone_builds_tokens = bool(cfg.model.backbone.get("option_tokens", False))
+
     backbone_kwargs: dict = {"out_features": embed_dim}
+    adapter: StructuredObsAdapter | None = None
     if any(isinstance(obs_spec[key], Composite) for key in in_keys):
         adapter_kwargs = dict(cfg.model.get("adapter", None) or {})
-        adapter = StructuredObsAdapter(obs_spec=obs_spec, in_keys=in_keys, **adapter_kwargs)
+        adapter_kwargs["emit_option_tokens"] = (
+            needs_option_repr and not backbone_builds_tokens
+        )
+        # Snapshots embed their adapter config, so a checkpoint written before
+        # a parameter was removed still carries the stale key (e.g.
+        # ``card_effect_features``). Filter against the adapter's real
+        # signature rather than passing it through and crashing, so those
+        # checkpoints keep rebuilding at the width they were trained with.
+        adapter_params = inspect.signature(StructuredObsAdapter.__init__).parameters
+        unknown = set(adapter_kwargs) - set(adapter_params)
+        if unknown:
+            logger.warning(
+                "Dropping stale/unknown adapter config keys %s; the adapter "
+                "will use its defaults for them.",
+                sorted(unknown),
+            )
+            adapter_kwargs = {
+                key: value
+                for key, value in adapter_kwargs.items()
+                if key in adapter_params
+            }
+        adapter = StructuredObsAdapter(
+            obs_spec=obs_spec, in_keys=in_keys, **adapter_kwargs
+        )
         backbone_kwargs["adapter"] = adapter
         backbone_kwargs["input_dim"] = adapter.out_features
     else:
@@ -120,21 +159,39 @@ def build_actor_critic(
     # Hydra re-wraps list kwargs as ListConfig; set the normalized (nested-key
     # tuple) form directly so tensordict key lookups resolve.
     backbone.in_keys = in_keys
-    policy_head = instantiate(cfg.model.head, in_features=embed_dim, n_actions=n_actions)
-    value_head = ValueHead(in_features=embed_dim, num_cells=list(cfg.model.value_head.num_cells))
 
-    if getattr(policy_head, "requires_option_repr", False) and not backbone.produces_option_repr:
-        raise ValueError(
-            f"Head {type(policy_head).__name__} needs per-option tokens, but backbone "
-            f"{type(backbone).__name__} does not emit them. Pair the pointer head with a "
-            f"Deep Sets / Set Transformer backbone, or use LinearPolicyHead."
-        )
-    return ActorCritic(backbone=backbone, policy_head=policy_head, value_head=value_head)
+    head_kwargs: dict = {"in_features": embed_dim, "n_actions": n_actions}
+    if needs_option_repr:
+        if adapter is None:
+            raise ValueError(
+                f"Head {head_class.__name__} needs per-option tokens, which require the "
+                f"structured observation groups; got backbone in_keys {in_keys}."
+            )
+        if not backbone.produces_option_repr:
+            raise ValueError(
+                f"Head {head_class.__name__} needs per-option tokens, but backbone "
+                f"{type(backbone).__name__} does not emit them."
+            )
+        # From the backbone, not the adapter: a trunk may project the adapter's
+        # per-entity encodings to its own width or pass them through untouched,
+        # and only it knows which. Asking the adapter would size the head to the
+        # wrong width on the projecting path.
+        head_kwargs["option_dim"] = backbone.option_repr_dim
+    policy_head = instantiate(cfg.model.head, **head_kwargs)
+    value_head = ValueHead(
+        in_features=embed_dim,
+        num_cells=list(cfg.model.value_head.num_cells),
+        activation=cfg.model.value_head.get("activation", "tanh"),
+    )
+
+    return ActorCritic(
+        backbone=backbone, policy_head=policy_head, value_head=value_head
+    )
 
 
 def build_ppo_operator(
-        actor_critic: ActorCritic,
-        action_spec: Categorical,
+    actor_critic: ActorCritic,
+    action_spec: Categorical,
 ) -> ActorValueOperator:
     """
     Wrap an :class:`ActorCritic` in a shared-trunk torchrl operator.
@@ -150,7 +207,9 @@ def build_ppo_operator(
     :return: Operator exposing ``get_policy_operator`` / ``get_value_operator``.
     """
     backbone = actor_critic.backbone
-    common_out = [HIDDEN_KEY, OPTION_REPR_KEY] if backbone.produces_option_repr else [HIDDEN_KEY]
+    common_out = (
+        [HIDDEN_KEY, OPTION_REPR_KEY] if backbone.produces_option_repr else [HIDDEN_KEY]
+    )
     head_in = (
         [HIDDEN_KEY, OPTION_REPR_KEY]
         if getattr(actor_critic.policy_head, "requires_option_repr", False)
@@ -159,21 +218,25 @@ def build_ppo_operator(
 
     common = TensorDictModule(backbone, in_keys=backbone.in_keys, out_keys=common_out)
     policy = ProbabilisticActor(
-        TensorDictModule(actor_critic.policy_head, in_keys=head_in, out_keys=[LOGITS_KEY]),
+        TensorDictModule(
+            actor_critic.policy_head, in_keys=head_in, out_keys=[LOGITS_KEY]
+        ),
         in_keys={"logits": LOGITS_KEY, "mask": ACTION_MASK_KEY},
         out_keys=[ACTION_KEY],
         distribution_class=MaskedCategorical,
         return_log_prob=True,
         spec=action_spec,
     )
-    value = ValueOperator(actor_critic.value_head, in_keys=[HIDDEN_KEY], out_keys=[VALUE_KEY])
+    value = ValueOperator(
+        actor_critic.value_head, in_keys=[HIDDEN_KEY], out_keys=[VALUE_KEY]
+    )
     return ActorValueOperator(common, policy, value)
 
 
 def build_ppo_actor_critic(
-        cfg: DictConfig,
-        obs_spec: Composite,
-        action_spec: Categorical,
+    cfg: DictConfig,
+    obs_spec: Composite,
+    action_spec: Categorical,
 ) -> ActorValueOperator:
     """
     Build the PPO shared-trunk actor-critic operator from config and specs.
@@ -188,4 +251,6 @@ def build_ppo_actor_critic(
     :param action_spec: Environment action spec.
     :return: The assembled :class:`~torchrl.modules.ActorValueOperator`.
     """
-    return build_ppo_operator(build_actor_critic(cfg, obs_spec, action_spec), action_spec)
+    return build_ppo_operator(
+        build_actor_critic(cfg, obs_spec, action_spec), action_spec
+    )

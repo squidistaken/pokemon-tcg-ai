@@ -3,7 +3,7 @@
 #   python -m src.train agent=ppo model/head=linear
 defaults:
   - backbone: mlp        # default backbone; override on the CLI
-  - head: linear         # default head;     override on the CLI
+  - head: pointer        # default head;     override on the CLI (linear = flat baseline)
   - _self_
 
 # Shared token/hidden width; backbones read it as out_features.
@@ -16,6 +16,44 @@ value_head:
 # whenever the backbone's in_keys name structured groups; ignored on the
 # legacy flat-encoder path.
 adapter:
+  # Width of one per-entity encoding: an option row, a Pokemon row, a card in a
+  # zone. Also the width of the option tokens a pointer head scores, so it caps
+  # how finely the head can tell options apart -- a raw option row is ~180
+  # features, and this is what they are compressed to before the head sees them.
+  entity_dim: 64
   card_embed_dim: 8
   attack_embed_dim: 8
   category_embed_dim: 4
+  # How unordered card sets (hand, discard, prizes, the Pokémon board) are
+  # collapsed. A bare mean is a centroid: it cannot express whether a specific
+  # card is present, only what the average card in the zone looks like, which
+  # is why the critic could not predict outcomes. mean_max_sum adds the
+  # element-wise max (presence) and a capacity-normalized sum (count).
+  zone_pooling: mean_max_sum
+  # Pool the two seats' board rows separately instead of collapsing all 18 into
+  # one summary. `pokemon` is the only group carrying both players' rows, so
+  # without this the pooled path is seat-blind: swapping the two boards leaves
+  # state_repr bit-identical (measured 0.000e+00), and the critic -- which sees
+  # only state_repr -- is asked to predict win probability from a board summary
+  # that cannot say whose Pokemon is whose. Widens the group 192 -> 384.
+  #
+  # This changes the model's input widths, so a checkpoint trained before it
+  # cannot load against a config that has it on. Continuing such a run needs
+  # model.adapter.pokemon_seat_split=false on the command line; the strict load
+  # fails loudly rather than silently mismatching.
+  pokemon_seat_split: true
+  # Put the targeted Pokemon's live state (HP, attached energy/tool counts,
+  # is-active) on each option's own row. target_id already says *which card* an
+  # option targets, but a card ID is shared by every copy of it, so without this
+  # two options over two copies of the same Pokemon differ only in a raw index
+  # scalar -- and no feedforward network can use that index to look the Pokemon
+  # up in the `pokemon` table. Measured: 30.2% of same-target-card option pairs
+  # in real play differ in this state, and were previously unrankable.
+  #
+  # This width comes from the observation spec rather than the checkpoint's
+  # config, so it must stay opt-in: a snapshot trained before it has to rebuild
+  # at its original width to serve as an evaluation opponent, and the deployed
+  # Kaggle agent has to keep running.
+  option_target_state: true
+  # emit_option_tokens is not set here: build_actor_critic derives it from the
+  # selected head, so the two can never disagree.

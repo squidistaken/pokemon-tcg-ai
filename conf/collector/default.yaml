@@ -1,2 +1,74 @@
 frames_per_batch: 2048
 total_frames: 16384
+
+# Which TorchRL collector runs data collection. Measured numbers per kind are in
+# docs/training-performance.md; `scripts/bench_throughput.py --mode profile` is what
+# regenerates them.
+#
+#   sync          -> one Collector over a ParallelEnv. The policy lives in this
+#                    process, every worker waits for the slowest at every step,
+#                    and the batch is fully on-policy. The historical default.
+#   multi_sync    -> one worker process per environment, each with its own copy
+#                    of the policy. Removes the per-step round trip through the
+#                    parent, which is where the main process was pegged at one
+#                    core; the learner still waits for every worker, so batches
+#                    stay on-policy.
+#   multi_async   -> as above, but the learner takes whichever rollouts are
+#                    ready and workers keep collecting through the update. Data
+#                    arrives stale, so pair it with agent.value_estimator=vtrace.
+#
+# torchrl's AsyncBatchedCollector was measured and removed: its transport maps a
+# shared-memory segment per leaf tensor per transition, so this observation
+# exhausts vm.max_map_count and it cannot collect a batch at all.
+type: sync
+
+# Rollouts stacked into one learner batch under multi_async. That collector
+# yields one worker's rollout at a time, so without this a PPO batch would be a
+# single environment's experience; stacking env.num_workers of them reproduces
+# the row count of a synchronous batch. null uses the worker count.
+workers_per_batch: null
+
+# Dead worker pools to rebuild and resume from before giving up on the run.
+#
+# The cabt engine aborts its process on rare game states rather than raising: a
+# C++ exception thrown inside it unwinds out through `Select`, which -- unlike
+# the `Search*` entry points -- has no handler, and reaches std::terminate.
+# Nothing on the Python side can catch that, so a ParallelEnv worker simply
+# vanishes and torchrl fails the whole run. Measured once in ~13k episodes
+# (~1.3M frames), which a multi-million-frame budget will hit several times.
+#
+# A restart discards the in-flight batch, every battle in progress and the
+# workers' PFSP win-rate tallies; weights, optimizer, curriculum buffer and
+# frame count all live in the parent process and are untouched. Set 0 to fail
+# on the first death instead -- what you want when debugging the engine rather
+# than training through it.
+max_restarts: 20
+
+# Seconds a ParallelEnv worker and its parent wait on each other before giving
+# up, overriding torchrl's BATCHED_PIPE_TIMEOUT default of 10000 (2h47m).
+#
+# That default is the recovery latency, not the failure: when one worker stops
+# answering, the parent spins on it and the other 31 sit idle waiting for work,
+# and nobody raises until the timeout expires. Two such incidents cost a 5M-frame
+# run 5.6 of its 8.9 hours -- 63% of the wall clock spent waiting to find out
+# something was already wrong. `max_restarts` then recovers in seconds.
+#
+# The floor is NOT how long a step or reset takes. Workers sit blocked on their
+# pipe whenever the parent is doing anything else, so the real constraint is the
+# longest the trainer can go without talking to them -- and that is evaluation,
+# which runs synchronously in the trainer process against its own separate
+# environment while all 32 workers idle.
+#
+# Measured at eval_episodes 200 with two evaluators (a checkpoint opponent and
+# random): 9m47s. At the previous 180 every evaluation round killed the whole
+# pool, and each rebuild spent one of collector.max_restarts -- the budget that
+# exists to absorb the engine aborting its own process on rare game states. A
+# 15M-frame run at eval_interval 750000 has 20 evaluations against 20 restarts,
+# so it was running with no margin for the fault the budget is actually for.
+#
+# 900 covers the measured worst case with ~50% headroom. Lowering eval_episodes
+# shortens the eval and widens that margin further. Raise it if a slow reset
+# ever trips it; set `null` to keep torchrl's default. Zero and negatives are
+# rejected rather than read as an opt-out, so a typo cannot silently restore the
+# 2h47m wait.
+pipe_timeout: 900

@@ -19,10 +19,16 @@ logger = logging.getLogger(__name__)
 
 def _episode_archetype(env: EnvBase) -> str | None:
     """
-    Archetype the agent piloted in the episode the env just finished.
+    Archetype the agent *faced* in the episode the env just finished.
+
+    The breakdown is by opponent, not by the deck the agent piloted. Evaluation
+    holds the agent's deck fixed so the curve measures the submission's deck, so
+    bucketing by the agent's own archetype would put every episode in one bucket
+    and report nothing. Which opponents the agent beats is the useful split, and
+    the only one that says where the policy is weak.
 
     :param env: The evaluation environment, possibly transform-wrapped.
-    :return: The agent's deck archetype, or None when unlabelled.
+    :return: The opponent's deck archetype, or None when unlabelled.
     """
     base: object = env
     while (inner := getattr(base, "base_env", None)) is not None:
@@ -31,7 +37,7 @@ def _episode_archetype(env: EnvBase) -> str | None:
     if labels is None:
         return None
 
-    return labels[getattr(base, "agent_seat", 0)]
+    return labels[1 - getattr(base, "agent_seat", 0)]
 
 
 def _archetype_metrics(per_archetype: dict[str, list[int]]) -> dict[str, float]:
@@ -46,8 +52,7 @@ def _archetype_metrics(per_archetype: dict[str, list[int]]) -> dict[str, float]:
     if not per_archetype:
         return {}
     rates = {
-        archetype: wins / scored
-        for archetype, (scored, wins) in per_archetype.items()
+        archetype: wins / scored for archetype, (scored, wins) in per_archetype.items()
     }
     values = list(rates.values())
     ordered = sorted(values)
@@ -73,7 +78,7 @@ class Evaluator:
     league tracks the learner, so it hovers near 0.5 no matter how strong the
     policy becomes. This evaluator restores a readable learning curve by
     periodically playing the current policy against a *frozen* reference (in
-    practice :class:`~src.env.random_opponent.RandomOpponent`), on its own
+    practice :class:`~src.env.opponents.random_opponent.RandomOpponent`), on its own
     environment that is never used for collection.
 
     Episodes are played one at a time on a single-process environment that is
@@ -97,14 +102,14 @@ class Evaluator:
     """
 
     def __init__(
-            self,
-            env_factory: Callable[[], EnvBase],
-            n_episodes: int = 100,
-            max_steps: int = 2000,
-            device: torch.device | str = "cpu",
-            deterministic: bool = True,
-            name: str = "eval",
-            per_archetype: bool = True,
+        self,
+        env_factory: Callable[[], EnvBase],
+        n_episodes: int = 100,
+        max_steps: int = 2000,
+        device: torch.device | str = "cpu",
+        deterministic: bool = True,
+        name: str = "eval",
+        per_archetype: bool = True,
     ) -> None:
         """
         :param env_factory: Builds the evaluation environment; called once and
@@ -177,7 +182,9 @@ class Evaluator:
         total_steps = 0
         per_archetype: dict[str, list[int]] = {}
         exploration = (
-            ExplorationType.DETERMINISTIC if self._deterministic else ExplorationType.RANDOM
+            ExplorationType.DETERMINISTIC
+            if self._deterministic
+            else ExplorationType.RANDOM
         )
         try:
             with set_exploration_type(exploration):
@@ -263,9 +270,16 @@ class Evaluator:
             steps += 1
             reward = float(tensordict["next", "reward"].reshape(-1)[-1])
             if bool(tensordict["next", "done"].reshape(-1)[-1]):
-                return reward, steps, bool(tensordict["next", "terminated"].reshape(-1)[-1])
+                return (
+                    reward,
+                    steps,
+                    bool(tensordict["next", "terminated"].reshape(-1)[-1]),
+                )
             tensordict = step_mdp(tensordict)
-        logger.warning("Evaluation episode hit the %d-step cap without terminating.", self._max_steps)
+        logger.warning(
+            "Evaluation episode hit the %d-step cap without terminating.",
+            self._max_steps,
+        )
         return reward, steps, False
 
     def close(self) -> None:

@@ -48,7 +48,8 @@ def save_heatmap(
 
     plt.figure(figsize=(10, 8))
     sns.heatmap(sim, cmap="YlGnBu", xticklabels=False, yticklabels=False, square=True)
-    plt.title(title + (" (ordered by archetype)" if archetypes is not None else ""))
+    suffix = "ordered by archetype; " if archetypes is not None else ""
+    plt.title(f"{title} ({suffix}{sim.shape[0]} decks considered)")
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
@@ -70,14 +71,18 @@ def plot_archetype_distribution(archetypes: list[str], out_path: Path) -> None:
     plt.yticks(range(len(labels)), labels, fontsize=6)
     plt.gca().invert_yaxis()
     plt.xlabel("decks")
-    plt.title(f"Archetype distribution ({len(archetypes)} decks, {len(labels)} archetypes)")
+    plt.title(
+        f"Archetype distribution ({len(archetypes)} decks, {len(labels)} archetypes)"
+    )
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
     console.print(f"[green]✓[/] {out_path}")
 
 
-def plot_similarity_histogram(count_sim: np.ndarray, threshold: float, out_path: Path) -> None:
+def plot_similarity_histogram(
+    count_sim: np.ndarray, threshold: float, out_path: Path
+) -> None:
     """
     Save a histogram of pairwise weighted-Jaccard similarity.
 
@@ -93,10 +98,12 @@ def plot_similarity_histogram(count_sim: np.ndarray, threshold: float, out_path:
     off = count_sim[np.triu_indices(count_sim.shape[0], k=1)]
     plt.figure(figsize=(8, 5))
     plt.hist(off, bins=60, color="#55a868", edgecolor="white", linewidth=0.3)
-    plt.axvline(threshold, color="#c44e52", linestyle="--", label=f"near-dup >= {threshold:.2f}")
+    plt.axvline(
+        threshold, color="#c44e52", linestyle="--", label=f"near-dup >= {threshold:.2f}"
+    )
     plt.xlabel("weighted-Jaccard similarity")
     plt.ylabel("deck pairs")
-    plt.title("Pairwise deck similarity")
+    plt.title(f"Pairwise deck similarity ({count_sim.shape[0]} decks considered)")
     plt.legend()
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
@@ -113,11 +120,18 @@ def plot_card_inclusion(presence: np.ndarray, out_path: Path) -> None:
     :return: None.
     """
     plt = _pyplot()
+    from matplotlib.ticker import FuncFormatter
+
     incl = presence.astype(np.float64).mean(axis=0)
     incl = incl[incl > 0]  # cards used by at least one deck
     plt.figure(figsize=(8, 5))
-    plt.hist(incl, bins=50, color="#8172b3", edgecolor="white", linewidth=0.3)
-    plt.xlabel("fraction of decks running the card")
+    bins: int | np.ndarray = 1
+    if incl.size > 1 and incl.min() < incl.max():
+        bins = np.geomspace(incl.min(), incl.max(), 51)
+    plt.hist(incl, bins=bins, color="#8172b3", edgecolor="white", linewidth=0.3)
+    plt.xscale("log")
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:.1E}"))
+    plt.xlabel("fraction of decks running the card (log scale)")
     plt.ylabel("cards")
     plt.title(f"Card inclusion rate ({incl.size} cards used)")
     plt.tight_layout()
@@ -154,7 +168,9 @@ def plot_set_usage(decks: list[list[int]], index: CardIndex, out_path: Path) -> 
     console.print(f"[green]✓[/] {out_path}")
 
 
-def plot_structure_distributions(stats: np.ndarray, columns: list[str], out_path: Path) -> None:
+def plot_structure_distributions(
+    stats: np.ndarray, columns: list[str], out_path: Path
+) -> None:
     """
     Save small-multiple histograms of headline deck-structure statistics.
 
@@ -164,14 +180,27 @@ def plot_structure_distributions(stats: np.ndarray, columns: list[str], out_path
     :return: None.
     """
     plt = _pyplot()
-    wanted = ["pokemon_count", "trainer_count", "energy_ratio", "ex_count", "mean_pokemon_hp", "distinct_cards"]
+    wanted = [
+        "pokemon_count",
+        "trainer_count",
+        "energy_ratio",
+        "ex_count",
+        "mean_pokemon_hp",
+        "distinct_cards",
+    ]
     col_idx = {name: i for i, name in enumerate(columns)}
     keys = [k for k in wanted if k in col_idx]
     fig, axes = plt.subplots(2, 3, figsize=(12, 7))
     for ax, key in zip(axes.ravel(), keys, strict=False):
-        ax.hist(stats[:, col_idx[key]], bins=30, color="#dd8452", edgecolor="white", linewidth=0.3)
+        ax.hist(
+            stats[:, col_idx[key]],
+            bins=30,
+            color="#dd8452",
+            edgecolor="white",
+            linewidth=0.3,
+        )
         ax.set_title(key, fontsize=9)
-    for ax in axes.ravel()[len(keys):]:
+    for ax in axes.ravel()[len(keys) :]:
         ax.axis("off")
     fig.suptitle("Deck-structure distributions")
     fig.tight_layout()

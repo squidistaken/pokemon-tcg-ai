@@ -7,8 +7,8 @@ import torch
 from omegaconf import OmegaConf
 
 from src.checkpoint_registry import read_checkpoint_records
-from src.env.random_opponent import RandomOpponent
-from src.env.snapshot_opponent_pool import SnapshotOpponentPool
+from src.env.opponents.random_opponent import RandomOpponent
+from src.env.opponents.snapshot_opponent_pool import SnapshotOpponentPool
 from src.policies.greedy_policy_opponent import GreedyPolicyOpponent, save_actor_critic
 from src.policies.ppo_actor import build_actor_critic, build_ppo_actor_critic
 from src.training.callbacks import SnapshotCallback
@@ -167,12 +167,16 @@ def test_pool_skips_unreadable_snapshot_and_retries_later(tmp_path) -> None:
     assert pool.snapshot_count == 1
 
 
-def test_snapshot_callback_writes_on_interval(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_snapshot_callback_writes_on_interval(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     Snapshots are written once per interval, leaving no partial ``.tmp`` files
     behind for a scanning worker to trip over.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     callback = SnapshotCallback(actor_critic, tmp_path, interval=100)
     callback.on_train_start({})
     for frames in (50, 100, 150, 200):
@@ -185,19 +189,25 @@ def test_snapshot_callback_writes_on_interval(tmp_path, structured_model_cfg, st
     assert list(tmp_path.glob("*.tmp")) == []
 
 
-def test_snapshot_callback_does_not_rewrite_final_snapshot(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_snapshot_callback_does_not_rewrite_final_snapshot(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     A run ending exactly on a snapshot boundary does not write that snapshot
     twice; a run ending between boundaries still persists its final policy.
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     registry = tmp_path / "logs" / "checkpoint_keys.csv"
     logged: list[tuple[Path, str, int]] = []
     callback = SnapshotCallback(
         actor_critic,
         tmp_path / "checkpoints",
         interval=100,
-        checkpoint_loggers=[lambda path, digest, frames: logged.append((path, digest, frames))],
+        checkpoint_loggers=[
+            lambda path, digest, frames: logged.append((path, digest, frames))
+        ],
         registry_path=registry,
         repo_root=tmp_path,
     )
@@ -266,13 +276,17 @@ def test_final_checkpoint_embeds_config_and_emits_hash_key(
     capsys,
 ) -> None:
     """Even interval=0 writes a self-describing final checkpoint and short key."""
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     logged: list[tuple[Path, str, int]] = []
     callback = SnapshotCallback(
         actor_critic,
         tmp_path / "checkpoints",
         interval=0,
-        checkpoint_loggers=[lambda path, digest, frames: logged.append((path, digest, frames))],
+        checkpoint_loggers=[
+            lambda path, digest, frames: logged.append((path, digest, frames))
+        ],
         registry_path=tmp_path / "logs" / "checkpoint_keys.csv",
         repo_root=tmp_path,
     )
@@ -306,7 +320,9 @@ def test_final_checkpoint_embeds_config_and_emits_hash_key(
     assert f"checkpoint-key: {metadata['key']}" in output
 
 
-def test_disabled_snapshotting_yields_no_opponent_factory(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_disabled_snapshotting_yields_no_opponent_factory(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     ``snapshot_interval: 0`` leaves the environments on their built-in random
     opponent, keeping the baseline path free of self-play machinery.
@@ -316,7 +332,140 @@ def test_disabled_snapshotting_yields_no_opponent_factory(tmp_path, structured_m
     assert factory is None
 
 
-def test_opponent_factory_survives_pickling(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_missing_opponent_pool_mode_keeps_legacy_selfplay_factory(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """Older configs still get the established random-anchored output pool."""
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    assert "opponent_pool_mode" not in cfg.train
+
+    factory = build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
+    assert factory is not None
+    pool = factory()
+
+    assert isinstance(pool, SnapshotOpponentPool)
+    assert isinstance(pool.opponents[0], RandomOpponent)
+    assert pool._checkpoint_dir.resolve() == tmp_path.resolve()  # noqa: SLF001
+
+
+def test_warmup_checkpoint_missing_path_fails_during_factory_build(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """A warmup_checkpoint that does not resolve to a file fails in the parent."""
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    cfg.train.warmup_checkpoint = str(tmp_path / "missing.pt")
+
+    with pytest.raises(ValueError, match="warmup_checkpoint .* does not exist"):
+        build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
+
+
+def test_warmup_checkpoint_replaces_random_anchor(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec, monkeypatch
+) -> None:
+    """warmup_checkpoint becomes the league's anchor instead of RandomOpponent."""
+    anchor = tmp_path / "anchor.pt"
+    anchor.write_bytes(b"placeholder")
+
+    def fake_load(checkpoint_path, cfg, obs_spec, action_spec, encoder):  # noqa: ARG001
+        return lambda _obs: [0]
+
+    monkeypatch.setattr("src.training.self_play._load_snapshot", fake_load)
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    cfg.train.warmup_checkpoint = str(anchor)
+
+    factory = build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
+    assert factory is not None
+    pool = factory()
+
+    assert isinstance(pool, SnapshotOpponentPool)
+    assert pool.snapshot_count == 0
+    assert not isinstance(pool.opponents[0], RandomOpponent)
+
+
+def test_unknown_opponent_pool_mode_fails_during_factory_build(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """A mode typo cannot silently fall back to a different experiment."""
+    cfg = selfplay_cfg(tmp_path, structured_model_cfg)
+    cfg.train.opponent_pool_mode = "frezen"
+
+    with pytest.raises(ValueError, match="unknown opponent_pool_mode"):
+        build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
+
+
+@pytest.mark.parametrize("mode", ["frozen", "refresh"])
+def test_external_modes_reject_pfsp_and_factories_are_picklable(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec, mode: str
+) -> None:
+    """New populations require literal uniform sampling and survive workers."""
+    baseline = tmp_path / "baseline"
+    learner = tmp_path / "learner"
+    write_snapshot_files(baseline, list(range(10)))
+    cfg = selfplay_cfg(learner, structured_model_cfg)
+    cfg.train.opponent_pool_mode = mode
+    cfg.train.opponent_checkpoint_dir = str(baseline)
+    cfg.train.pool_size = 10
+    cfg.train.opponent_sampling = "pfsp"
+
+    with pytest.raises(ValueError, match="requires opponent_sampling=uniform"):
+        build_opponent_factory(cfg, structured_obs_spec, action_spec, learner)
+
+    cfg.train.opponent_sampling = "uniform"
+    factory = build_opponent_factory(cfg, structured_obs_spec, action_spec, learner)
+    assert factory is not None
+    restored = pickle.loads(pickle.dumps(factory))
+    assert restored.keywords["refresh"] is (mode == "refresh")
+
+
+def test_external_modes_validate_checkpoint_sources(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """Missing, undersized, and aliased sources fail in the parent process."""
+    cfg = selfplay_cfg(tmp_path / "learner", structured_model_cfg)
+    cfg.train.opponent_pool_mode = "frozen"
+    cfg.train.opponent_sampling = "uniform"
+    cfg.train.pool_size = 10
+    cfg.train.opponent_checkpoint_dir = str(tmp_path / "missing")
+    with pytest.raises(ValueError, match="does not exist"):
+        build_opponent_factory(
+            cfg, structured_obs_spec, action_spec, tmp_path / "learner"
+        )
+
+    baseline = tmp_path / "baseline"
+    write_snapshot_files(baseline, list(range(9)))
+    cfg.train.opponent_checkpoint_dir = str(baseline)
+    with pytest.raises(ValueError, match="expected at least pool_size=10"):
+        build_opponent_factory(
+            cfg, structured_obs_spec, action_spec, tmp_path / "learner"
+        )
+
+    write_snapshot_files(baseline, [9])
+    cfg.train.opponent_pool_mode = "refresh"
+    with pytest.raises(ValueError, match="must be distinct"):
+        build_opponent_factory(cfg, structured_obs_spec, action_spec, baseline)
+
+
+def test_refresh_requires_periodic_learner_snapshots(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """Refresh cannot be selected while learner snapshot publication is off."""
+    baseline = tmp_path / "baseline"
+    write_snapshot_files(baseline, list(range(10)))
+    cfg = selfplay_cfg(tmp_path / "learner", structured_model_cfg, snapshot_interval=0)
+    cfg.train.opponent_pool_mode = "refresh"
+    cfg.train.opponent_checkpoint_dir = str(baseline)
+    cfg.train.opponent_sampling = "uniform"
+    cfg.train.pool_size = 10
+
+    with pytest.raises(ValueError, match="snapshot_interval > 0"):
+        build_opponent_factory(
+            cfg, structured_obs_spec, action_spec, tmp_path / "learner"
+        )
+
+
+def test_opponent_factory_survives_pickling(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     The factory is pickled into every ParallelEnv worker, so it must round-trip
     and still build a working league on the other side.
@@ -331,13 +480,17 @@ def test_opponent_factory_survives_pickling(tmp_path, structured_model_cfg, stru
     assert pool.snapshot_count == 0
 
 
-def test_real_snapshot_loads_back_into_the_league(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_real_snapshot_loads_back_into_the_league(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     The full write/discover cycle works on a real checkpoint: what the callback
     saves is what a worker's league can rebuild and play.
     """
     cfg = selfplay_cfg(tmp_path, structured_model_cfg)
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     SnapshotCallback(actor_critic, tmp_path, interval=100).on_rollout_end(100, {})
 
     factory = build_opponent_factory(cfg, structured_obs_spec, action_spec, tmp_path)
@@ -347,14 +500,18 @@ def test_real_snapshot_loads_back_into_the_league(tmp_path, structured_model_cfg
     assert pool.snapshot_count == 1
 
 
-def test_league_members_share_one_encoder(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_league_members_share_one_encoder(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     Every snapshot a worker loads reuses that worker's single encoder, rather
     than allocating a fresh set of scratch buffers (and a fresh one-shot
     truncation warning) per league member.
     """
     cfg = selfplay_cfg(tmp_path, structured_model_cfg)
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     callback = SnapshotCallback(actor_critic, tmp_path, interval=100)
     for frames in (100, 200, 300):
         callback.on_rollout_end(frames, {})
@@ -368,11 +525,17 @@ def test_league_members_share_one_encoder(tmp_path, structured_model_cfg, struct
     # Sharing is an internal arrangement with no public surface, so the
     # assertion has to reach for the private members to observe it.
     members = pool._opponents  # noqa: SLF001
-    encoders = {id(member._encoder) for member in members if hasattr(member, "_encoder")}  # noqa: SLF001
+    encoders = {
+        id(member._encoder)  # noqa: SLF001
+        for member in members
+        if hasattr(member, "_encoder")
+    }
     assert len(encoders) == 1
 
 
-def test_eval_opponent_factory_builds_the_configured_reference(tmp_path, structured_model_cfg) -> None:
+def test_eval_opponent_factory_builds_the_configured_reference(
+    tmp_path, structured_model_cfg
+) -> None:
     """
     The evaluator's opponent comes from ``train.eval_opponent`` explicitly,
     rather than from whatever the environment happens to default to.
@@ -402,7 +565,9 @@ def test_checkpoint_eval_opponent_loads_a_frozen_snapshot(
     ``eval_opponent=checkpoint`` scores the run against a frozen saved model.
     """
     cfg = selfplay_cfg(tmp_path, structured_model_cfg)
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     snapshot = save_actor_critic(actor_critic, tmp_path / "reference.pt")
     cfg.train.eval_opponent = "checkpoint"
     cfg.train.eval_opponent_checkpoint = str(snapshot)
@@ -423,7 +588,9 @@ def test_checkpoint_eval_opponent_requires_a_path(
         build_eval_opponent_factory(cfg, structured_obs_spec, action_spec)
 
 
-def test_checkpoint_eval_opponent_requires_specs(tmp_path, structured_model_cfg) -> None:
+def test_checkpoint_eval_opponent_requires_specs(
+    tmp_path, structured_model_cfg
+) -> None:
     """
     Rebuilding a checkpoint's network needs the env specs, so omitting them raises.
     """
@@ -447,6 +614,32 @@ def test_checkpoint_eval_opponent_rejects_missing_file(
         build_eval_opponent_factory(cfg, structured_obs_spec, action_spec)
 
 
+def test_checkpoint_pool_eval_is_frozen_to_baseline_directory(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
+    """Aggregate evaluation never adds the refreshed learner population."""
+    baseline = tmp_path / "baseline"
+    learner = tmp_path / "learner"
+    write_snapshot_files(baseline, list(range(10)))
+    write_snapshot_files(learner, [999])
+    cfg = selfplay_cfg(learner, structured_model_cfg)
+    cfg.train.opponent_pool_mode = "refresh"
+    cfg.train.opponent_checkpoint_dir = str(baseline)
+    cfg.train.eval_opponent_checkpoint_dir = str(baseline)
+    cfg.train.eval_opponent_pool_size = 10
+
+    factory = build_eval_opponent_factory(
+        cfg,
+        structured_obs_spec,
+        action_spec,
+        opponent="checkpoint_pool",
+    )
+
+    assert factory.keywords["checkpoint_dirs"] == (baseline.resolve(),)
+    assert factory.keywords["refresh"] is False
+    assert factory.keywords["pool_size"] == 10
+
+
 def test_best_response_opponent_loads_the_frozen_agent(
     tmp_path, structured_model_cfg, structured_obs_spec, action_spec
 ) -> None:
@@ -454,11 +647,15 @@ def test_best_response_opponent_loads_the_frozen_agent(
     The best-response opponent is the frozen agent whose exploitability is probed.
     """
     cfg = selfplay_cfg(tmp_path, structured_model_cfg)
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     probed = save_actor_critic(actor_critic, tmp_path / "probed.pt")
     cfg.train.best_response_checkpoint = str(probed)
 
-    factory = build_best_response_opponent_factory(cfg, structured_obs_spec, action_spec)
+    factory = build_best_response_opponent_factory(
+        cfg, structured_obs_spec, action_spec
+    )
     assert isinstance(factory(), GreedyPolicyOpponent)
 
 
@@ -469,10 +666,16 @@ def test_best_response_opponent_survives_pickling(
     The collection opponent is pickled into each worker, so it must round-trip.
     """
     cfg = selfplay_cfg(tmp_path, structured_model_cfg)
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
-    cfg.train.best_response_checkpoint = str(save_actor_critic(actor_critic, tmp_path / "probed.pt"))
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    cfg.train.best_response_checkpoint = str(
+        save_actor_critic(actor_critic, tmp_path / "probed.pt")
+    )
 
-    factory = build_best_response_opponent_factory(cfg, structured_obs_spec, action_spec)
+    factory = build_best_response_opponent_factory(
+        cfg, structured_obs_spec, action_spec
+    )
     opponent = pickle.loads(pickle.dumps(factory))()
     assert isinstance(opponent, GreedyPolicyOpponent)
 
@@ -492,7 +695,9 @@ def test_best_response_requires_an_existing_checkpoint(
 
 
 @pytest.mark.parametrize("deterministic", [True, False])
-def test_evaluator_scores_policy_against_fixed_opponent(structured_model_cfg, deterministic) -> None:
+def test_evaluator_scores_policy_against_fixed_opponent(
+    structured_model_cfg, deterministic
+) -> None:
     """
     Evaluation plays complete episodes against the fixed random opponent and
     reports outcome rates that partition the episodes, in both action-selection
@@ -516,5 +721,7 @@ def test_evaluator_scores_policy_against_fixed_opponent(structured_model_cfg, de
         evaluator.close()
 
     assert metrics["episodes"] == 2
-    assert metrics["win_rate"] + metrics["draw_rate"] + metrics["loss_rate"] == pytest.approx(1.0)
+    assert metrics["win_rate"] + metrics["draw_rate"] + metrics[
+        "loss_rate"
+    ] == pytest.approx(1.0)
     assert metrics["mean_episode_length"] > 0

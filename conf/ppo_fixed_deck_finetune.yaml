@@ -1,0 +1,107 @@
+# Fixed-deck PPO fine-tuning from the 85.7M-frame Transformer checkpoint.
+#
+# Player 1 always pilots Alakazam-Dudunsparce. Player 2's policy is sampled
+# uniformly from an external checkpoint population, independently of its deck,
+# while its deck is drawn from the complete heuristic-resolved corpus using raw
+# observation_count weights. Rewards remain the engine's sparse terminal reward.
+defaults:
+  - config
+  - override /agent: ppo
+  - override /train: ppo_selfplay
+  - override /env: multideck
+  - override /model/backbone: transformer
+  - override /model/head: pointer
+  - _self_
+
+# Override these paths at launch when checkpoints and decks live on shared HPC
+# storage. The init snapshot is weights-only, so the optimizer starts fresh.
+finetune_checkpoint_dir: checkpoints/baseline-training-checkpoints
+finetune_init_checkpoint: ${finetune_checkpoint_dir}/snapshot_000085688320.pt
+finetune_agent_deck: ${paths.data_dir}/heuristic-resolved/alakazam-dudunsparce/alakazam-dudunsparce-4.csv
+
+deck_corpus: heuristic-resolved
+seed: 42
+set_seed: true
+
+env:
+  agent_deck: ${finetune_agent_deck}
+  eval_agent_deck: ${finetune_agent_deck}
+  agent_deck_field_prob: 0.0
+  # The other seat needs one independent corpus draw, not a manufactured pair
+  # whose unused member would advance the weighted/RR sampler.
+  agent_deck_single_field_draw: true
+  deck_matchup: independent
+  eval_deck_matchup: independent
+  # `uniform` is the sampler's i.i.d. mode; supplying the raw manifest weights
+  # below turns its categorical draw into observation-weighted sampling.
+  deck_sampling: uniform
+  deck_weighting: observation
+  deck_holdout_frac: 0.0
+  eval_panel_size: 10
+  eval_deck_sampling: round_robin
+  curriculum:
+    enabled: false
+  num_workers: 16
+
+# Preserve the baseline checkpoint's Transformer/pointer architecture.
+model:
+  embed_dim: 256
+  backbone:
+    token_groups: [pokemon]
+    option_tokens: true
+  adapter:
+    card_embed_dim: 16
+    entity_dim: 128
+    option_target_state: true
+    pokemon_seat_split: true
+
+agent:
+  lr: 2.0e-4
+  entropy_coeff: 0.015
+  device: cuda
+  collector_device: cpu
+
+collector:
+  type: multi_sync
+  # The vendored engine occasionally aborts one worker on a rare invalid-index
+  # game state. The trainer rebuilds that worker pool without losing learner or
+  # optimizer state. A 30M-frame run can plausibly exceed the generic budget of
+  # 20; the separate three-consecutive-barren-restart guard still stops a
+  # deterministic startup/configuration failure from looping indefinitely.
+  max_restarts: 30
+  # Exactly 1,832 PPO batches of 16,384 frames. Added to the checkpoint's
+  # 85,688,320 frames, the final absolute counter is 115,703,808.
+  total_frames: 30015488
+
+train:
+  init_checkpoint: ${finetune_init_checkpoint}
+  opponent_pool_mode: frozen
+  opponent_checkpoint_dir: ${finetune_checkpoint_dir}
+  opponent_sampling: uniform
+  pool_size: 10
+  checkpoint_dir: ${hydra:runtime.output_dir}/checkpoints
+  snapshot_interval: 500000
+  train_state_interval: 250000
+  eval_interval: 500000
+  eval_episodes: 50
+  eval_per_archetype: true
+  eval_opponents:
+    - checkpoint_pool
+    - random
+  # Evaluation always stays on the original ten baseline policies, including
+  # when training uses refresh and begins admitting learner snapshots.
+  eval_opponent_checkpoint_dir: ${finetune_checkpoint_dir}
+  eval_opponent_pool_size: 10
+  cross_play: false
+
+wandb:
+  tags:
+    - fixed-deck-finetune
+    - alakazam-dudunsparce
+    - observation-weighted
+    - transformer
+    - pointer-head
+  notes: >-
+    Fixed-deck fine-tuning from snapshot 85,688,320. Player 1 always pilots
+    Alakazam-Dudunsparce; Player 2 policy and observation-weighted deck are
+    independently sampled. Sparse terminal rewards; fresh optimizer.

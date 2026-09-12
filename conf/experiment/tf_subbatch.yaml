@@ -1,0 +1,24 @@
+# @package _global_
+# Diagnosis arm: give the optimizer more than 4 steps per collected batch.
+#
+# conf/agent/ppo.yaml sets sub_batch_size == frames_per_batch == 4096, and
+# PPOTrainer clamps `sub_batch_size = min(sub_batch_size, frames_per_batch)`,
+# so the inner loop runs exactly one minibatch per epoch: 4 optimizer steps
+# per 4096 frames. The reference run took ~1,292 gradient steps in total.
+# 256 is the value docs/architecture/ppo-transformer-actor-critic.md specifies;
+# the 4096 in conf/ is drift, carrying a "reduce if not a lot of memory" note
+# that no longer applies (the A100 run peaked at 3.19 GB of 40 GB).
+#
+# 16x the updates for identical frames and identical collection cost.
+agent:
+  sub_batch_size: 256
+
+wandb:
+  name: tf-subbatch-s42
+  tags:
+    - issue-45
+    - tf-diagnosis
+    - optimizer-steps
+  notes: >-
+    Transformer diagnosis: sub_batch_size 4096 -> 256, raising optimizer steps
+    per collected batch from 4 to 64 at unchanged frames and collection cost.

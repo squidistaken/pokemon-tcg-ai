@@ -155,7 +155,7 @@ def main() -> None:
     # The engine is the authority on legality, so prove each deck starts rather
     # than trusting the construction rules restated above.
     from src.env.battle_handle import BattleHandle
-    from src.env.deck import load_deck
+    from src.env.decks.deck import load_deck
 
     for path in written:
         deck = load_deck(str(path))

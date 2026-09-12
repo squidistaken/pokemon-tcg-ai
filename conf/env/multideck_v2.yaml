@@ -1,21 +1,37 @@
 # Archetype-filtered slice of the tournament deck corpus under decks/,
-# restricted to archetypes with at least 8 lists: 15 archetypes, 242 of the
-# corpus's 329 decks.
+# restricted to archetypes with at least 8 lists: 19 archetypes, 316 of the
+# corpus's 400 decks.
 #
 # Why the filter: the curriculum's level space is archetype *pairs*, so it grows
 # with the square of the archetype count while the episode budget stays fixed.
-# All 53 archetypes give 2809 matchups, or ~5 episodes each at 2M frames -- too
+# All 61 archetypes give 3721 matchups, or ~4 episodes each at 2M frames -- too
 # few for a level's mean-residual score to mean anything, and under the
 # curriculum's min_visits floor. The threshold trades the long tail of
-# rarely-played archetypes (keeping 242 of 329 decks) for 225 matchups at ~67
+# rarely-played archetypes (keeping 316 of 400 decks) for 361 matchups at ~42
 # episodes each, where scores are averages over enough games to rank on. It also
 # keeps the 20% holdout meaningful -- the split is global rather than stratified,
 # so with only a handful of lists per archetype the thinner ones would often
-# contribute nothing at all to the evaluator. At >=8 the split lands 194 decks in
-# train and 48 across 13 of the 15 archetypes in eval.
+# contribute nothing at all to the evaluator. At >=8 the split lands 253 decks in
+# train and 63 across 18 of the 19 archetypes in eval.
+#
+# Re-pinned 2026-08-01 after a corpus refresh (329 -> 400 decks) pushed
+# dragapult-blaziken, mega-venusaur, raging-bolt-ogerpon and slowking past the
+# threshold. Runs before and after that re-pin are different experiments: the
+# previous pool was the 15 archetypes this list held minus those four.
+#
+# Entries are ${paths.data_dir}-relative, not hardcoded "decks/<archetype>":
+# the corpus has since been reorganized into per-resolution-strategy
+# subdirectories (decks/heuristic-resolved/, decks/mapping-resolved/), so a
+# bare "decks/<archetype>" no longer resolves (every archetype directory
+# moved one level deeper). A run now needs paths.data_dir set to whichever
+# subdirectory it wants -- e.g. paths.data_dir=decks/heuristic-resolved -- or
+# resolve_deck_paths raises "matched no CSV files" at env-factory time, not at
+# Hydra compose time, which is why this crashed mid-job rather than at
+# submission (see scripts/run_ptr_sweep.sh's --decks-dir).
 #
 # Usage:
-#   python -m src.train agent=ppo env=multideck_v2 train=ppo_selfplay
+#   python -m src.train agent=ppo env=multideck_v2 train=ppo_selfplay \
+#     paths.data_dir=decks/heuristic-resolved
 defaults:
   - default
   - _self_
@@ -26,18 +42,22 @@ deck_sampling: uniform
 deck_holdout_frac: 0.2
 
 deck_pool:
-  - decks/alakazam-dudunsparce
-  - decks/cynthias-garchomp
-  - decks/dragapult
-  - decks/dragapult-dusknoir
-  - decks/festival-lead
-  - decks/flareon-noctowl
-  - decks/grimmsnarl-froslass
-  - decks/lucario-hariyama
-  - decks/mega-lucario
-  - decks/ns-zoroark
-  - decks/ogerpon-meganium
-  - decks/other
-  - decks/rockets-honchkrow
-  - decks/rockets-mewtwo
-  - decks/rockets-porygon-z
+  - ${paths.data_dir}/${deck_corpus}/alakazam-dudunsparce
+  - ${paths.data_dir}/${deck_corpus}/cynthias-garchomp
+  - ${paths.data_dir}/${deck_corpus}/dragapult
+  - ${paths.data_dir}/${deck_corpus}/dragapult-blaziken
+  - ${paths.data_dir}/${deck_corpus}/dragapult-dusknoir
+  - ${paths.data_dir}/${deck_corpus}/festival-lead
+  - ${paths.data_dir}/${deck_corpus}/flareon-noctowl
+  - ${paths.data_dir}/${deck_corpus}/grimmsnarl-froslass
+  - ${paths.data_dir}/${deck_corpus}/lucario-hariyama
+  - ${paths.data_dir}/${deck_corpus}/mega-lucario
+  - ${paths.data_dir}/${deck_corpus}/mega-venusaur
+  - ${paths.data_dir}/${deck_corpus}/ns-zoroark
+  - ${paths.data_dir}/${deck_corpus}/ogerpon-meganium
+  - ${paths.data_dir}/${deck_corpus}/other
+  - ${paths.data_dir}/${deck_corpus}/raging-bolt-ogerpon
+  - ${paths.data_dir}/${deck_corpus}/rockets-honchkrow
+  - ${paths.data_dir}/${deck_corpus}/rockets-mewtwo
+  - ${paths.data_dir}/${deck_corpus}/rockets-porygon-z
+  - ${paths.data_dir}/${deck_corpus}/slowking

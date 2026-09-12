@@ -11,6 +11,10 @@ players independently piloted across five tournaments were indistinguishable in 
 corpus. ``observation_count`` is that popularity signal, and each observation keeps
 its own event, dates, record, placing, URL, and source-native IDs.
 
+Schema v3 adds structured card substitutions to each observation. Keeping them on
+the occurrence rather than the deduplicated deck preserves which original cards
+produced the same final competition-legal 60-card list.
+
 Re-scrapes must not inflate the count, so every occurrence carries a stable
 identity (:meth:`Observation.key`) built from the source's own IDs. Re-running the
 same scrape re-observes occurrences already on file and changes nothing.
@@ -23,7 +27,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 #: How ``id_hash`` is computed. See :func:`scraper.writer.deck_hash`; a change to
 #: the algorithm must bump this string so stale hashes can't be mistaken for live ones.
 HASH_ALGO = "sha1-sorted-card-ids-12"
@@ -61,6 +65,8 @@ class Observation:
     # Source-native identifiers that pin this occurrence down across re-scrapes,
     # e.g. {"tournament_id": "...", "placing": "3"} for limitless.
     external_ids: dict[str, str] = field(default_factory=dict)
+    # Structured source-printing -> competition-card decisions for this occurrence.
+    substitutions: list[dict[str, Any]] = field(default_factory=list)
     # Set when near-duplicate pruning folded this occurrence into another deck's
     # entry: the slug it was originally observed under. The cards it was observed
     # with differed slightly from its host entry's, so the provenance says so
@@ -77,7 +83,9 @@ class Observation:
         :return: An opaque string equal for two observations of the same occurrence.
         """
         if self.external_ids:
-            ids = ";".join(f"{k}={self.external_ids[k]}" for k in sorted(self.external_ids))
+            ids = ";".join(
+                f"{k}={self.external_ids[k]}" for k in sorted(self.external_ids)
+            )
             return f"{self.source}|{ids}"
         parts = (self.url, self.event, self.placing, self.record, self.event_date)
         return f"{self.source}|" + "|".join("" if p is None else str(p) for p in parts)
@@ -105,6 +113,7 @@ class Observation:
             "placing": self.placing,
             "url": self.url,
             "external_ids": dict(self.external_ids),
+            "substitutions": [dict(item) for item in self.substitutions],
             "merged_from": self.merged_from,
         }
 
@@ -125,6 +134,11 @@ class Observation:
             placing=data.get("placing"),
             url=data.get("url"),
             external_ids=dict(data.get("external_ids") or {}),
+            substitutions=[
+                dict(item)
+                for item in data.get("substitutions") or []
+                if isinstance(item, dict)
+            ],
             merged_from=data.get("merged_from"),
         )
 
@@ -204,7 +218,9 @@ class DeckEntry:
             archetype=data.get("archetype") or "",
             fmt=data.get("format"),
             warnings=list(data.get("warnings") or []),
-            observations=[Observation.from_json(o) for o in data.get("observations") or []],
+            observations=[
+                Observation.from_json(o) for o in data.get("observations") or []
+            ],
         )
 
     @classmethod
@@ -216,7 +232,7 @@ class DeckEntry:
         ``scraped_date`` set and ``event_date`` left None.
 
         :param data: One deck object from a v1 manifest file.
-        :return: The equivalent v2 :class:`DeckEntry`.
+        :return: The equivalent current-schema :class:`DeckEntry`.
         """
         entry = cls(
             file=data.get("file") or "",
@@ -277,7 +293,9 @@ class Manifest:
         return {
             "schema_version": SCHEMA_VERSION,
             "hash_algo": HASH_ALGO,
-            "decks": {slug: entry.to_json() for slug, entry in sorted(self.decks.items())},
+            "decks": {
+                slug: entry.to_json() for slug, entry in sorted(self.decks.items())
+            },
         }
 
     @classmethod
@@ -285,7 +303,8 @@ class Manifest:
         """Parse either schema version.
 
         A v1 file has no ``schema_version`` and is a bare slug -> entry mapping; it
-        is upgraded in memory and rewritten as v2 on the next save.
+        is upgraded in memory and rewritten as v3 on the next save. Schema v2 is
+        read directly with empty per-observation substitutions.
 
         :param data: The parsed manifest document.
         :return: The :class:`Manifest`.
@@ -293,7 +312,9 @@ class Manifest:
             version than this code understands (writing it would drop fields).
         """
         if not isinstance(data, dict):
-            raise ManifestError(f"manifest must be a JSON object, found {type(data).__name__}")
+            raise ManifestError(
+                f"manifest must be a JSON object, found {type(data).__name__}"
+            )
         version = data.get("schema_version")
         if version is None:
             return cls(
@@ -312,7 +333,7 @@ class Manifest:
             )
         raw_decks = data.get("decks")
         if not isinstance(raw_decks, dict):
-            raise ManifestError("v2 manifest is missing its 'decks' object")
+            raise ManifestError("versioned manifest is missing its 'decks' object")
         return cls(
             decks={
                 slug: DeckEntry.from_json(entry)

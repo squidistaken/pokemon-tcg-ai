@@ -3,26 +3,130 @@ import signal
 import time
 from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Any, cast
 
 import torch.multiprocessing as torch_mp
 from tensordict import TensorDict
 from torch import Tensor, nn
-from torchrl.collectors import Collector
 from torchrl.envs import EnvBase, ParallelEnv, SerialEnv
 from tqdm import tqdm
 
 from src.training.base_trainer import BaseTrainer
 from src.training.callbacks import CallbackList, TrainingCallback
+from src.training.collectors import (
+    AsyncCollectorOptions,
+    CollectorKind,
+    TrainingCollector,
+    build_collector,
+    parse_collector_kind,
+    requires_weight_sync,
+)
 from src.training.evaluator import Evaluator
 from src.training.multi_evaluator import MultiEvaluator
+from src.training.pipe_timeout import apply_pipe_timeout
 
 logger = logging.getLogger(__name__)
 
 # Metrics every iteration reports.
 # Anything else in a metrics mapping comes from the algorithm's _update and is
 # formatted generically.
-_CORE_METRICS = ("frames", "episodes", "win_rate", "draw_rate", "fps")
+_CORE_METRICS = (
+    "frames",
+    "episodes",
+    "win_rate",
+    "draw_rate",
+    "truncation_rate",
+    "fps",
+)
+
+#: Lowercase substrings identifying torchrl's report that a ParallelEnv worker
+#: process is gone. A C++ exception inside the engine reaches std::terminate
+#: instead of unwinding, so the worker aborts and the parent sees only a dead
+#: pipe, raised as a bare RuntimeError. Hence the string match: torchrl has no
+#: dedicated exception type for it.
+_WORKER_DEATH_MARKERS = (
+    "at least one process failed",
+    "cannot proceed, worker",
+)
+
+#: Consecutive restarts that collect nothing before dying again, after which
+#: the loop stops respawning. A pool that cannot complete a single batch is
+#: failing for a reason a restart will not fix (a bad checkpoint, an
+#: unsatisfiable config), and retrying it forever would burn the wall clock
+#: while looking like a live run.
+_MAX_BARREN_RESTARTS = 3
+
+
+def _is_worker_death(error: BaseException) -> bool:
+    """
+    Whether an exception raised out of collection means a worker process died.
+
+    :param error: Exception raised while iterating the collector.
+    :return: True if this is a dead worker rather than a fault in the update.
+    """
+    # TorchRL's collector iterator calls shutdown while handling a dead-worker
+    # RuntimeError. With current multiprocessing that shutdown can itself raise
+    # ``ValueError: process object is closed``, leaving the original useful
+    # RuntimeError only in ``__context__``. Walk the chain so cleanup cannot
+    # disguise a recoverable pool death as an unrelated ValueError.
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, EOFError | BrokenPipeError | ConnectionResetError):
+            # The parent hit the far end of a worker's pipe directly, before
+            # torchrl's own liveness check ran.
+            return True
+        message = str(current).lower()
+        if any(marker in message for marker in _WORKER_DEATH_MARKERS):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+@dataclass
+class _RunTotals:
+    """
+    Running totals for one training run, carried across collector restarts.
+
+    Held in the parent process, so a dead worker pool costs the run only its
+    in-flight batch: the counters, the policy, the optimizer and the curriculum
+    all survive untouched.
+
+    :param frames: Frames collected so far *by this run*.
+    :param episodes: Episodes finished so far, decided or not.
+    :param wins: Episodes won so far.
+    :param draws: Episodes drawn so far.
+    :param truncations: Episodes cut off by the engine's selection cap, which
+        produce no result and are therefore excluded from the win/draw rates.
+    :param last_eval_frames: Absolute frame count at the most recent evaluation.
+    :param start_frames: Frames a warm-started run inherits from the checkpoint
+        it continues, so reported counts carry on from there rather than
+        restarting at zero.
+    """
+
+    frames: int = 0
+    episodes: int = 0
+    wins: int = 0
+    draws: int = 0
+    truncations: int = 0
+    last_eval_frames: int = 0
+    start_frames: int = 0
+
+    @property
+    def absolute_frames(self) -> int:
+        """
+        Frame count as reported outward, spanning the run being continued.
+
+        The collection loop budgets against :attr:`frames` (what *this* process
+        must still collect), while snapshots, metrics and evaluation intervals
+        are keyed to this absolute count, so a continued run's checkpoints sort
+        after its predecessor's instead of colliding with them.
+
+        :return: Inherited frames plus frames collected so far.
+        """
+        return self.start_frames + self.frames
 
 
 @contextmanager
@@ -49,7 +153,9 @@ def _deferred_interrupt() -> Generator[None, None, None]:
     finally:
         signal.signal(
             signal.SIGINT,
-            previous_handler if previous_handler is not None else signal.default_int_handler,
+            previous_handler
+            if previous_handler is not None
+            else signal.default_int_handler,
         )
 
 
@@ -65,19 +171,28 @@ class Trainer(BaseTrainer):
     :meth:`_update` with the advantage/loss/optimizer step.
     """
 
+    _callbacks: CallbackList
+
     def __init__(
-            self,
-            env_factories: list[Callable[[], EnvBase]],
-            policy: nn.Module,
-            frames_per_batch: int,
-            total_frames: int,
-            use_parallel_env: bool = True,
-            mp_start_method: str = "fork",
-            serial_for_single: bool = True,
-            callbacks: Iterable[TrainingCallback] | None = None,
-            run_config: Mapping[str, Any] | None = None,
-            evaluator: Evaluator | MultiEvaluator | None = None,
-            eval_interval: int = 0,
+        self,
+        env_factories: list[Callable[[], EnvBase]],
+        policy: nn.Module,
+        frames_per_batch: int,
+        total_frames: int,
+        use_parallel_env: bool = True,
+        mp_start_method: str = "fork",
+        serial_for_single: bool = True,
+        callbacks: Iterable[TrainingCallback] | None = None,
+        run_config: Mapping[str, Any] | None = None,
+        evaluator: Evaluator | MultiEvaluator | None = None,
+        eval_interval: int = 0,
+        max_collector_restarts: int = 0,
+        rebuild_env_factories: Callable[[int], list[Callable[[], EnvBase]]]
+        | None = None,
+        pipe_timeout: float | None = None,
+        start_frames: int = 0,
+        collector_type: str | CollectorKind = CollectorKind.SYNC,
+        async_options: AsyncCollectorOptions | None = None,
     ) -> None:
         """
         :param env_factories: One environment factory per worker.
@@ -100,6 +215,29 @@ class Trainer(BaseTrainer):
             collected win-rate is pinned near 0.5 by construction.
         :param eval_interval: Frames between evaluations; ``0`` disables them
             even when an evaluator is supplied.
+        :param max_collector_restarts: How many times a dead worker pool may be
+            rebuilt and collection resumed, rather than ending the run. ``0``
+            (the default) propagates the failure as before. See :meth:`train`
+            for what a restart costs.
+        :param rebuild_env_factories: Builds a replacement set of factories for
+            restart *n* (1-based), so a restarted pool does not replay the
+            per-worker seed stream the dead one started from. None reuses the
+            original factories, which is fine for a stochastic policy but
+            re-deals the same deck/seat sequence. Unused when
+            ``max_collector_restarts`` is 0.
+        :param pipe_timeout: Seconds a worker and its parent wait on each other
+            before raising, overriding torchrl's 10000-second default. This is
+            purely how fast an unresponsive worker is *detected*;
+            ``max_collector_restarts`` is what recovers from it. ``None``
+            keeps torchrl's default. See
+            :func:`~src.training.pipe_timeout.apply_pipe_timeout`.
+        :param start_frames: Frames already collected by the run this one
+            continues, taken from the warm-start checkpoint. ``total_frames``
+            still means frames to collect *now*, so this only shifts what the
+            run reports: metrics, snapshot filenames and evaluation intervals
+            all count from here. ``0`` is a fresh run.
+        :param collector_type: Which TorchRL collector drives collection.
+        :param async_options: Settings only the asynchronous collectors read.
         """
         self._env_factories = env_factories
         self._policy = policy
@@ -112,75 +250,271 @@ class Trainer(BaseTrainer):
         self._run_config = run_config if run_config is not None else {}
         self._evaluator = evaluator
         self._eval_interval = eval_interval
+        self._max_collector_restarts = max_collector_restarts
+        self._rebuild_env_factories = rebuild_env_factories
+        self._pipe_timeout = pipe_timeout
+        self._start_frames = start_frames
+        self._collector_kind = parse_collector_kind(collector_type)
+        self._async_options = async_options or AsyncCollectorOptions()
+        # The Collector rounds its budget up to a whole number of batches, so
+        # anchoring the loop to the same rounded figure keeps the remaining
+        # frames handed to a restarted Collector exactly divisible. Passing the
+        # raw remainder instead would re-trigger torchrl's not-divisible warning
+        # on every restart and drift the run's total frame count.
+        batches = -(-total_frames // frames_per_batch)
+        self._budget = batches * frames_per_batch
 
     def train(self) -> dict[str, float]:
         """
         Run collection until ``total_frames``, updating after every rollout.
 
+        When ``max_collector_restarts`` allows it, a worker process that dies
+        mid-rollout is treated as a recoverable fault rather than the end of the
+        run: the pool is torn down, a fresh one is built and collection resumes
+        from the frame count reached so far. This is what it takes to finish a
+        long run unattended against an engine that aborts its process on rare
+        game states instead of raising (see :data:`_WORKER_DEATH_MARKERS`).
+
+        A restart is cheap but not free. Everything the learner owns lives in
+        this process and survives untouched -- weights, optimizer state, the
+        curriculum's level buffer, snapshot cadence, the frame counter. What is
+        lost is per-worker: the batch in flight, every battle in progress, and
+        the workers' PFSP win-rate tallies, which are estimated per worker and
+        so restart from their prior.
+
         :return: Aggregate statistics: frames, episodes, win/draw rate and fps,
             covering the frames collected before any interruption.
         """
-        # Opt out of torchrl's automatic policy-transform registration: env
-        # transforms are managed explicitly by the env factories, and the
-        # policies used here read "action_mask" directly without needing the
-        # InitTracker transform the collector's heuristic would append.
-        collector = Collector(
-            create_env_fn=self._make_vec_env(),
-            policy=self._policy,
-            frames_per_batch=self._frames_per_batch,
-            total_frames=self._total_frames,
-            auto_register_policy_transforms=False,
-            **self._collector_kwargs(),
+        totals = _RunTotals(
+            last_eval_frames=self._start_frames, start_frames=self._start_frames
         )
-        frames = 0
-        episodes = 0
-        wins = 0
-        draws = 0
-        last_eval_frames = 0
         start_time = time.time()
+        restarts = 0
+        barren_restarts = 0
+        collector: TrainingCollector | None = None
         try:
             self._callbacks.on_train_start(self._run_config)
-            with tqdm(total=self._total_frames, unit="frame") as progress_bar:
-                for data in collector:
-                    self._callbacks.on_rollout_start(frames)
-                    assert isinstance(data, TensorDict)
-                    batch_frames = data.numel()
-                    frames += batch_frames
-                    done = cast(Tensor, data["next", "done"]).reshape(-1)
-                    final_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[done]
-                    episodes += int(done.sum())
-                    wins += int((final_rewards > 0).sum())
-                    draws += int((final_rewards == 0).sum())
-                    
-                    # Perform update step (return surrgate loss)
-                    losses = self._update(data)
-                    
-                    metrics = self._metrics(
-                        frames, episodes, wins, draws, time.time() - start_time, losses
-                    )
-                    progress_bar.update(batch_frames)
-                    self._log_progress(progress_bar, metrics)
-                    self._callbacks.on_rollout_end(frames, metrics)
-                    if self._should_evaluate(frames, last_eval_frames):
-                        last_eval_frames = frames
-                        assert self._evaluator is not None
-                        self._callbacks.on_eval_end(
-                            frames, self._evaluator.evaluate(self._policy)
+            with tqdm(
+                total=self._start_frames + self._total_frames,
+                initial=self._start_frames,
+                unit="frame",
+            ) as progress_bar:
+                while totals.frames < self._budget:
+                    if restarts:
+                        self._prepare_restart(restarts)
+                    # Only children this collector starts are ours to reap if it
+                    # dies; anything already running (e.g. the W&B service) is not.
+                    preexisting = {child.pid for child in torch_mp.active_children()}
+                    collector = self._make_collector(self._budget - totals.frames)
+                    frames_before = totals.frames
+                    try:
+                        self._collect(collector, progress_bar, totals, start_time)
+                    except (RuntimeError, OSError, EOFError, ValueError) as error:
+                        if not _is_worker_death(error):
+                            raise
+                        if restarts >= self._max_collector_restarts:
+                            logger.error(
+                                "Worker pool died at %d frames after %d restart(s); "
+                                "the restart budget (collector.max_restarts) is spent.",
+                                totals.absolute_frames,
+                                restarts,
+                            )
+                            raise
+                        barren_restarts = (
+                            barren_restarts + 1 if totals.frames == frames_before else 0
                         )
+                        if barren_restarts >= _MAX_BARREN_RESTARTS:
+                            logger.error(
+                                "Worker pool died %d times in a row without collecting "
+                                "a batch; not restarting again.",
+                                barren_restarts,
+                            )
+                            raise
+                        restarts += 1
+                        logger.warning(
+                            "Worker pool died at %d frames (%s). Restarting collection "
+                            "(%d of %d); the in-flight batch and all battles in "
+                            "progress are discarded.",
+                            totals.absolute_frames,
+                            error,
+                            restarts,
+                            self._max_collector_restarts,
+                        )
+                    else:
+                        break
+                    finally:
+                        self._shutdown_collector(collector, preexisting)
+                        collector = None
         except KeyboardInterrupt:
             logger.warning(
                 "Interrupted at %d frames; shutting down and reporting partial results. "
                 "Press Ctrl-C again only if shutdown hangs.",
-                frames,
+                totals.absolute_frames,
             )
+        except BaseException as error:
+            # Recorded before the teardown below so metric backends can mark the
+            # run failed. Without this a crashed run closes as cleanly as a
+            # finished one and is indistinguishable from a short successful run.
+            self._callbacks.on_train_error(error)
+            raise
         finally:
             with _deferred_interrupt():
                 if self._evaluator is not None:
                     self._evaluator.close()
-                collector.shutdown()
-            summary = self._metrics(frames, episodes, wins, draws, time.time() - start_time)
+            if collector is not None:
+                self._shutdown_collector(collector)
+            summary = self._metrics(
+                totals.absolute_frames,
+                totals.episodes,
+                totals.wins,
+                totals.draws,
+                time.time() - start_time,
+                collected_frames=totals.frames,
+                truncations=totals.truncations,
+            )
+            if restarts:
+                logger.warning(
+                    "Run completed across %d collector restart(s).", restarts
+                )
             self._callbacks.on_train_end(summary)
         return summary
+
+    def _collect(
+        self,
+        collector: TrainingCollector,
+        progress_bar: tqdm,
+        totals: _RunTotals,
+        start_time: float,
+    ) -> None:
+        """
+        Drain one collector, updating and reporting after every rollout.
+
+        Returns when the collector's own budget is exhausted; raises whatever
+        collection or the update raised, which :meth:`train` classifies into
+        recoverable worker death and everything else.
+
+        :param collector: Collector to iterate; owns one worker pool.
+        :param progress_bar: Bar tracking frames across the whole run, not just
+            this collector.
+        :param totals: Run totals, advanced in place so they survive a restart.
+        :param start_time: Wall-clock start of the run, for the fps figure.
+        """
+        for data in collector:
+            self._callbacks.on_rollout_start(totals.absolute_frames)
+            assert isinstance(data, TensorDict)
+            batch_frames = data.numel()
+            totals.frames += batch_frames
+            done = cast(Tensor, data["next", "done"]).reshape(-1)
+            terminated = cast(Tensor, data["next", "terminated"]).reshape(-1)
+            decided_rewards = cast(Tensor, data["next", "reward"]).reshape(-1)[
+                terminated
+            ]
+            totals.episodes += int(done.sum())
+            totals.truncations += int(done.sum()) - int(terminated.sum())
+            totals.wins += int((decided_rewards > 0).sum())
+            totals.draws += int((decided_rewards == 0).sum())
+
+            # Perform update step (return surrgate loss)
+            losses = self._update(data)
+            if requires_weight_sync(self._collector_kind):
+                collector.update_policy_weights_()
+
+            metrics = self._metrics(
+                totals.absolute_frames,
+                totals.episodes,
+                totals.wins,
+                totals.draws,
+                time.time() - start_time,
+                losses,
+                collected_frames=totals.frames,
+                truncations=totals.truncations,
+            )
+            progress_bar.update(batch_frames)
+            self._log_progress(progress_bar, metrics)
+            self._callbacks.on_rollout_end(totals.absolute_frames, metrics)
+            if self._should_evaluate(totals.absolute_frames, totals.last_eval_frames):
+                totals.last_eval_frames = totals.absolute_frames
+                assert self._evaluator is not None
+                self._callbacks.on_eval_end(
+                    totals.absolute_frames, self._evaluator.evaluate(self._policy)
+                )
+
+    def _make_collector(self, remaining_frames: int) -> TrainingCollector:
+        """
+        Build a collector over a fresh worker pool for the frames still owed.
+
+        :param remaining_frames: Frames this collector should produce, i.e. the
+            run budget less what previous collectors already delivered.
+        :return: A collector yielding ``(rows, time)`` batches, whichever kind
+            ``collector_type`` selected.
+        """
+        apply_pipe_timeout(self._pipe_timeout)
+        return build_collector(
+            self._collector_kind,
+            env_factories=self._env_factories,
+            make_vec_env=self._make_vec_env,
+            policy=self._policy,
+            frames_per_batch=self._frames_per_batch,
+            total_frames=remaining_frames,
+            collector_kwargs=self._collector_kwargs(),
+            options=self._async_options,
+            mp_start_method=self._mp_start_method,
+        )
+
+    def _prepare_restart(self, restart_index: int) -> None:
+        """
+        Re-establish per-worker state before a replacement pool is built.
+
+        The base class only re-deals the environment factories. Subclasses
+        extend this for state that is keyed to collector rows and would
+        otherwise be misattributed to whichever episode lands in that row next.
+
+        :param restart_index: 1-based index of the restart about to happen.
+        """
+        if self._rebuild_env_factories is not None:
+            self._env_factories = self._rebuild_env_factories(restart_index)
+
+    @staticmethod
+    def _shutdown_collector(
+        collector: TrainingCollector,
+        preexisting_pids: set[int | None] | None = None,
+    ) -> None:
+        """
+        Tear a collector down without letting cleanup mask the original failure.
+
+        ``shutdown`` re-runs torchrl's liveness check, so tearing down a pool
+        whose worker has already died raises the very condition that brought us
+        here. Running from a ``finally``, that replacement exception would
+        discard the specific one ("worker 6 dead") in favour of the generic one,
+        which is exactly how the failure this guards against reports itself.
+
+        Because that shutdown cannot be relied on to finish, it is also not
+        guaranteed to reap the pool's surviving workers. Any it leaves behind
+        are terminated here when ``preexisting_pids`` says which children the
+        collector owns, or the next collector's workers would contend with
+        orphans still holding the previous pool's shared memory.
+
+        :param collector: Collector to shut down; may already be broken.
+        :param preexisting_pids: PIDs of child processes that predate this
+            collector and must be left alone (the W&B service, say). None skips
+            the reaping entirely, for callers that never started a pool of
+            their own.
+        """
+        with _deferred_interrupt():
+            try:
+                collector.shutdown()
+            except Exception:
+                logger.warning("Collector shutdown failed; continuing.", exc_info=True)
+            if preexisting_pids is None:
+                return
+            for child in torch_mp.active_children():
+                if child.pid in preexisting_pids:
+                    continue
+                child.terminate()
+                child.join(timeout=10.0)
+                if child.is_alive():
+                    child.kill()
+                    child.join(timeout=10.0)
 
     def _should_evaluate(self, frames: int, last_eval_frames: int) -> bool:
         """
@@ -198,32 +532,46 @@ class Trainer(BaseTrainer):
 
     @staticmethod
     def _metrics(
-            frames: int,
-            episodes: int,
-            wins: int,
-            draws: int,
-            elapsed: float,
-            losses: dict[str, float] | None = None,
+        frames: int,
+        episodes: int,
+        wins: int,
+        draws: int,
+        elapsed: float,
+        losses: dict[str, float] | None = None,
+        collected_frames: int | None = None,
+        truncations: int = 0,
     ) -> dict[str, float]:
         """
         Build the metrics mapping for the run so far.
 
-        :param frames: Total frames collected so far.
-        :param episodes: Total episodes finished so far.
+        Win and draw rates are over *decided* episodes only. A truncated run has
+        no winner, so counting it would drag both rates toward zero by an amount
+        that says nothing about how the policy played.
+
+        :param frames: Frame count as reported, spanning a warm-started run's
+            inherited frames.
+        :param episodes: Total episodes finished so far, decided or not.
         :param wins: Total wins so far.
         :param draws: Total draws so far.
         :param elapsed: Wall-clock seconds since training started.
         :param losses: Loss values from the last update, merged in if present.
+        :param collected_frames: Frames this process actually collected, which
+            is what the throughput figure is per second *of*. None means the
+            run collected everything it reports, i.e. no warm start.
+        :param truncations: Episodes that ended without a result.
         :return: Metrics keyed by :data:`_CORE_METRICS` plus any loss keys.
         """
+        throughput_frames = frames if collected_frames is None else collected_frames
+        decided = max(episodes - truncations, 1)
         metrics: dict[str, float] = {
             "frames": frames,
             "episodes": episodes,
-            "win_rate": wins / max(episodes, 1),
-            "draw_rate": draws / max(episodes, 1),
+            "win_rate": wins / decided,
+            "draw_rate": draws / decided,
+            "truncation_rate": truncations / max(episodes, 1),
             # Guarded because a fast first batch can land inside the clock's
             # resolution, making elapsed 0.
-            "fps": frames / max(elapsed, 1e-9),
+            "fps": throughput_frames / max(elapsed, 1e-9),
         }
         if losses:
             metrics.update(losses)
@@ -253,13 +601,15 @@ class Trainer(BaseTrainer):
         Run the algorithm-specific update on a collected batch.
 
         :param data: One batch of ``frames_per_batch`` transitions from the
-            Collector, as a TensorDict shaped ``(B, T)`` where ``B`` is
+            collector, as a TensorDict shaped ``(B, T)`` where ``B`` is
             ``num_workers`` and ``T`` is ``frames_per_batch // num_workers``
-            (2D: one row per vectorized worker, not flattened). Every entry
-            is one agent-side step of :class:`~src.env.tcg_env.TCGEnv` (a
-            single ``Categorical`` pick); opponent moves are played inside
-            the environment and never appear as separate entries. Layout,
-            with ``n_actions = max_options + 1``::
+            (2D: one row per vectorized worker, not flattened). Under the
+            asynchronous collectors a row is still a contiguous slice of one
+            environment's trajectory, but rows are no longer pinned to a
+            fixed worker and the batch may be slightly smaller than requested.
+            Every entry is one agent-side step of :class:`~src.env.tcg_env.TCGEnv`;
+            opponent moves are played inside the environment and never appear
+            as separate entries. Layout, with ``n_actions = max_options + 1``::
 
                 data                                    (state the policy acted on)
                 |-- "observation"   (B, T, ...)        nested   structured state, see
@@ -300,6 +650,7 @@ class Trainer(BaseTrainer):
 
         :return: ParallelEnv (fork workers) or SerialEnv over the factories.
         """
+        apply_pipe_timeout(self._pipe_timeout)
         if self._use_parallel_env:
             torch_mp.set_start_method(self._mp_start_method, force=True)
             return ParallelEnv(
@@ -308,8 +659,9 @@ class Trainer(BaseTrainer):
                 mp_start_method=self._mp_start_method,
                 serial_for_single=self._serial_for_single,
             )
-        return SerialEnv(num_workers=len(self._env_factories),
-                         create_env_fn=self._env_factories)
+        return SerialEnv(
+            num_workers=len(self._env_factories), create_env_fn=self._env_factories
+        )
 
     @staticmethod
     def _log_progress(progress_bar: tqdm, metrics: Mapping[str, float]) -> None:

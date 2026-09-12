@@ -2,8 +2,10 @@ import torch
 from torchrl.envs import TransformedEnv
 from torchrl.envs.transforms import ActionMask
 
-from src.env.deck import load_deck
-from src.env.structured_observation_encoder import StructuredObservationEncoder
+from src.env.decks.deck import load_deck
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
 from src.env.tcg_env import TCGEnv
 from src.policies.greedy_policy_opponent import (
     GreedyPolicyOpponent,
@@ -36,7 +38,10 @@ def test_greedy_select_single_pick() -> None:
     A single-pick selection returns the argmax option.
     """
     picks = GreedyPolicyOpponent.greedy_select(
-        _logits([0.1, 0.2, 5.0, 0.3, 0.4], stop=-1.0), n_options=5, min_count=1, max_count=1
+        _logits([0.1, 0.2, 5.0, 0.3, 0.4], stop=-1.0),
+        n_options=5,
+        min_count=1,
+        max_count=1,
     )
     assert picks == [2]
 
@@ -83,29 +88,41 @@ def _run_episode(opponent) -> torch.Tensor:
         ActionMask(),
     )
     try:
-        rollout = env.rollout(400, policy=RandomMaskedPolicy(), break_when_any_done=True)
+        rollout = env.rollout(
+            400, policy=RandomMaskedPolicy(), break_when_any_done=True
+        )
     finally:
         env.close()
     return rollout["next", "done"]
 
 
-def test_greedy_opponent_plays_legal_episode(structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_greedy_opponent_plays_legal_episode(
+    structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     A greedy opponent plays a full episode without the engine rejecting a
     selection (an illegal pick would raise inside the engine).
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
-    opponent = GreedyPolicyOpponent(actor_critic, StructuredObservationEncoder(max_options=MAX_OPTIONS))
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
+    opponent = GreedyPolicyOpponent(
+        actor_critic, StructuredObservationEncoder(max_options=MAX_OPTIONS)
+    )
     done = _run_episode(opponent)
     assert bool(done.any())
 
 
-def test_snapshot_roundtrip_plays(tmp_path, structured_model_cfg, structured_obs_spec, action_spec) -> None:
+def test_snapshot_roundtrip_plays(
+    tmp_path, structured_model_cfg, structured_obs_spec, action_spec
+) -> None:
     """
     A snapshot saved to disk reloads into a greedy opponent that plays legally
     (the documented self-play checkpoint cycle).
     """
-    actor_critic = build_actor_critic(structured_model_cfg, structured_obs_spec, action_spec)
+    actor_critic = build_actor_critic(
+        structured_model_cfg, structured_obs_spec, action_spec
+    )
     checkpoint = save_actor_critic(
         actor_critic,
         tmp_path / "snapshot.pt",

@@ -5,39 +5,95 @@ clip_epsilon: 0.2
 # regularizer against collapsing onto a single action. With this false the term
 # is dropped and entropy_coeff (and ent_anneal below) do nothing.
 entropy_bonus: true
-# Entropy-bonus weight.
-entropy_coeff: 0.01
-# Discount factor for GAE.
-gamma: 0.99
-# GAE trace-decay factor.
-lmbda: 0.95
+# Entropy-bonus weight. At 0.01 the policy collapsed to ~0.07 nats inside the
+# first million frames of the 5M-frame corpus runs and never recovered, so the
+# rest of the run explored nothing.
+entropy_coeff: 0.02
+
+# Hold the policy near a behaviour-cloned reference for the whole run, as
+# AlphaStar did. Unanchored self-play here keeps producing a fresh best
+# response to the league instead of accumulating skill: snapshots 2M frames
+# apart agree on only 0.40 of their decisions. 0 disables the anchor.
+kl_anchor_coeff: 0.0
+# Snapshot holding the cloned weights. Null anchors to the learner's own
+# initial weights, which is correct when the run is initialized from the clone.
+kl_anchor_checkpoint: null
+# Discount factor for GAE. The reward is terminal only (+1/-1), so the quantity
+# to predict is win probability and any gamma < 1 biases the objective towards
+# winning sooner, which is worth nothing here. Held just under 1 because eval
+# episodes do occasionally hit the step cap, and truncation bootstrapping is
+# badly behaved at exactly 1.
+gamma: 0.999
+# GAE trace-decay factor. gamma * lmbda sets the advantage horizon: at 0.95 it
+# was ~19 steps of a 100-190 step episode, so the terminal signal only reached
+# the opening by way of a critic with nothing else to bootstrap from. 0.98 puts
+# it near 48 steps, closer to Monte-Carlo returns that propagate the outcome
+# directly. Variance stays bounded because the reward is only ever +/-1.
+lmbda: 0.98
 # Standardize advantages (zero mean, unit std) over each collected batch. The
 # standard PPO formulation; keeps the surrogate's scale independent of the
 # reward magnitude.
 average_gae: true
-# Adam learning rate.
+# Advantage estimator: gae or vtrace.
+#  - GAE assumes every action in a batch was drawn from the weights
+#    currently loaded.
+#  - V-trace re-scores the collected  actions under the current policy and
+#    clips the importance ratios, correcting for the drift the asynchronous
+#    collectors introduce.
+value_estimator: gae
+# V-trace clipping.
+#  - rho_thresh bounds the ratio in the TD term and so decides which policy's
+#    value function the critic converges to.
+#  - c_thresh bounds the ratio in the trace and so how far a correction
+#    propagates back in time. Both unused under gae.
+vtrace_rho_thresh: 1.0
+vtrace_c_thresh: 1.0
+# Chunks the GAE critic pass along the worker dimension. Unset, torchrl runs the
+# whole collected batch through the critic in one vmap over a stacked
+# current/next pair, peaking at ~2x the batch; at frames_per_batch 16384 that is
+# the allocation the WSL GPU scheduler refuses (docs/wsl-crash-diagnosis.md).
+# Exact, not an approximation: worker rows are independent trajectories.
+gae_num_chunks: 8
+# AdamW learning rate.
 lr: 3.0e-4
-# Optimization epochs over each collected batch.
+# Decoupled weight decay. 0.0 is plain Adam, which is what every run up to
+# 130M frames used: with nothing bounding them the transformer's weights grew
+# monotonically for the whole run (linear1 max-abs 0.111 -> 2.16), until a
+# single minibatch produced a gradient large enough to overflow the fp32 norm.
+# Applied to every parameter, LayerNorm gains and biases included; excluding
+# them needs a second parameter group, which a resume cannot load.
+weight_decay: 0.0
+# Optimization epochs over each collected batch. Kept low because the sixteen
+# minibatches below already give the batch plenty of reuse, and more of it than
+# the KL bound comfortably supports.
 num_epochs: 4
-# Minibatch size drawn from the replay buffer per optimizer step.
-sub_batch_size: 4096  # NOTE: Reduce if not a lot of memory
+# Minibatch size drawn from the replay buffer per optimizer step. This is capped
+# to frames_per_batch in PPOTrainer, so keeping the two equal meant one minibatch
+# per epoch: the 5M-frame runs took 4 optimizer steps per batch and 4884 in
+# total. Sixteen minibatches per epoch brings that to ~19k on the same budget.
+sub_batch_size: 1024  # NOTE: Raise if not a lot of memory
 # Frames collected per collector iteration (overrides collector.frames_per_batch).
-frames_per_batch: 4096
+frames_per_batch: 16384
 # Gradient-norm clipping threshold.
 max_grad_norm: 1.0
 # Device for the model and the PPO update ("cpu" or "cuda"). Environments
 # always step on CPU; the collector moves data to this device for updates.
 device: cpu
+# Device the *collection* policy runs on; null follows agent.device.
+# Set to cpu with agent.device=cuda under collector.type=multi_sync/multi_async:
+# those run a policy copy per worker, and on CUDA that is one context per worker
+# for batch-size-1 forwards, while the update still wants the GPU.
+collector_device: null
 
-# --- Adopted TorchRLTrainer features (all additive; defaults preserve prior behaviour) ---
 # Early-stop the epoch loop once mean approx-KL exceeds
 # target_kl_multiplier * target_kl (null disables; checked between epochs).
-target_kl: null
+# Needed now that a batch gets 64 optimizer steps instead of 4: without a bound
+# the later epochs drift far off-policy and drive the entropy collapse above.
+# Not tighter than this, or it early-stops on every batch and quietly gives back
+# the extra updates the minibatching just bought.
+target_kl: 0.03
 target_kl_multiplier: 1.5
-# Automatic mixed precision for the update step (float16+GradScaler on CUDA,
-# bfloat16 elsewhere).
-use_amp: false
-# torch.compile the loss module / collection policy. 
+# torch.compile the loss module / collection policy.
 compile_loss: false
 compile_policy: false
 # Linearly anneal the learning rate to 0 over training.
@@ -46,6 +102,3 @@ lr_anneal: false
 # linearly decayed to 0. (Schedule shape inferred — see arch doc.)
 ent_anneal: false
 ent_warm_frac: 0.5
-# Reward-scaling divisor for reporting. No effect on the current sign-based
-# win/draw stats; reserved for future magnitude logging.
-reward_scaling: 1.0

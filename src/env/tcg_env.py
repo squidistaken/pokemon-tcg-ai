@@ -7,13 +7,13 @@ from torchrl.data import Binary, Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
 from cg.api import Observation, SelectData, State
+from src.curriculum.deck_sampler import NO_LEVEL
 
 from .battle_handle import BattleHandle
-from .curriculum_deck_sampler import NO_LEVEL
-from .deck_sampler import DeckSampler, FixedDeckSampler
-from .observation_encoder import ObservationEncoder
-from .random_opponent import RandomOpponent
-from .structured_observation_encoder import StructuredObservationEncoder
+from .decks.deck_sampler import DeckSampler, FixedDeckSampler, sample_for_seat
+from .observation.observation_encoder import ObservationEncoder
+from .observation.structured_observation_encoder import StructuredObservationEncoder
+from .opponents.random_opponent import RandomOpponent
 
 
 class TCGEnv(EnvBase):
@@ -37,6 +37,12 @@ class TCGEnv(EnvBase):
     produce; a selection that overflows it raises, since a truncated option
     would silently desynchronize the observation from the action space.
     """
+
+    #: Battles started per :meth:`_reset` before giving up. A battle that ends
+    #: before the agent's first selection is retried rather than handed over as
+    #: an episode with no decisions in it; the cap keeps an unsatisfiable
+    #: deck/cap combination from spinning forever.
+    MAX_RESET_ATTEMPTS = 100
 
     def __init__(
         self,
@@ -195,39 +201,57 @@ class TCGEnv(EnvBase):
     # this exact override signature, and this env ignores the reset input because it
     # always starts a fresh battle. Suppressed for PyCharm (noinspection) and Ruff (noqa).
     # noinspection PyUnusedLocal
-    def _reset(self, tensordict: TensorDictBase | None = None, **kwargs) -> TensorDictBase:  # noqa: ARG002
+    def _reset(
+        self,
+        tensordict: TensorDictBase | None = None,  # noqa: ARG002
+        **kwargs,  # noqa: ARG002
+    ) -> TensorDictBase:
         """
         Start a new battle and advance it to the agent's first selection.
 
         :param tensordict: Optional reset input (unused).
         :return: Tensordict with the initial observation and action mask.
         """
-        while True:
+        on_reset = getattr(self._opponent, "on_reset", None)
+        if on_reset is not None:
+            on_reset()
+        self._opponent_is_anchor = bool(
+            getattr(self._opponent, "active_is_anchor", True)
+        )
+
+        for attempt in range(self.MAX_RESET_ATTEMPTS):
             self._handle.finish()
-            on_reset = getattr(self._opponent, "on_reset", None)
-            if on_reset is not None:
-                on_reset()
-            self._agent_seat = self._rng.randint(
-                0, 1
-            )  # flip a coin to decide who plays first
+            self._agent_seat = self._rng.randint(0, 1)
             self._selection_count = 0
             self._truncate_flag = False
             self._chosen = []
-            if self._steps_since_switch >= self._deck_switch_steps:
-                self._deck0, self._deck1 = self._deck_sampler.sample()
+            # `attempt > 0` forces a fresh matchup on every retry. The
+            # switch-interval test alone would not: the first attempt zeroes
+            # `_steps_since_switch`, so with `deck_switch_steps > 0` every
+            # later attempt re-deals the *same* pair that just failed to
+            # produce an agent decision, and the loop can only burn all
+            # MAX_RESET_ATTEMPTS and kill the worker.
+            if attempt > 0 or self._steps_since_switch >= self._deck_switch_steps:
+                # Seat-aware: _agent_seat is already drawn above, and a sampler
+                # that pins the agent's deck or scores an ordered matchup needs
+                # to know which of the two decks the agent will receive.
+                self._deck0, self._deck1 = sample_for_seat(
+                    self._deck_sampler, self._agent_seat
+                )
                 self._steps_since_switch = 0
                 # Only meaningful under a curriculum sampler; every other
                 # sampler leaves the level at NO_LEVEL, which the learner skips.
                 self._level_id = int(getattr(self._deck_sampler, "level_id", NO_LEVEL))
-            self._opponent_is_anchor = bool(
-                getattr(self._opponent, "active_is_anchor", True)
-            )
             observation = self._handle.start(self._deck0, self._deck1)
             observation = self._advance_to_agent(observation)
             if not self._game_over(observation) and not self._truncate_flag:
-                break
-        self._pending = observation
-        return self._build_obs_tensordict()
+                self._pending = observation
+                return self._build_obs_tensordict()
+        raise RuntimeError(
+            f"No battle survived setup in {self.MAX_RESET_ATTEMPTS} attempts: every "
+            f"one ended or hit the {self._max_engine_selections}-selection cap before "
+            f"the agent could act. Check the sampled decks and max_engine_selections."
+        )
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """
@@ -297,7 +321,7 @@ class TCGEnv(EnvBase):
         Tell the opponent policy how the finished battle went, if it cares.
 
         Leagues that weight their members by strength (e.g.
-        :class:`~src.env.pfsp_opponent_pool.PFSPOpponentPool`) need the result
+        :class:`~src.env.opponents.pfsp_opponent_pool.PFSPOpponentPool`) need the result
         of each episode, and the terminal reward is only available here. Other
         opponents do not expose the hook and are left untouched, exactly as
         with ``on_reset``.
@@ -426,7 +450,9 @@ class TCGEnv(EnvBase):
             mask[self._stop_index] = True
         return mask
 
-    def _set_step_keys(self, tensordict: TensorDict, reward: float, terminated: bool, truncated: bool) -> None:
+    def _set_step_keys(
+        self, tensordict: TensorDict, reward: float, terminated: bool, truncated: bool
+    ) -> None:
         """
         Encode reward and done flags into a step output tensordict.
 

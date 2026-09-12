@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 
+from src.hydra_resolvers import register_resolvers
 from src.policies.greedy_policy_opponent import load_actor_critic
 from src.policies.ppo_actor import build_ppo_operator
 from src.training import (
@@ -16,6 +17,8 @@ from src.training import (
 )
 
 load_dotenv(Path(__file__).parents[1] / ".env", override=False)
+# Before Hydra composes anything: the run directory interpolates ${run_uid:}.
+register_resolvers()
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="eval_deck_field")
@@ -36,14 +39,20 @@ def main(cfg: DictConfig) -> None:
         )
     checkpoint_path = Path(to_absolute_path(str(checkpoint)))
     if not checkpoint_path.is_file():
-        raise ValueError(f"train.eval_opponent_checkpoint {checkpoint_path} does not exist.")
+        raise ValueError(
+            f"train.eval_opponent_checkpoint {checkpoint_path} does not exist."
+        )
 
     obs_spec, action_spec = build_probe_specs(cfg)
 
-    actor_critic = load_actor_critic(checkpoint_path, cfg, obs_spec, action_spec, device="cpu")
+    actor_critic = load_actor_critic(
+        checkpoint_path, cfg, obs_spec, action_spec, device="cpu"
+    )
     policy = build_ppo_operator(actor_critic, action_spec).get_policy_operator()
 
-    callbacks: list[TrainingCallback] = [hydra.utils.instantiate(callback) for callback in cfg.callbacks]
+    callbacks: list[TrainingCallback] = [
+        hydra.utils.instantiate(callback) for callback in cfg.callbacks
+    ]
     run_config = cast(dict[str, Any], OmegaConf.to_container(cfg, resolve=True))
     for callback in callbacks:
         callback.on_train_start(run_config)

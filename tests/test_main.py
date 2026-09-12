@@ -5,7 +5,7 @@ from omegaconf import OmegaConf
 
 import main
 from src.env.battle_handle import BattleHandle
-from src.env.deck import load_deck
+from src.env.decks.deck import load_deck
 from src.policies.greedy_policy_opponent import save_actor_critic
 from src.policies.inference import build_inference_specs
 from src.policies.ppo_actor import build_actor_critic
@@ -64,7 +64,9 @@ def _write_checkpoint(output_dir, structured_model_cfg) -> None:
     OmegaConf.save(model_config, output_dir / "model_config.yaml")
 
 
-def test_agent_selects_legal_options_from_checkpoint(tmp_path, monkeypatch, structured_model_cfg, real_observation) -> None:
+def test_agent_selects_legal_options_from_checkpoint(
+    tmp_path, monkeypatch, structured_model_cfg, real_observation
+) -> None:
     """
     With a checkpoint on disk, ``agent()`` returns a legal selection for a
     real engine observation, going through the actual checkpoint-loading path.
@@ -82,7 +84,9 @@ def test_agent_selects_legal_options_from_checkpoint(tmp_path, monkeypatch, stru
     assert all(0 <= pick < option_count for pick in picks)
 
 
-def test_agent_reuses_cached_instance(tmp_path, monkeypatch, structured_model_cfg, real_observation) -> None:
+def test_agent_reuses_cached_instance(
+    tmp_path, monkeypatch, structured_model_cfg, real_observation
+) -> None:
     """
     The agent is built once and cached, not rebuilt on every call.
     """
@@ -96,7 +100,9 @@ def test_agent_reuses_cached_instance(tmp_path, monkeypatch, structured_model_cf
     assert main._agent is agent  # noqa: SLF001
 
 
-def test_agent_raises_when_checkpoint_missing(tmp_path, monkeypatch, real_observation) -> None:
+def test_agent_raises_when_checkpoint_missing(
+    tmp_path, monkeypatch, real_observation
+) -> None:
     """
     A missing checkpoint/config is a packaging mistake, not a state to
     silently degrade from: ``agent()`` must raise rather than fall back.

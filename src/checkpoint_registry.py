@@ -83,8 +83,8 @@ def resolve_record_path(value: str, repo_root: Path) -> Path:
 
 
 @contextmanager
-def _registry_lock(path: Path, *, exclusive: bool) -> Iterator[None]:
-    """Lock a sidecar file while reading or appending the registry."""
+def registry_lock(path: Path, *, exclusive: bool) -> Iterator[None]:
+    """Lock a sidecar file while reading or appending an append-only registry."""
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.parent / f".{path.name}.lock"
     with lock_path.open("a+", encoding="utf-8") as lock_file:
@@ -146,7 +146,7 @@ def append_checkpoint_record(
     )
 
     registry_path = registry_path.expanduser().resolve()
-    with _registry_lock(registry_path, exclusive=True):
+    with registry_lock(registry_path, exclusive=True):
         needs_header = not registry_path.exists() or registry_path.stat().st_size == 0
         with registry_path.open("a", encoding="utf-8", newline="") as registry_file:
             writer = csv.DictWriter(
@@ -170,7 +170,7 @@ def read_checkpoint_records(registry_path: Path) -> list[CheckpointRecord]:
             f"Checkpoint registry does not exist: {registry_path}"
         )
     with (
-        _registry_lock(registry_path, exclusive=False),
+        registry_lock(registry_path, exclusive=False),
         registry_path.open(encoding="utf-8", newline="") as registry_file,
     ):
         reader = csv.DictReader(registry_file)
@@ -270,3 +270,59 @@ def validate_checkpoint_record(record: CheckpointRecord, repo_root: Path) -> Pat
             f"expected {record.sha256}, got {actual_digest}."
         )
     return checkpoint
+
+
+# Kaggle live-rating history.
+_RATING_HISTORY_FIELDS = (
+    "fetched_at_utc",
+    "kaggle_ref",
+    "label",
+    "status",
+    "public_score",
+    "leaderboard_rank",
+)
+
+
+def _migrate_rating_history_header(path: Path) -> None:
+    """Backfill older history."""
+    with path.open(encoding="utf-8", newline="") as history_file:
+        reader = csv.DictReader(history_file)
+        rows = list(reader)
+    with path.open("w", encoding="utf-8", newline="") as history_file:
+        writer = csv.writer(history_file)
+        writer.writerow(_RATING_HISTORY_FIELDS)
+        for row in rows:
+            writer.writerow([row.get(field, "") for field in _RATING_HISTORY_FIELDS])
+
+
+def append_rating_history(
+    path: Path,
+    *,
+    kaggle_ref: int,
+    label: str,
+    status: str,
+    public_score: float | None,
+    leaderboard_rank: int | None = None,
+) -> None:
+    """Append one submission's live-rating snapshot to the history CSV."""
+    with registry_lock(path, exclusive=True):
+        needs_header = not path.exists() or path.stat().st_size == 0
+        if not needs_header:
+            with path.open(encoding="utf-8", newline="") as history_file:
+                header = next(csv.reader(history_file), [])
+            if header and "leaderboard_rank" not in header:
+                _migrate_rating_history_header(path)
+        with path.open("a", encoding="utf-8", newline="") as history_file:
+            writer = csv.writer(history_file)
+            if needs_header:
+                writer.writerow(_RATING_HISTORY_FIELDS)
+            writer.writerow(
+                [
+                    datetime.now(UTC).isoformat(),
+                    kaggle_ref,
+                    label,
+                    status,
+                    "" if public_score is None else public_score,
+                    "" if leaderboard_rank is None else leaderboard_rank,
+                ]
+            )

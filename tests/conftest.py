@@ -5,7 +5,9 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from torchrl.data import Binary, Categorical, Composite
 
-from src.env.structured_observation_encoder import StructuredObservationEncoder
+from src.env.observation.structured_observation_encoder import (
+    StructuredObservationEncoder,
+)
 from src.training.ppo_trainer import PPOTrainer
 
 DECK_PATH = str(Path(__file__).parents[1] / "decks" / "example.csv")
@@ -80,6 +82,14 @@ class PPOTrainerForTests(PPOTrainer):
         """
         return float(self._loss.entropy_coeff)
 
+    def prepare_restart_for_test(self, restart_index: int) -> None:
+        """
+        Run the pre-restart hook the trainer calls before rebuilding a pool.
+
+        :param restart_index: 1-based index of the restart being simulated.
+        """
+        self._prepare_restart(restart_index)
+
 
 @pytest.fixture
 def structured_obs_spec() -> Composite:
@@ -111,7 +121,7 @@ def structured_model_cfg() -> DictConfig:
             "model": {
                 "embed_dim": 32,
                 "backbone": {
-                    "_target_": "src.models.backbone.MLPBackbone",
+                    "_target_": "src.models.mlp.MLPBackbone",
                     "num_cells": [32],
                     "activation": "tanh",
                     "in_keys": [
@@ -132,6 +142,64 @@ def structured_model_cfg() -> DictConfig:
             }
         }
     )
+
+
+@pytest.fixture
+def transformer_model_cfg() -> DictConfig:
+    """
+    Minimal ``model`` config selecting the transformer backbone over the
+    structured observation's top-level groups, with a tiny embed dim so unit
+    tests stay fast.
+
+    :return: OmegaConf config with a ``model`` section.
+    """
+    return OmegaConf.create(
+        {
+            "model": {
+                "embed_dim": 32,
+                "backbone": {
+                    "_target_": "src.models.transformer.TransformerBackbone",
+                    "num_heads": 4,
+                    "num_layers": 1,
+                    "ff_dim": 32,
+                    "activation": "gelu",
+                    "in_keys": [
+                        ["observation", "globals"],
+                        ["observation", "select_cats"],
+                        ["observation", "context_card_ids"],
+                        ["observation", "stadium_id"],
+                        ["observation", "options"],
+                        ["observation", "pokemon"],
+                        ["observation", "my"],
+                        ["observation", "opp"],
+                        ["observation", "select_deck"],
+                        ["observation", "looking"],
+                    ],
+                },
+                "head": {"_target_": "src.models.heads.LinearPolicyHead"},
+                "value_head": {"num_cells": [32]},
+            }
+        }
+    )
+
+
+@pytest.fixture
+def pointer_model_cfg(structured_model_cfg: DictConfig) -> DictConfig:
+    """
+    The structured model config with the pointer head instead of the flat one.
+
+    :param structured_model_cfg: Base structured-observation model config.
+    :return: Config selecting :class:`~src.models.heads.PointerHead`.
+    """
+    cfg = structured_model_cfg.copy()
+    cfg.model.head = OmegaConf.create(
+        {
+            "_target_": "src.models.heads.PointerHead",
+            "num_cells": [16],
+            "activation": "tanh",
+        }
+    )
+    return cfg
 
 
 @pytest.fixture

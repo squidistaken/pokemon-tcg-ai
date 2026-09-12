@@ -74,9 +74,9 @@ def test_multideck_v2_pool_matches_the_archetype_threshold() -> None:
 @requires_corpus
 def test_multideck_v2_pool_is_the_documented_size() -> None:
     """
-    The pool is the 15 archetypes the config header and design doc quote.
+    The pool is the 19 archetypes the config header and design doc quote.
 
     Pinned separately from the rule check so a corpus change that happens to
     keep the count while swapping an archetype still fails the test above.
     """
-    assert len(_configured_pool()) == 15
+    assert len(_configured_pool()) == 19

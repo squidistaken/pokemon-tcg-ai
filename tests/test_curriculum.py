@@ -7,10 +7,10 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from tensordict import TensorDict
 
-from src.env.archetype_index import ArchetypeIndex
-from src.env.curriculum_handles import CurriculumHandles
-from src.env.level_buffer import LevelBuffer
-from src.training.curriculum import Curriculum, build_curriculum
+from src.curriculum.archetype_index import ArchetypeIndex
+from src.curriculum.curriculum import Curriculum, build_curriculum
+from src.curriculum.handles import CurriculumHandles
+from src.curriculum.level_buffer import LevelBuffer
 from src.training.env_factory import load_deck_pool
 from tests.conftest import DECK_PATH, structured_env_cfg
 
@@ -151,6 +151,73 @@ def test_immature_levels_are_never_evicted() -> None:
     assert buffer.insert(2) is not None
 
 
+def test_commit_on_unknown_pair_id_enters_probation_not_the_buffer() -> None:
+    """
+    Lazy discovery must not touch the scored buffer before a level matures.
+    """
+    buffer = make_buffer(capacity=4, min_visits=3)
+
+    buffer.commit(99, 0.5)
+
+    assert buffer.size == 0
+    assert buffer.stats()["curriculum/probation_size"] == 1
+
+
+def test_probation_entry_promotes_at_min_visits() -> None:
+    """
+    A level graduates into the scored buffer only once trustworthy.
+    """
+    buffer = make_buffer(capacity=4, min_visits=3)
+
+    for value in (0.2, 0.4, 0.6):
+        buffer.commit(7, value)
+
+    assert buffer.size == 1
+    assert buffer.stats()["curriculum/probation_size"] == 0
+    entry = buffer.entries[0]
+    assert entry.pair_id == 7
+    assert entry.visits == 3
+    assert entry.mean_residual == pytest.approx(0.4)
+
+
+def test_promotion_evicts_the_weakest_matured_entry_when_full() -> None:
+    """
+    A newly matured discovery must displace the lowest-scoring entry, not stall.
+    """
+    buffer = make_buffer(capacity=1, min_visits=1)
+    buffer.commit(0, 0.1)
+    assert {entry.pair_id for entry in buffer.entries} == {0}
+
+    buffer.commit(1, 0.9)
+
+    assert {entry.pair_id for entry in buffer.entries} == {1}
+    assert buffer.stats()["curriculum/evictions"] == 1
+
+
+def test_lazy_discovery_never_reenters_coverage_mode() -> None:
+    """
+    An in-flight probation entry must not force distribution() back to
+    coverage: that would starve prioritized replay for as long as discovery
+    keeps running, which for a corpus larger than capacity is the whole run.
+    """
+    buffer = make_buffer(capacity=2, min_visits=2)
+    for _ in range(2):
+        buffer.commit(0, 0.1)
+    for _ in range(2):
+        buffer.commit(1, 0.9)
+    assert buffer.size == 2
+
+    buffer.commit(2, 0.5)  # a brand-new pair_id, still immature -> probation only
+
+    assert buffer.size == 2, (
+        "the probationary level must not enter the scored buffer yet"
+    )
+    distribution = buffer.distribution()
+    assert distribution[1] > distribution[0], (
+        "prioritization must survive an in-flight discovery"
+    )
+
+
 def test_staleness_lifts_neglected_levels() -> None:
     """
     Without the staleness term a low-scoring level would never be re-measured.
@@ -196,6 +263,52 @@ def test_state_dict_round_trips() -> None:
 
     assert restored.state_dict() == state
     assert restored.entries[0].wins == pytest.approx(1.0)
+
+
+def test_state_dict_round_trips_probation() -> None:
+    """
+    Probation survives a dump, so a resume keeps what it has already measured.
+
+    Under lazy discovery probation holds most of a run's measurement, and the
+    supervisor reloads state after every crash.
+    """
+    buffer = make_buffer(min_visits=5)
+    buffer.prefill([0])
+    buffer.commit(7, 0.4, outcome=1.0)
+    buffer.commit(7, 0.2)
+    assert buffer.stats()["curriculum/probation_size"] == 1
+
+    restored = make_buffer(min_visits=5)
+    restored.load_state_dict(buffer.state_dict())
+
+    assert restored.state_dict() == buffer.state_dict()
+    assert restored.stats()["curriculum/probation_size"] == 1
+    # The restored entry keeps its visits, so it matures on schedule rather
+    # than restarting the five episodes it already paid for.
+    for _ in range(3):
+        restored.commit(7, 0.3)
+    assert restored.stats()["curriculum/probation_size"] == 0
+    assert 7 in {entry.pair_id for entry in restored.entries}
+
+
+def test_load_state_dict_accepts_a_dump_without_probation() -> None:
+    """
+    Dumps written before probation was persisted must still load.
+    """
+    buffer = make_buffer(min_visits=1)
+    buffer.prefill([0, 1])
+    buffer.commit(0, 0.3, outcome=1.0)
+    legacy = {
+        key: value
+        for key, value in buffer.state_dict().items()
+        if not key.startswith("probation_")
+    }
+
+    restored = make_buffer(min_visits=1)
+    restored.load_state_dict(legacy)
+
+    assert restored.size == 2
+    assert restored.stats()["curriculum/probation_size"] == 0
 
 
 def test_observe_commits_only_finished_episodes() -> None:
@@ -422,6 +535,33 @@ def test_curriculum_never_trains_on_held_out_decks(tmp_path: Path) -> None:
     assert covered == set(range(len(train_decks)))
 
 
+def test_deck_pool_width_narrows_the_curriculum_level_space(tmp_path: Path) -> None:
+    """
+    ``deck_pool_width`` must shrink the curriculum's matchup space too.
+
+    The cap used to be applied only where the plain sampler spec is built, so a
+    curriculum run kept the full-width pool and squared it into a level space
+    far too large for any level to reach ``min_visits``.
+    """
+    corpus = build_corpus(tmp_path, archetypes=6, per_archetype=2)
+    cfg = structured_env_cfg(num_workers=WORKERS)
+    cfg.env.mp_start_method = "fork"
+    cfg.env.deck_pool = str(corpus)
+    cfg.env.curriculum = OmegaConf.create(
+        {"enabled": True, "capacity": 64, "min_visits": 2}
+    )
+    cfg.env.deck_pool_width = 3
+
+    curriculum = build_curriculum(cfg)
+    _decks, paths = load_deck_pool(cfg, deck_split="train")
+
+    assert curriculum is not None
+    assert curriculum.archetypes.count == 3, "the width cap must reach the index"
+    assert curriculum.buffer.size == 9, "and the level space must be its square"
+    # The sampler is handed exactly the decks the index was built from.
+    assert ArchetypeIndex.from_paths(paths).count == 3
+
+
 def test_build_curriculum_disabled_by_default(tmp_path: Path) -> None:
     """
     Nothing changes unless the curriculum is explicitly turned on.
@@ -432,14 +572,45 @@ def test_build_curriculum_disabled_by_default(tmp_path: Path) -> None:
     assert build_curriculum(cfg) is None
 
 
-def test_build_curriculum_rejects_undersized_capacity(tmp_path: Path) -> None:
+def test_build_curriculum_rejects_undersized_capacity_without_exploration(
+    tmp_path: Path,
+) -> None:
     """
-    Silently covering part of the level space would bias the curriculum.
+    A corpus bigger than capacity needs explore_prob, or coverage silently stops.
     """
     cfg = curriculum_cfg(tmp_path, capacity=2)
 
-    with pytest.raises(ValueError, match="capacity"):
+    with pytest.raises(ValueError, match="explore_prob"):
         build_curriculum(cfg)
+
+
+def test_build_curriculum_rejects_out_of_range_explore_prob(tmp_path: Path) -> None:
+    """
+    A probability outside [0, 1] is a config mistake, not a value to clamp.
+    """
+    cfg = curriculum_cfg(tmp_path, explore_prob=1.5)
+
+    with pytest.raises(ValueError, match="explore_prob"):
+        build_curriculum(cfg)
+
+
+def test_build_curriculum_over_capacity_with_exploration_starts_empty(
+    tmp_path: Path,
+) -> None:
+    """
+    An oversized corpus with exploration enabled must not prefill or raise.
+
+    Prefilling would immediately overflow `capacity`; the buffer instead starts
+    empty and relies on lazy discovery through commit()'s probation path,
+    driven by the workers' explore_prob.
+    """
+    cfg = curriculum_cfg(tmp_path, capacity=2, explore_prob=0.5)
+
+    curriculum = build_curriculum(cfg)
+
+    assert curriculum is not None
+    assert curriculum.buffer.size == 0
+    assert curriculum.explore_prob == pytest.approx(0.5)
 
 
 def test_build_curriculum_rejects_spawn(tmp_path: Path) -> None:
@@ -509,7 +680,9 @@ def test_sampling_fidelity_reads_one_when_draws_follow_the_distribution() -> Non
     )
 
     expected = probabilities[drawn] / float(np.square(probabilities).sum())
-    assert curriculum.metrics()["sampling_fidelity"] == pytest.approx(expected, rel=1e-6)
+    assert curriculum.metrics()["sampling_fidelity"] == pytest.approx(
+        expected, rel=1e-6
+    )
     assert expected > 1.0, "an uneven distribution should score above one here"
 
 
@@ -610,3 +783,39 @@ def test_sweeping_matures_the_buffer_near_the_theoretical_floor() -> None:
     assert episodes == floor, (
         f"expected the sweep to hit the {floor}-episode floor, took {episodes}"
     )
+
+
+def test_abandoned_episodes_do_not_leak_into_the_next_one() -> None:
+    """
+    Residuals banked against a worker pool that died must be dropped.
+
+    The replacement pool starts every row on a fresh battle, so the steps the
+    old row accumulated belong to a game that will never report ``done``.
+    Carried over, they would be committed under the next episode's matchup --
+    scoring one level with another level's evidence.
+    """
+    curriculum = make_curriculum()
+
+    # Level 0 gets six steps at residual 4.0 and then the pool dies.
+    curriculum.observe(
+        batch(
+            levels=[[0] * STEPS] * WORKERS,
+            residuals=[[4.0] * STEPS] * WORKERS,
+            done=[[False] * STEPS] * WORKERS,
+        )
+    )
+    curriculum.abandon_open_episodes()
+
+    # A restarted pool deals level 1 and plays it out to a natural end.
+    curriculum.observe(
+        batch(
+            levels=[[1] * STEPS] * WORKERS,
+            residuals=[[1.0] * STEPS] * WORKERS,
+            done=[[False] * (STEPS - 1) + [True]] * WORKERS,
+        )
+    )
+
+    assert curriculum.buffer.entries[0].visits == 0
+    assert curriculum.buffer.entries[1].visits == WORKERS
+    # 1.0, not the 2.5 that averaging in the abandoned 4.0 steps would give.
+    assert curriculum.buffer.entries[1].mean_residual == pytest.approx(1.0)

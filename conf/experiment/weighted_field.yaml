@@ -1,0 +1,168 @@
+# @package _global_
+# Long PPO self-play run over an observation-weighted deck field.
+#
+# Overlay on conf/ppo_selfplay_multideck.yaml. Launch through the crash
+# supervisor, which owns hydra.run.dir, collector.total_frames and
+# train.resume_state:
+#
+#   ./scripts/train_tf_weighted_field.sh
+#
+# or directly for a short probe:
+#
+#   uv run python -m src.train --config-name ppo_selfplay_multideck \
+#     +experiment=weighted_field collector.total_frames=100000
+#
+# Neither seat is pinned to a deck. Under self-play a pin also cripples the
+# opponent, which is a snapshot of the same network dealt field decks it never
+# practises. deck_weighting=observation concentrates training on what the
+# ladder plays instead. The submission deck is picked afterwards by probing
+# candidates in-engine with the finished agent.
+defaults:
+  - override /model/backbone: transformer
+  - override /model/head: pointer
+
+# The full corpus deals 28,670 lists, so the submitted deck took 0.202% of
+# draws. deck_pool_width cuts archetypes and keeps every list inside them
+# (width 8 still leaves 10,756); scripts/build_topk_corpus.py cuts at the list
+# level, putting alakazam-dudunsparce-4 at 3.60% of draws, 17.8x more.
+deck_corpus: top20
+
+seed: 42
+set_seed: true
+
+env:
+  agent_deck: null
+  # 76.7% of the corpus was observed once in tournament data, so uniform draws
+  # spent most training on decks nobody plays. Applies to both seats.
+  deck_weighting: observation
+  # Eval pilots one fixed deck, as a submission does. Safe in a way a training
+  # pin is not, since eval never feeds back into learning.
+  # alakazam-dudunsparce-4 scored 536.7 on Kaggle at 76.5M frames; the previous
+  # default measured 0.360 in the deck probe.
+  eval_agent_deck: ${paths.data_dir}/${deck_corpus}/alakazam-dudunsparce/alakazam-dudunsparce-4.csv
+  # The 10 most-observed lists, round-robin, so every round plays the same
+  # matchups. At eval_episodes 50 each opponent gets 5 games per round: read a
+  # single round as noise, the accumulation across rounds as signal.
+  eval_panel_size: 10
+  eval_deck_sampling: round_robin
+  # Load-bearing. AgentDeckSampler hands the opponent the field sampler's
+  # *second* deck, so `independent` advances the round-robin cursor twice per
+  # episode and the opponent meets only 5 of the 10 panel lists.
+  eval_deck_matchup: mirror
+  # multideck's 0.2 withheld 20.1% of the corpus's observation mass to buy a
+  # memorization check that cannot fail at ~9 episodes per list, and left the
+  # eval panel covering 8 archetypes instead of the true top-10's 10. Eval
+  # decks are now trained on, which shifts every arm equally.
+  deck_holdout_frac: 0.0
+  curriculum:
+    enabled: false
+  # Matches this desktop's thread count, where multi_sync peaks. A 32-core
+  # allocation wants env.num_workers=32 on the command line.
+  num_workers: 16
+
+model:
+  embed_dim: 256
+  backbone:
+    # MLPBackbone has no per-entity token path except option_repr, so its
+    # pooled features stay seat- and zone-blind. token_groups=[pokemon] routes
+    # the 18 pokemon slots through attention as individual tokens carrying
+    # their seat/zone segment embedding. Also the smaller model: 0.93M
+    # parameters against the MLP's 2.85M, ~4% of wall clock either way.
+    token_groups: [pokemon]
+    option_tokens: true
+    # Post-LN put the LayerNorm after the residual add, so the branch could
+    # carry a large magnitude while the normalized output still looked healthy.
+    # At 129.25M frames the pre-clip gradient norm went 1.0 -> 8 -> 1.2e3 in
+    # three updates with the loss unchanged (loss_critic 0.078, entropy 0.63),
+    # reached 1.3e16, then overflowed fp32. Pre-LN normalizes on the way into
+    # each branch instead. final_norm is the conventional pairing: it restores
+    # the output normalization the heads were trained against, and it is the
+    # one parameter a pre-130M checkpoint does not carry (see
+    # trainer_builder._load_warm_start_weights).
+    norm_first: true
+    final_norm: true
+  adapter:
+    card_embed_dim: 16
+    entity_dim: 128
+    option_target_state: true
+    pokemon_seat_split: true
+
+agent:
+  # At 3e-4 the KL early stop fired on 269 of ~619 updates, cutting 43% of
+  # batches short of their 4 epochs. Constant, not annealed.
+  lr: 2.0e-4
+  # Nothing bounded the weights over the first 130M frames: linear1 max-abs
+  # grew 0.111 -> 2.16 and never came back, which is how the trunk drifted into
+  # the regime where one minibatch produced a 1e16 gradient. Decoupled, so it
+  # does not interact with Adam's second moment.
+  weight_decay: 0.01
+  # 0.015 ran 86M to 128M and held entropy at 0.82 nats, |loss_entropy| /
+  # |loss_objective| at 1.25. Whether it beat 0.005 is unmeasured: deck_corpus
+  # and eval_agent_deck changed at the same restart, so the eval step from 0.641
+  # to 0.70 across that boundary is not attributable to this key.
+  # 0.005 holds 0.62 nats, ratio ~0.3, which is ~2.0 effective options of the
+  # 4.90 legal once the 14.5% forced decisions are taken out. Still exploration,
+  # and the sharper policy is what greedy submission deploys.
+  entropy_coeff: 0.005
+  device: cuda
+  # Required under multi_sync, not an optimisation: workers are forked and CUDA
+  # cannot initialize in a forked child. The PPO update keeps the GPU.
+  collector_device: cpu
+
+collector:
+  # Each worker gets its own policy copy, so the forward that sync serialized
+  # runs 16 times in parallel: 251 -> ~400 fps measured here, learning
+  # diagnostics unchanged (ESS 0.9937 vs 0.9934). Batches stay on-policy.
+  type: multi_sync
+  # total_frames is left to the launcher: the supervisor sets it per attempt to
+  # what is left of the run's budget.
+
+train:
+  # Absolute, so src.train takes it as given. A relative path would find the
+  # resumed run's checkpoints/ already there and abort with "another run owns
+  # it" -- and that league is what a resume should carry forward.
+  checkpoint_dir: ${hydra:runtime.output_dir}/checkpoints
+  # League memory is pool_size * snapshot_interval: 12M frames here, against
+  # 2.4M at the previous 12 x 200000, where the learner faced near-copies of
+  # its own most recent 3%. Costs ~7.7 MB per snapshot per worker.
+  pool_size: 24
+  # The default 0.05 lets `hard` weighting squeeze a mastered member to ~1/5
+  # the share of an even one, which is how the league forgets what it beat.
+  pfsp_min_weight: 0.15
+  # 1M spacing widens league memory to pool_size * 1M = 24M frames at no extra
+  # memory cost, so the league remembers "me from 16% ago" instead of
+  # near-copies from the last 8%. Sparser snapshots on a converged ladder are
+  # near-free: two snapshots 500k apart are almost interchangeable, while the
+  # extra span reaches genuinely weaker, differently-weak past policies.
+  snapshot_interval: 1000000
+  # Permanent anchor: the checkpoint this run resumes from, frozen in the
+  # league so PFSP always has a strong, stationary opponent to concentrate on.
+  # Replaces the random warmup, which teaches nothing once the learner beats it
+  # (~94% win rate). Resolves relative to the repo root.
+  warmup_checkpoint: outputs/weighted-field-20260808/tf-ptr-weighted-15m-s42/checkpoints/snapshot_000150011904.pt
+  train_state_interval: 250000
+  eval_interval: 500000
+  eval_episodes: 50
+  eval_per_archetype: true
+  # first_snapshot: progress within the run. random: the only absolute
+  # yardstick, comparable across runs. The checkpoint: the 10.14M MLP deployed
+  # as mlp-ptr-pinned-10m-honchkrow-greedy, the only reference that cannot
+  # drift with this league. Checkpoint opponents play greedily and rebuild
+  # their architecture from the config they embed, so an MLP here is fine.
+  eval_opponents:
+    - first_snapshot
+    - random
+    - outputs/deck-pinned-20260808/mlp-ptr-pinned-15m-s42/checkpoints/snapshot_000010141696.pt
+
+wandb:
+  # group and name come from the launcher, which needs them to build the run
+  # directory and would otherwise hold a second copy of both.
+  tags:
+    - pointer-head
+    - transformer
+    - pokemon-tokens
+    - observation-weighted
+    - unpinned
+  notes: >-
+    Unpinned self-play over the top20 corpus, observation-weighted on both
+    seats, transformer trunk with per-Pokemon entity tokens and a pointer head.
