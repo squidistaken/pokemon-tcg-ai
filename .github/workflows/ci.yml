@@ -1,5 +1,9 @@
 name: CI
 
+env:
+  # Paths that are checked by the `protected-files` job.
+  PROTECTED_PATHS: cg ptcg_engine
+
 on:
   pull_request:
     types:
@@ -9,6 +13,38 @@ on:
       - ready_for_review
 
 jobs:
+  protected-files:
+    # Only run CI once a PR is in review to save free-plan compute-minutes.
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # Keep enough history to diff the PR branch against its base branch.
+          fetch-depth: 0
+
+      - name: Check protected paths
+        # Fail if a PR changes organizer-provided or protected deck assets.
+        run: |
+          read -r -a protected_paths <<< "${PROTECTED_PATHS}"
+
+          if git diff --quiet \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            -- "${protected_paths[@]}"; then
+            exit 0
+          fi
+
+          echo "Protected paths changed in this PR:" >&2
+          git diff --name-only \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            -- "${protected_paths[@]}" >&2
+          echo "Changes to protected paths are blocked by CI: ${protected_paths[*]}" >&2
+          exit 1
+
   checks:
     # Only run CI once a PR is in review to save free-plan compute-minutes.
     if: ${{ !github.event.pull_request.draft }}
@@ -19,6 +55,17 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Check competition engine availability
+        id: engine
+        shell: bash
+        run: |
+          if [[ -d cg && -d ptcg_engine ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping checks because the proprietary competition engine is not present."
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -39,17 +86,21 @@ jobs:
         run: uv sync --all-groups
 
       - name: Lint
+        if: steps.engine.outputs.available == 'true'
         # Run Ruff to catch style issues and common bug patterns.
         run: uv run ruff check .
 
       - name: Format
+        if: steps.engine.outputs.available == 'true'
         # Fail if anything is unformatted.
         run: uv run ruff format --check .
 
       - name: Type-check
+        if: steps.engine.outputs.available == 'true'
         # Run Pyright to catch static typing errors.
         run: uv run pyright
 
       - name: Run tests
+        if: steps.engine.outputs.available == 'true'
         # Run the pytest suite and fail on test failures or unignored warnings.
         run: uv run pytest
