@@ -28,6 +28,32 @@ from src.policies.ppo_actor import build_actor_critic
 MAX_OPTIONS = 128
 
 
+def load_init_weights(network, checkpoint_path: str) -> None:
+    """
+    Warm-start the clone from a trained checkpoint instead of random weights.
+
+    Continuing a self-play policy with supervised data needs its parameters,
+    not only its shape, which is all ``build_config`` copies. The architectures
+    must already agree; point ``--reference`` at the same checkpoint and they
+    do by construction.
+
+    :param network: Freshly built actor-critic, still on CPU.
+    :param checkpoint_path: Snapshot whose parameters are loaded.
+    :raises SystemExit: If the checkpoint's shapes do not match the network,
+        which means ``--reference`` and ``--init-weights`` disagree.
+    """
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    state_dict = payload.get("state_dict", payload)
+    try:
+        network.load_state_dict(state_dict)
+    except RuntimeError as error:
+        raise SystemExit(
+            f"--init-weights {checkpoint_path} does not fit the architecture from "
+            f"--reference: {error}"
+        ) from error
+    print(f"warm start: loaded weights from {checkpoint_path}", flush=True)
+
+
 def build_config(
     reference_path: str,
     num_layers: int | None = None,
@@ -252,7 +278,10 @@ def train(args) -> None:
     )
 
     config = build_config(args.reference, args.num_layers, args.ff_dim, args.dropout)
-    network = build_network(config).to(device)
+    network = build_network(config)
+    if args.init_weights is not None:
+        load_init_weights(network, args.init_weights)
+    network = network.to(device)
     parameters = sum(p.numel() for p in network.parameters())
     optimizer = torch.optim.AdamW(
         network.parameters(), lr=args.lr, weight_decay=args.weight_decay
@@ -377,6 +406,12 @@ def main() -> None:
         default="outputs/deck-pinned-150m-local/tf-ptr-pinned-selfplay-10m-s42/"
         "checkpoints/snapshot_000175702016.pt",
         help="Snapshot whose architecture the clone copies.",
+    )
+    parser.add_argument(
+        "--init-weights",
+        default=None,
+        help="Snapshot whose parameters the clone starts from. --reference "
+        "gives the architecture only; this continues a trained policy.",
     )
     parser.add_argument(
         "--select-on",
