@@ -188,3 +188,7 @@ uv.lock
 habrok_pull_state.sh
 habrok_sync_state.sh
 publish_mini_corpus.sh
+
+# competition-provided engine, not redistributable
+/cg/
+/ptcg_engine/

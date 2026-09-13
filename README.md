@@ -35,6 +35,10 @@ To add more libraries:
 uv add <package_name>
 ```
 
+### Battle engine
+
+`cg/` (ctypes bindings) and `ptcg_engine/` (its C++ source) are the competition-provided battle engine. They're licensed for competition use only, so they're gitignored rather than committed. Download them from the Kaggle competition data and place both folders at the repo root before running anything that touches `TCGEnv`.
+
 ### Deck corpus
 
 Decks are versioned as GitHub Releases tagged `decks-*`. No version is committed to the repo, so
@@ -184,8 +188,8 @@ Drafts skip CI to stay in the free-plan budget.
 ## Code structure
 
 ```
-cg/                    ctypes bindings for the cabt battle engine
-ptcg_engine/           C++ source of that engine
+cg/                    ctypes bindings for the cabt battle engine (gitignored, see Setup)
+ptcg_engine/           C++ source of that engine (gitignored, see Setup)
 src/
   env/                 TCGEnv and its battle handle
     observation/         Encoders, option reference resolver, card database
