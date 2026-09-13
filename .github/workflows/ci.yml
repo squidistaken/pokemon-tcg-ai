@@ -56,6 +56,17 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check competition engine availability
+        id: engine
+        shell: bash
+        run: |
+          if [[ -d cg && -d ptcg_engine ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping checks because the proprietary competition engine is not present."
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -75,17 +86,21 @@ jobs:
         run: uv sync --all-groups
 
       - name: Lint
+        if: steps.engine.outputs.available == 'true'
         # Run Ruff to catch style issues and common bug patterns.
         run: uv run ruff check .
 
       - name: Format
+        if: steps.engine.outputs.available == 'true'
         # Fail if anything is unformatted.
         run: uv run ruff format --check .
 
       - name: Type-check
+        if: steps.engine.outputs.available == 'true'
         # Run Pyright to catch static typing errors.
         run: uv run pyright
 
       - name: Run tests
+        if: steps.engine.outputs.available == 'true'
         # Run the pytest suite and fail on test failures or unignored warnings.
         run: uv run pytest
