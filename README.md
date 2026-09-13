@@ -3,6 +3,12 @@
 Solution for the Kaggle [Pokémon TCG AI Battle](https://www.kaggle.com/competitions/pokemon-tcg-ai-battle)
 competition. [This video](https://www.youtube.com/watch?v=eKC5PlYoboE) explains the game.
 
+## Competition performance
+
+![Slopémon Kaggle Elo progression across 26 scored submissions, ending at 980 Elo and rank 168 of 6,807 teams](docs/assets/elo-progression.jpeg)
+
+*Across 26 scored submissions, our Elo rose to 980. The final submission placed 168th out of 6,807 teams and earned a silver medal in the Simulation category.*
+
 ## Setup
 
 ### Requirements
